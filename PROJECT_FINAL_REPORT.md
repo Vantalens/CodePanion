@@ -423,8 +423,8 @@ MIT License - 详见 [LICENSE](LICENSE) 文件
 
 ## 📞 联系方式
 
-- **Issues**: https://github.com/yourusername/RemindAI/issues
-- **Discussions**: https://github.com/yourusername/RemindAI/discussions
+- **Issues**: https://github.com/Vantalens/RemindAI/issues
+- **Discussions**: https://github.com/Vantalens/RemindAI/discussions
 
 ---
 

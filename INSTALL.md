@@ -69,7 +69,7 @@ Get-ItemProperty -Path "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\
 #### 1. 克隆项目
 
 ```bash
-git clone https://github.com/yourusername/RemindAI.git
+git clone https://github.com/Vantalens/RemindAI.git
 cd RemindAI
 ```
 
@@ -370,7 +370,7 @@ node packages/daemon/dist/index.js run -- node test-interactive.js
 
 如遇到问题：
 1. 查看 [故障排查](#-故障排查) 部分
-2. 搜索 [Issues](https://github.com/yourusername/RemindAI/issues)
+2. 搜索 [Issues](https://github.com/Vantalens/RemindAI/issues)
 3. 提交新 Issue
 4. 加入社区讨论
 

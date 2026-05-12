@@ -27,7 +27,7 @@
 ### 克隆项目
 
 ```bash
-git clone https://github.com/yourusername/RemindAI.git
+git clone https://github.com/Vantalens/RemindAI.git
 cd RemindAI
 ```
 

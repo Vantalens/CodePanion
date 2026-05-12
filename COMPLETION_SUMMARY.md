@@ -284,7 +284,7 @@ RemindAI/
 ## 📞 联系方式
 
 如有问题或建议，请提交 Issue：
-https://github.com/yourusername/RemindAI/issues
+https://github.com/Vantalens/RemindAI/issues
 
 ---
 
