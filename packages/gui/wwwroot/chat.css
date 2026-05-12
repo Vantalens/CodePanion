@@ -51,115 +51,233 @@ body {
 
 /* Markdown 内容样式 */
 .message h1, .message h2, .message h3 {
-    margin: 12px 0 8px 0;
+    margin: 16px 0 12px 0;
     color: #ffffff;
+    font-weight: 600;
 }
 
-.message h1 { font-size: 1.5em; }
-.message h2 { font-size: 1.3em; }
-.message h3 { font-size: 1.1em; }
+.message h1 {
+    font-size: 1.5em;
+    border-bottom: 2px solid #404040;
+    padding-bottom: 8px;
+}
+
+.message h2 {
+    font-size: 1.3em;
+    border-bottom: 1px solid #404040;
+    padding-bottom: 6px;
+}
+
+.message h3 {
+    font-size: 1.1em;
+}
 
 .message p {
-    margin: 8px 0;
-    line-height: 1.6;
+    margin: 12px 0;
+    line-height: 1.7;
 }
 
 .message ul, .message ol {
-    margin: 8px 0;
-    padding-left: 24px;
+    margin: 12px 0;
+    padding-left: 28px;
 }
 
 .message li {
+    margin: 6px 0;
+    line-height: 1.6;
+}
+
+.message li > p {
     margin: 4px 0;
 }
 
 .message code {
     background: #1a1a1a;
-    padding: 2px 6px;
-    border-radius: 3px;
-    font-family: "Consolas", "Monaco", monospace;
+    padding: 3px 6px;
+    border-radius: 4px;
+    font-family: "Consolas", "Monaco", "Courier New", monospace;
     font-size: 0.9em;
+    color: #e06c75;
 }
 
 .message pre {
     background: #1a1a1a;
-    padding: 12px;
-    border-radius: 6px;
+    padding: 16px;
+    border-radius: 8px;
     overflow-x: auto;
-    margin: 12px 0;
+    margin: 16px 0;
+    border: 1px solid #2a2a2a;
 }
 
 .message pre code {
     background: none;
     padding: 0;
+    color: inherit;
+    font-size: 0.95em;
+    line-height: 1.5;
+}
+
+.message blockquote {
+    border-left: 4px solid #0066cc;
+    padding-left: 16px;
+    margin: 12px 0;
+    color: #b0b0b0;
+    font-style: italic;
+}
+
+.message table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 12px 0;
+}
+
+.message th, .message td {
+    border: 1px solid #404040;
+    padding: 8px 12px;
+    text-align: left;
+}
+
+.message th {
+    background: #2a2a2a;
+    font-weight: 600;
+}
+
+.message tr:nth-child(even) {
+    background: #252525;
+}
+
+.message a {
+    color: #4a9eff;
+    text-decoration: none;
+}
+
+.message a:hover {
+    text-decoration: underline;
+}
+
+.message hr {
+    border: none;
+    border-top: 1px solid #404040;
+    margin: 20px 0;
+}
+
+.message strong {
+    font-weight: 600;
+    color: #ffffff;
+}
+
+.message em {
+    font-style: italic;
+    color: #d0d0d0;
 }
 
 /* 选项按钮样式 */
 .prompt-options {
-    margin-top: 16px;
+    margin-top: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
 }
 
 .option-button {
-    display: block;
+    display: flex;
+    align-items: center;
     width: 100%;
-    padding: 12px 16px;
-    margin-bottom: 8px;
+    padding: 14px 16px;
     border: 1px solid #404040;
-    border-radius: 6px;
+    border-radius: 8px;
     background: #2a2a2a;
     color: #e0e0e0;
     text-align: left;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all 0.15s ease;
     font-size: 14px;
     font-family: inherit;
+    position: relative;
 }
 
 .option-button:hover {
     background: #353535;
     border-color: #505050;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.option-button:active {
+    transform: translateY(0);
 }
 
 .option-button.recommended {
     background: #0066cc;
     border-color: #0066cc;
     color: white;
+    font-weight: 500;
 }
 
 .option-button.recommended:hover {
     background: #0052a3;
+    border-color: #0052a3;
+    box-shadow: 0 2px 12px rgba(0, 102, 204, 0.4);
 }
 
 .option-number {
-    display: inline-block;
-    width: 24px;
-    font-weight: bold;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 28px;
+    height: 28px;
+    margin-right: 12px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 13px;
+}
+
+.option-button.recommended .option-number {
+    background: rgba(255, 255, 255, 0.2);
 }
 
 .option-label {
-    margin-left: 8px;
+    flex: 1;
+    line-height: 1.5;
 }
 
 /* 自定义输入框 */
+.custom-input-container {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #404040;
+}
+
 .custom-input {
     width: 100%;
-    padding: 12px;
-    margin-top: 8px;
+    padding: 14px 16px;
     background: #1a1a1a;
     border: 1px solid #404040;
-    border-radius: 6px;
+    border-radius: 8px;
     color: #e0e0e0;
     font-size: 14px;
     font-family: inherit;
+    transition: all 0.15s ease;
 }
 
 .custom-input:focus {
     outline: none;
     border-color: #0066cc;
+    background: #202020;
+    box-shadow: 0 0 0 3px rgba(0, 102, 204, 0.1);
 }
 
 .custom-input::placeholder {
     color: #808080;
+    font-style: italic;
+}
+
+.custom-input-hint {
+    margin-top: 8px;
+    font-size: 12px;
+    color: #808080;
+    text-align: center;
 }
 
 /* 滚动条样式 */
@@ -185,4 +303,102 @@ body {
     font-size: 0.85em;
     color: #808080;
     margin-bottom: 8px;
+}
+
+/* 空状态 */
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: #808080;
+    text-align: center;
+    padding: 40px;
+}
+
+.empty-state-icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+    opacity: 0.5;
+}
+
+.empty-state-title {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: #a0a0a0;
+}
+
+.empty-state-description {
+    font-size: 14px;
+    line-height: 1.6;
+    max-width: 400px;
+}
+
+/* 加载动画 */
+.loading {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid #404040;
+    border-top-color: #0066cc;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* 代码块语言标签 */
+.code-block-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background: #252525;
+    border-bottom: 1px solid #2a2a2a;
+    border-radius: 8px 8px 0 0;
+    margin-bottom: -16px;
+}
+
+.code-language {
+    font-size: 12px;
+    color: #808080;
+    text-transform: uppercase;
+    font-weight: 600;
+}
+
+.code-copy-button {
+    padding: 4px 8px;
+    background: transparent;
+    border: 1px solid #404040;
+    border-radius: 4px;
+    color: #808080;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.code-copy-button:hover {
+    background: #2a2a2a;
+    color: #e0e0e0;
+    border-color: #505050;
+}
+
+/* 响应式调整 */
+@media (max-width: 768px) {
+    #chat-container {
+        padding: 12px;
+        gap: 12px;
+    }
+
+    .message {
+        padding: 12px;
+    }
+
+    .option-button {
+        padding: 12px 14px;
+    }
 }

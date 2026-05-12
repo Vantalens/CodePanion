@@ -12,6 +12,22 @@ marked.setOptions({
 
 // 消息存储
 let messages = [];
+let currentSessionId = null;
+
+// 显示空状态
+function showEmptyState() {
+    const container = document.getElementById('chat-container');
+    container.innerHTML = `
+        <div class="empty-state">
+            <div class="empty-state-icon">💬</div>
+            <div class="empty-state-title">等待会话</div>
+            <div class="empty-state-description">
+                当 AI 需要输入时，对话将显示在这里。<br>
+                您可以在左侧选择不同的会话。
+            </div>
+        </div>
+    `;
+}
 
 // 渲染消息
 function renderMessage(message) {
@@ -29,7 +45,29 @@ function renderMessage(message) {
     // Markdown 内容
     const contentDiv = document.createElement('div');
     contentDiv.className = 'message-content';
-    contentDiv.innerHTML = marked.parse(message.content);
+
+    try {
+        contentDiv.innerHTML = marked.parse(message.content);
+
+        // 为代码块添加语言标签
+        const codeBlocks = contentDiv.querySelectorAll('pre code');
+        codeBlocks.forEach(block => {
+            const pre = block.parentElement;
+            const language = block.className.match(/language-(\w+)/)?.[1] || 'text';
+
+            const header = document.createElement('div');
+            header.className = 'code-block-header';
+            header.innerHTML = `
+                <span class="code-language">${language}</span>
+            `;
+
+            pre.insertBefore(header, block);
+        });
+    } catch (error) {
+        console.error('Markdown parsing error:', error);
+        contentDiv.textContent = message.content;
+    }
+
     messageDiv.appendChild(contentDiv);
 
     // 如果是提示消息，添加选项按钮
@@ -55,17 +93,26 @@ function renderOptions(sessionId, options) {
                 button.classList.add('recommended');
             }
 
-            button.innerHTML = `
-                <span class="option-number">${index + 1}</span>
-                <span class="option-label">${escapeHtml(option)}</span>
-            `;
+            const numberSpan = document.createElement('span');
+            numberSpan.className = 'option-number';
+            numberSpan.textContent = index + 1;
+
+            const labelSpan = document.createElement('span');
+            labelSpan.className = 'option-label';
+            labelSpan.textContent = option;
+
+            button.appendChild(numberSpan);
+            button.appendChild(labelSpan);
 
             button.onclick = () => selectOption(sessionId, option);
             container.appendChild(button);
         });
     }
 
-    // 自定义输入框
+    // 自定义输入框容器
+    const inputContainer = document.createElement('div');
+    inputContainer.className = 'custom-input-container';
+
     const customInput = document.createElement('input');
     customInput.type = 'text';
     customInput.placeholder = 'Tell Claude what to do instead';
@@ -75,7 +122,14 @@ function renderOptions(sessionId, options) {
             selectOption(sessionId, customInput.value.trim());
         }
     };
-    container.appendChild(customInput);
+
+    const hint = document.createElement('div');
+    hint.className = 'custom-input-hint';
+    hint.textContent = 'Press Enter to send';
+
+    inputContainer.appendChild(customInput);
+    inputContainer.appendChild(hint);
+    container.appendChild(inputContainer);
 
     return container;
 }
@@ -166,4 +220,5 @@ function generateId() {
 
 // 初始化
 console.log('RemindAI Chat initialized');
+showEmptyState();
 sendToHost({ type: 'ready' });
