@@ -27,8 +27,8 @@
 ### 克隆项目
 
 ```bash
-git clone https://github.com/yourusername/remindai.git
-cd remindai
+git clone https://github.com/yourusername/RemindAI.git
+cd RemindAI
 ```
 
 ### 安装依赖
@@ -109,7 +109,7 @@ npm run gui:run
 ## 项目结构
 
 ```
-remindai-monorepo/
+RemindAI/
 ├── packages/
 │   ├── daemon/                 # Node.js 守护进程和 CLI
 │   │   ├── src/

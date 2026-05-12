@@ -13,7 +13,7 @@
 ## 📦 项目结构
 
 ```
-remindai-monorepo/
+RemindAI/
 ├── packages/
 │   ├── daemon/          # Node.js 守护进程和 CLI 工具
 │   │   ├── src/
@@ -67,10 +67,10 @@ remindai status
 npm run gui:run
 ```
 
-#### 3. 使用 remindai 包装命令
+#### 3. 使用 RemindAI 包装命令
 
 ```bash
-# 使用 remindai 运行需要监控的命令
+# 使用 RemindAI 运行需要监控的命令
 remindai run -- claude code
 
 # 或者运行其他需要交互的命令

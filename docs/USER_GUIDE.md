@@ -53,8 +53,8 @@ RemindAI 会：
 #### 1. 克隆或下载项目
 
 ```bash
-git clone https://github.com/yourusername/remindai.git
-cd remindai
+git clone https://github.com/yourusername/RemindAI.git
+cd RemindAI
 ```
 
 #### 2. 安装依赖
