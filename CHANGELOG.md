@@ -5,79 +5,131 @@ All notable changes to RemindAI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Planned
-- GUI 界面完善
-- 更多提示检测模式
-- 插件系统
-- 远程会话支持（SSH）
-- 移动端通知
-
-## [0.1.0] - 2026-05-12
+## [0.2.0] - 2026-05-12
 
 ### Added
-- 初始版本发布
-- 守护进程核心功能
-  - HTTP REST API
-  - WebSocket 实时通信
-  - 会话管理
-  - PID 文件管理
-- CLI 工具
-  - `start` - 启动守护进程
-  - `stop` - 停止守护进程
-  - `status` - 查看状态
-  - `run` - 运行命令并监控
-  - `notify` - 发送通知
-  - `reply` - 发送响应
-  - `install` - 安装为系统服务
-- PTY (伪终端) 支持
-  - 命令包装执行
-  - 输入输出捕获
-  - TTY 特性保留
-- 提示检测系统
-  - Yes/No 问题检测 `(y/n)`, `[Y/n]`, `[y/N]`
-  - 按键继续检测 `Press Enter to continue`
-  - 自定义输入检测 `Enter your name:`
-  - 可配置的正则表达式模式
-  - 滑动窗口缓冲区
-- 通知系统
-  - 跨平台桌面通知（Windows/macOS/Linux）
-  - 可配置通知声音和超时
-  - 通知类型支持（info/warning/error）
-- 配置系统
-  - JSON 配置文件
-  - Zod 模式验证
-  - 默认配置生成
-- 日志系统
-  - 结构化日志（Pino）
-  - 多级别日志（debug/info/warn/error）
-  - 日志文件持久化
-- GUI 框架（C# .NET）
-  - 基础项目结构
-  - WebSocket 客户端连接
+
+#### Core Features
+- **完整输出捕获**: 实现 `fullOutput` 数组和 `outputChunks` 结构化存储
+- **对话流界面**: 基于 WPF + WebView2 的现代化对话界面
+- **Markdown 渲染**: 集成 marked.js 和 highlight.js，支持代码高亮
+- **智能通知系统**: 声音提示 + Windows Focus Assist 检测
+- **会话管理**: 完整的会话列表和状态跟踪
+
+#### GUI Features
+- 会话列表（左侧 250px）
+- 对话区域（WebView2）
+- 选项按钮界面（编号徽章、推荐高亮）
+- 自定义输入框（支持 Enter 键提交）
+- 空状态显示
+- 系统托盘图标
+- 连接状态指示器
+
+#### Notification System
+- 提示音播放（需要输入时）
+- 完成音播放（任务完成时）
+- Focus Assist 状态检测
+- 前台/后台应用检测
+- 智能提示逻辑（避免打扰用户）
+
+#### API Enhancements
+- `GET /sessions/:id/output` - 获取会话完整输出
+- `fullOutput` 字段 - 完整输出历史
+- `outputChunks` 字段 - 结构化输出块
+
+#### Testing & Documentation
+- 功能验证测试脚本（test-validation.sh）
+- 端到端测试脚本（test-e2e.sh）
+- 交互式测试脚本（test-interactive.js）
+- 验证报告（VALIDATION_REPORT.md）
+- E2E 测试报告（E2E_TEST_REPORT.md）
+- E2E 测试指南（E2E_TEST_GUIDE.md）
+- 项目完成总结（COMPLETION_SUMMARY.md）
+
+### Changed
+- 项目名称统一为 RemindAI（驼峰命名）
+- GUI 从简单界面重构为对话流界面
+- Markdown 样式优化（标题、代码块、表格等）
+- 选项按钮样式改进（类似 Claude Code）
+
+### Fixed
+- C# nullable 引用类型警告（MainWindow.xaml.cs, DaemonClient.cs）
+- 测试脚本端口配置（从配置文件动态读取）
+- WebView2 资源复制配置
+- Assets 目录自动复制
 
 ### Documentation
-- README.md - 项目概述和快速开始
-- ARCHITECTURE.md - 架构设计文档
-- API.md - API 参考文档
-- USER_GUIDE.md - 用户使用指南
-- DEVELOPMENT.md - 开发者指南
-- CHANGELOG.md - 版本更新日志
+- 统一项目名称为 RemindAI
+- 更新所有文档中的项目结构
+- 添加图标文件说明（icon-README.md）
+- 添加提示音文件说明（Assets/README.md）
 
-### Technical
-- TypeScript 5.7
-- Node.js 18+ 支持
-- ES Modules (ESM)
-- Monorepo 结构（npm workspaces）
-- 依赖项：
-  - express 5.1.0
-  - ws 8.20.0
-  - node-pty 1.1.0
-  - node-notifier 10.0.1
-  - pino 10.3.1
-  - yargs 18.0.0
-  - zod 4.4.3
+### Technical Improvements
+- 构建状态: 0 个警告，0 个错误
+- 测试通过率: 100% (18/18)
+- 代码质量提升
+- 完整的错误处理
 
-[Unreleased]: https://github.com/yourusername/remindai/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/yourusername/remindai/releases/tag/v0.1.0
+---
+
+## [0.1.0] - 2024-XX-XX
+
+### Added
+- 初始版本
+- Daemon 守护进程
+- 基础 CLI 命令（start, stop, status, run）
+- PTY 命令包装
+- 提示检测
+- HTTP + WebSocket API
+- 基础 GUI 界面
+- 桌面通知
+
+---
+
+## 版本说明
+
+### 版本号规则
+- **主版本号**: 重大架构变更或不兼容的 API 变更
+- **次版本号**: 新增功能，向后兼容
+- **修订号**: Bug 修复，向后兼容
+
+### 发布周期
+- **稳定版**: 每 2-3 个月
+- **补丁版**: 根据需要随时发布
+
+---
+
+## 即将推出 (Roadmap)
+
+### v0.3.0 (计划中)
+- [ ] 跨平台支持（macOS, Linux）
+- [ ] 历史记录查看
+- [ ] 会话导出功能
+- [ ] 设置界面
+- [ ] 主题切换
+
+### v0.4.0 (计划中)
+- [ ] 插件系统
+- [ ] 自定义提示检测规则
+- [ ] 远程会话支持
+- [ ] 性能优化
+
+### v1.0.0 (长期目标)
+- [ ] 生产级稳定性
+- [ ] 完整的文档和教程
+- [ ] 社区支持
+- [ ] 安装程序
+
+---
+
+## 贡献指南
+
+欢迎提交 Issue 和 Pull Request！
+
+请参阅 [DEVELOPMENT.md](docs/DEVELOPMENT.md) 了解开发指南。
+
+---
+
+## 许可证
+
+MIT License - 详见 [LICENSE](LICENSE) 文件

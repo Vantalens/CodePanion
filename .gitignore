@@ -1,19 +1,65 @@
+# Node.js
 node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+.npm
+.eslintcache
+
+# Build outputs
 dist/
-*.log
-.remindai-test/
+build/
+*.tsbuildinfo
 
 # .NET
 bin/
 obj/
 *.user
 *.suo
+*.cache
 .vs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 
 # OS
 Thumbs.db
 .DS_Store
+Desktop.ini
 
-# pkg output
+# RemindAI specific
+.remindai/
+.remindai-test/
+*.pid
+
+# Test outputs
+test-results/
+coverage/
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Logs
+*.log
+logs/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Executables (except assets)
 *.exe
 !assets/*.exe
+
+# Assets (optional - uncomment if you don't want to commit)
+# packages/gui/Assets/*.wav
+# packages/gui/Assets/*.ico
+
