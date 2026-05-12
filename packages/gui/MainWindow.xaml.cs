@@ -18,6 +18,7 @@ namespace RemindAI.Gui
         private readonly ObservableCollection<SessionViewModel> _sessions;
         private string _currentSessionId = "";
         private Hardcodet.Wpf.TaskbarNotification.TaskbarIcon? _trayIcon;
+        private readonly SoundPlayer _soundPlayer;
 
         public MainWindow()
         {
@@ -25,6 +26,9 @@ namespace RemindAI.Gui
 
             // 从资源获取托盘图标
             _trayIcon = (Hardcodet.Wpf.TaskbarNotification.TaskbarIcon?)FindResource("TrayIcon");
+
+            // 初始化声音播放器
+            _soundPlayer = new SoundPlayer();
 
             _sessions = new ObservableCollection<SessionViewModel>();
             SessionListView.ItemsSource = _sessions;
@@ -198,6 +202,12 @@ namespace RemindAI.Gui
 
                 AddLog($"[提示] 会话 {e.SessionId}: {e.LastLines}");
 
+                // 播放提示音
+                if (!FocusAssistDetector.IsCurrentAppInForeground())
+                {
+                    _soundPlayer.PlayPromptSound();
+                }
+
                 // 发送消息到 WebView
                 SendMessageToWeb(new
                 {
@@ -313,6 +323,7 @@ namespace RemindAI.Gui
         {
             _daemonClient?.Dispose();
             _trayIcon?.Dispose();
+            _soundPlayer?.Dispose();
             base.OnClosed(e);
         }
     }
