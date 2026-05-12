@@ -1,0 +1,15 @@
+{
+  "name": "remindai-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI tool completion notification and remote interaction hub",
+  "workspaces": [
+    "packages/daemon"
+  ],
+  "scripts": {
+    "build": "npm run build -w packages/daemon",
+    "dev:daemon": "npm run dev -w packages/daemon",
+    "gui:run": "dotnet run --project packages/gui/RemindAI.Gui.csproj",
+    "gui:build": "dotnet build packages/gui/RemindAI.Gui.csproj -c Release"
+  }
+}
