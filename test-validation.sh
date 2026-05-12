@@ -86,8 +86,12 @@ echo ""
 echo "3. 测试 HTTP API"
 echo "----------------------------------------"
 
-test_step "测试 GET /sessions"
-HTTP_RESPONSE=$(curl -s http://localhost:3721/sessions)
+# 从配置文件读取端口
+CONFIG_PORT=$(cat ~/.remindai/config.json 2>/dev/null | jq -r '.port' 2>/dev/null || echo "7777")
+TOKEN=$(cat ~/.remindai/config.json 2>/dev/null | jq -r '.token' 2>/dev/null || echo "")
+
+test_step "测试 GET /sessions (端口: $CONFIG_PORT)"
+HTTP_RESPONSE=$(curl -s -H "Authorization: Bearer $TOKEN" http://localhost:$CONFIG_PORT/sessions)
 if [ $? -eq 0 ]; then
     test_pass "HTTP API 可访问"
     echo "   响应: $HTTP_RESPONSE"

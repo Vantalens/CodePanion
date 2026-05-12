@@ -105,7 +105,10 @@ namespace RemindAI.Gui.Services
 
                 _wsClient.MessageReceived.Subscribe(msg =>
                 {
-                    HandleWebSocketMessage(msg.Text);
+                    if (msg.Text != null)
+                    {
+                        HandleWebSocketMessage(msg.Text);
+                    }
                 });
 
                 await _wsClient.Start();

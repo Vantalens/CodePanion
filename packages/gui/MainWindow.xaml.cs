@@ -86,7 +86,7 @@ namespace RemindAI.Gui
             }
         }
 
-        private void OnWebMessageReceived(object sender, CoreWebView2WebMessageReceivedEventArgs e)
+        private void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
         {
             try
             {
