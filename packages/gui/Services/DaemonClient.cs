@@ -145,7 +145,8 @@ namespace RemindAI.Gui.Services
                         {
                             SessionId = json["sessionId"]?.Value<string>() ?? "",
                             LastLines = json["lastLines"]?.Value<string>() ?? "",
-                            Options = json["options"]?.ToObject<string[]>()
+                            Options = json["options"]?.ToObject<string[]>(),
+                            FullOutput = json["fullOutput"]?.Value<string>()  // 新增
                         };
                         SessionPrompt?.Invoke(this, promptEvent);
                         break;

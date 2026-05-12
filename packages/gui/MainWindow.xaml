@@ -4,22 +4,15 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:tb="http://www.hardcodet.net/taskbar"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         mc:Ignorable="d"
-        Title="RemindAI" Height="600" Width="900"
+        Title="RemindAI" Height="700" Width="1200"
         WindowStartupLocation="CenterScreen"
         Closing="Window_Closing">
 
     <Window.Resources>
-        <!-- 会话状态颜色 -->
-        <SolidColorBrush x:Key="RunningBrush" Color="#4CAF50"/>
-        <SolidColorBrush x:Key="WaitingBrush" Color="#FF9800"/>
-        <SolidColorBrush x:Key="ExitedBrush" Color="#9E9E9E"/>
-    </Window.Resources>
-
-    <Grid>
         <!-- 系统托盘图标 -->
-        <tb:TaskbarIcon x:Name="TrayIcon"
-                        IconSource="icon.ico"
+        <tb:TaskbarIcon x:Key="TrayIcon"
                         ToolTipText="RemindAI"
                         TrayMouseDoubleClick="TrayIcon_TrayMouseDoubleClick">
             <tb:TaskbarIcon.ContextMenu>
@@ -32,7 +25,9 @@
                 </ContextMenu>
             </tb:TaskbarIcon.ContextMenu>
         </tb:TaskbarIcon>
+    </Window.Resources>
 
+    <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
@@ -54,16 +49,20 @@
                 </StackPanel>
 
                 <StackPanel Grid.Column="1" Orientation="Horizontal">
-                    <Button Content="刷新" Click="Refresh_Click" Width="80"/>
                     <Button Content="设置" Click="Settings_Click" Width="80"/>
                 </StackPanel>
             </Grid>
         </Border>
 
-        <!-- 主内容区 -->
-        <TabControl Grid.Row="1" Margin="0">
-            <!-- 会话列表标签页 -->
-            <TabItem Header="活动会话">
+        <!-- 主内容区：会话列表 + 对话区域 -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="250"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- 左侧：会话列表 -->
+            <Border Grid.Column="0" BorderBrush="#E0E0E0" BorderThickness="0,0,1,0" Background="White">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
@@ -71,85 +70,33 @@
                     </Grid.RowDefinitions>
 
                     <Border Grid.Row="0" Background="#FAFAFA" Padding="12" BorderBrush="#E0E0E0" BorderThickness="0,0,0,1">
-                        <TextBlock>
-                            <Run Text="当前活动会话："/>
-                            <Run x:Name="SessionCountText" Text="0" FontWeight="Bold"/>
+                        <TextBlock FontWeight="Bold">
+                            <Run Text="会话列表 ("/>
+                            <Run x:Name="SessionCountText" Text="0"/>
+                            <Run Text=")"/>
                         </TextBlock>
                     </Border>
 
-                    <ListView Grid.Row="1" x:Name="SessionListView" Margin="0">
-                        <ListView.View>
-                            <GridView>
-                                <GridViewColumn Header="命令" Width="200" DisplayMemberBinding="{Binding Command}"/>
-                                <GridViewColumn Header="状态" Width="100">
-                                    <GridViewColumn.CellTemplate>
-                                        <DataTemplate>
-                                            <StackPanel Orientation="Horizontal">
-                                                <Ellipse Width="8" Height="8" Margin="0,0,6,0">
-                                                    <Ellipse.Style>
-                                                        <Style TargetType="Ellipse">
-                                                            <Style.Triggers>
-                                                                <DataTrigger Binding="{Binding Status}" Value="running">
-                                                                    <Setter Property="Fill" Value="{StaticResource RunningBrush}"/>
-                                                                </DataTrigger>
-                                                                <DataTrigger Binding="{Binding Status}" Value="waiting">
-                                                                    <Setter Property="Fill" Value="{StaticResource WaitingBrush}"/>
-                                                                </DataTrigger>
-                                                                <DataTrigger Binding="{Binding Status}" Value="exited">
-                                                                    <Setter Property="Fill" Value="{StaticResource ExitedBrush}"/>
-                                                                </DataTrigger>
-                                                            </Style.Triggers>
-                                                        </Style>
-                                                    </Ellipse.Style>
-                                                </Ellipse>
-                                                <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center"/>
-                                            </StackPanel>
-                                        </DataTemplate>
-                                    </GridViewColumn.CellTemplate>
-                                </GridViewColumn>
-                                <GridViewColumn Header="开始时间" Width="150" DisplayMemberBinding="{Binding StartedAtText}"/>
-                                <GridViewColumn Header="工作目录" Width="250" DisplayMemberBinding="{Binding Cwd}"/>
-                                <GridViewColumn Header="操作" Width="150">
-                                    <GridViewColumn.CellTemplate>
-                                        <DataTemplate>
-                                            <StackPanel Orientation="Horizontal">
-                                                <Button Content="查看" Click="ViewSession_Click" Tag="{Binding Id}" Width="60" Padding="6,2"/>
-                                            </StackPanel>
-                                        </DataTemplate>
-                                    </GridViewColumn.CellTemplate>
-                                </GridViewColumn>
-                            </GridView>
-                        </ListView.View>
+                    <ListView Grid.Row="1" x:Name="SessionListView"
+                              SelectionChanged="SessionListView_SelectionChanged"
+                              BorderThickness="0">
+                        <ListView.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Margin="4">
+                                    <TextBlock Text="{Binding Command}" FontWeight="Bold" TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock Text="{Binding StatusText}" FontSize="11" Foreground="Gray"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
                     </ListView>
                 </Grid>
-            </TabItem>
+            </Border>
 
-            <!-- 日志标签页 -->
-            <TabItem Header="日志">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="*"/>
-                        <RowDefinition Height="Auto"/>
-                    </Grid.RowDefinitions>
-
-                    <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto">
-                        <TextBox x:Name="LogTextBox"
-                                 IsReadOnly="True"
-                                 TextWrapping="Wrap"
-                                 FontFamily="Consolas, Courier New"
-                                 FontSize="12"
-                                 Background="#1E1E1E"
-                                 Foreground="#D4D4D4"
-                                 BorderThickness="0"
-                                 Padding="12"/>
-                    </ScrollViewer>
-
-                    <Border Grid.Row="1" Background="#F5F5F5" BorderBrush="#E0E0E0" BorderThickness="0,1,0,0" Padding="12">
-                        <Button Content="清空日志" Click="ClearLog_Click" HorizontalAlignment="Right" Width="100"/>
-                    </Border>
-                </Grid>
-            </TabItem>
-        </TabControl>
+            <!-- 右侧：对话区域 (WebView2) -->
+            <Grid Grid.Column="1" Background="#1E1E1E">
+                <wv2:WebView2 x:Name="ChatWebView"/>
+            </Grid>
+        </Grid>
 
         <!-- 底部状态栏 -->
         <Border Grid.Row="2" Background="#F5F5F5" BorderBrush="#E0E0E0" BorderThickness="0,1,0,0" Padding="8">
@@ -160,7 +107,7 @@
                 </Grid.ColumnDefinitions>
 
                 <TextBlock x:Name="StatusBarText" Text="就绪" VerticalAlignment="Center"/>
-                <TextBlock Grid.Column="1" x:Name="VersionText" Text="v0.1.0" VerticalAlignment="Center" Foreground="Gray"/>
+                <TextBlock Grid.Column="1" x:Name="VersionText" Text="v0.2.0" VerticalAlignment="Center" Foreground="Gray"/>
             </Grid>
         </Border>
     </Grid>

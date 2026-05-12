@@ -33,12 +33,12 @@ namespace RemindAI.Gui
 
                     if (config["port"] != null)
                     {
-                        PortTextBox.Text = config["port"]!.Value<int>().ToString();
+                        PortTextBox.Text = config["port"]!.ToObject<int>().ToString();
                     }
 
                     if (config["token"] != null)
                     {
-                        TokenTextBox.Text = config["token"]!.Value<string>();
+                        TokenTextBox.Text = config["token"]!.ToObject<string>();
                     }
 
                     if (config["toast"] != null)
@@ -46,11 +46,11 @@ namespace RemindAI.Gui
                         var toast = config["toast"];
                         if (toast!["enabled"] != null)
                         {
-                            NotificationEnabledCheckBox.IsChecked = toast["enabled"]!.Value<bool>();
+                            NotificationEnabledCheckBox.IsChecked = toast["enabled"]!.ToObject<bool>();
                         }
                         if (toast["soundOnPrompt"] != null)
                         {
-                            NotificationSoundCheckBox.IsChecked = toast["soundOnPrompt"]!.Value<bool>();
+                            NotificationSoundCheckBox.IsChecked = toast["soundOnPrompt"]!.ToObject<bool>();
                         }
                     }
                 }

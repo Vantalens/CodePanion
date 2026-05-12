@@ -115,6 +115,7 @@ namespace RemindAI.Gui.Models
         public string SessionId { get; set; } = "";
         public string LastLines { get; set; } = "";
         public string[]? Options { get; set; }
+        public string? FullOutput { get; set; }  // 新增
     }
 
     public class SessionExitedEventArgs : EventArgs
