@@ -1,0 +1,99 @@
+<Window x:Class="RemindAI.Gui.PromptDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="RemindAI - 需要输入"
+        Height="400" Width="600"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        Topmost="True"
+        ShowInTaskbar="True">
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- 标题 -->
+        <TextBlock Grid.Row="0"
+                   Text="命令需要您的输入"
+                   FontSize="18"
+                   FontWeight="Bold"
+                   Margin="0,0,0,16"/>
+
+        <!-- 会话信息 -->
+        <Border Grid.Row="1"
+                Background="#F5F5F5"
+                Padding="12"
+                Margin="0,0,0,16"
+                CornerRadius="4">
+            <StackPanel>
+                <TextBlock>
+                    <Run Text="会话 ID：" FontWeight="Bold"/>
+                    <Run x:Name="SessionIdText" Text=""/>
+                </TextBlock>
+            </StackPanel>
+        </Border>
+
+        <!-- 提示内容 -->
+        <GroupBox Grid.Row="2" Header="提示信息" Margin="0,0,0,16">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <TextBox x:Name="PromptTextBox"
+                         IsReadOnly="True"
+                         TextWrapping="Wrap"
+                         BorderThickness="0"
+                         Background="Transparent"
+                         FontFamily="Consolas, Courier New"
+                         FontSize="13"/>
+            </ScrollViewer>
+        </GroupBox>
+
+        <!-- 选项按钮（如果有） -->
+        <StackPanel x:Name="OptionsPanel"
+                    Grid.Row="3"
+                    Orientation="Vertical"
+                    Margin="0,0,0,16"
+                    Visibility="Collapsed">
+            <TextBlock Text="请选择：" FontWeight="Bold" Margin="0,0,0,8"/>
+            <ItemsControl x:Name="OptionsItemsControl">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Button Content="{Binding}"
+                                Click="Option_Click"
+                                Tag="{Binding}"
+                                HorizontalAlignment="Stretch"
+                                Margin="0,2"
+                                Padding="12,8"/>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </StackPanel>
+
+        <!-- 输入区域 -->
+        <Grid Grid.Row="4">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <TextBox x:Name="InputTextBox"
+                     Grid.Column="0"
+                     Padding="8"
+                     FontSize="14"
+                     KeyDown="InputTextBox_KeyDown"/>
+
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="8,0,0,0">
+                <Button Content="发送"
+                        Click="Send_Click"
+                        Width="80"
+                        IsDefault="True"/>
+                <Button Content="取消"
+                        Click="Cancel_Click"
+                        Width="80"/>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>
