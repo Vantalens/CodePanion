@@ -3,7 +3,8 @@
     "allow": [
       "Bash(npm run *)",
       "Bash(git commit -m ' *)",
-      "Bash(dotnet build *)"
+      "Bash(dotnet build *)",
+      "Bash(curl -s http://localhost:7777/sessions)"
     ]
   }
 }
