@@ -46,7 +46,7 @@ export type SessionInfo = z.infer<typeof SessionInfoSchema>;
 export type WsServerEvent =
   | { type: 'session-registered'; session: SessionInfo }
   | { type: 'session-output'; sessionId: string; chunk: string }
-  | { type: 'session-prompt'; sessionId: string; lastLines: string; options?: string[] }
+  | { type: 'session-prompt'; sessionId: string; lastLines: string; options?: string[]; fullOutput?: string }
   | { type: 'session-exited'; sessionId: string; exitCode: number; durationMs: number }
   | { type: 'reply-injected'; sessionId: string; text: string }
   | { type: 'inject-input'; sessionId: string; text: string }

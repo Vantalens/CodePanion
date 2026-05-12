@@ -64,6 +64,21 @@ export function createServer(cfg: Config): {
     res.json(sessions.list());
   });
 
+  app.get('/sessions/:id/output', (req, res) => {
+    const fullOutput = sessions.getFullOutput(req.params.id);
+    const chunks = sessions.getOutputChunks(req.params.id);
+
+    if (fullOutput === null || chunks === null) {
+      res.status(404).json({ error: 'no such session' });
+      return;
+    }
+
+    res.json({
+      fullOutput,
+      chunks
+    });
+  });
+
   app.post('/sessions/:id/output', (req, res) => {
     const parsed = SessionOutputRequestSchema.safeParse(req.body);
     if (!parsed.success) {

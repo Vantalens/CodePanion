@@ -62,6 +62,10 @@ export function listSessions(): Promise<SessionInfo[]> {
   return request<SessionInfo[]>('GET', '/sessions');
 }
 
+export function getSessionOutput(id: string): Promise<{ fullOutput: string; chunks: any[] }> {
+  return request<{ fullOutput: string; chunks: any[] }>('GET', `/sessions/${id}/output`);
+}
+
 export function wsUrl(role: 'observer' | 'cli', sessionId?: string): string {
   const cfg = loadConfig();
   const params = new URLSearchParams({ token: cfg.token, role });
