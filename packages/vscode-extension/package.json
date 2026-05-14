@@ -1,0 +1,35 @@
+{
+  "name": "remindai-vscode-extension",
+  "displayName": "RemindAI Monitor",
+  "description": "Reports VS Code window, task, and terminal activity to RemindAI daemon.",
+  "version": "0.1.0",
+  "publisher": "remindai",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "RemindAI",
+      "properties": {
+        "remindai.port": {
+          "type": "number",
+          "default": 7777,
+          "description": "RemindAI daemon port."
+        },
+        "remindai.token": {
+          "type": "string",
+          "default": "",
+          "description": "RemindAI daemon token. Leave empty to read ~/.remindai/config.json."
+        },
+        "remindai.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable VS Code window monitoring."
+        }
+      }
+    }
+  }
+}

@@ -4,8 +4,9 @@
 
 ## 🎯 核心功能
 
+- **多源监控**：同时接收 CLI/PTTY、VS Code 扩展、浏览器扩展和外部适配器事件
 - **智能提示检测**：自动识别命令行工具执行过程中的输入请求（yes/no 确认、自定义输入等）
-- **桌面通知**：在需要输入时立即发送系统通知
+- **桌面 + GUI 通知**：系统通知和 GUI 时间线并行推送
 - **图形界面响应**：通过友好的 GUI 界面进行输入，无需切换到终端
 - **后台守护进程**：持续监控命令执行，低资源占用
 - **实时通信**：基于 WebSocket 的实时双向通信
@@ -32,20 +33,45 @@ RemindAI/
 ### 前置要求
 
 - Node.js >= 18
-- .NET SDK >= 6.0 (用于 GUI)
+- .NET SDK >= 8.0 (用于 GUI)
 - Windows 10/11 或 macOS 或 Linux
 
 ### 安装
 
 ```bash
-# 安装依赖
+# 1. 克隆仓库
+git clone https://github.com/yourusername/remindai.git
+cd remindai
+
+# 2. 安装依赖
 npm install
 
-# 构建 daemon
+# 3. 构建 daemon
 npm run build
 
-# 安装 CLI 工具到系统（可选）
-npm install -g packages/daemon
+# 4. 全局安装 CLI 工具
+cd packages/daemon
+npm link
+cd ../..
+
+# 5. 验证安装
+remindai --version
+```
+
+### 首次使用
+
+```bash
+# 1. 启动守护进程
+remindai start
+
+# 2. 查看状态
+remindai status
+
+# 3. 启动 GUI 界面（可选）
+npm run gui:run
+
+# 4. 测试通知功能
+remindai notify "测试通知" -m "RemindAI 已就绪！"
 ```
 
 ### 使用方法
@@ -58,13 +84,23 @@ remindai start
 
 # 查看守护进程状态
 remindai status
+
+# 停止守护进程
+remindai stop
+
+# 重启守护进程
+remindai restart
 ```
 
 #### 2. 启动 GUI 界面
 
 ```bash
-# 运行图形界面
+# 运行图形界面（Windows）
 npm run gui:run
+
+# 或者直接运行编译后的程序
+cd packages/gui/bin/Debug/net8.0-windows
+./RemindAI.Gui.exe
 ```
 
 #### 3. 使用 RemindAI 包装命令
@@ -76,6 +112,20 @@ remindai run -- claude code
 # 或者运行其他需要交互的命令
 remindai run -- npm install
 remindai run -- git commit
+remindai run -- python script.py
+```
+
+#### 4. 发送通知
+
+```bash
+# 发送简单通知
+remindai notify "任务完成"
+
+# 发送带消息的通知
+remindai notify "构建完成" -m "项目已成功构建"
+
+# 指定通知级别
+remindai notify "错误" -m "构建失败" -l error
 ```
 
 ## 💡 使用场景
@@ -111,16 +161,55 @@ remindai run -- git push --force
 
 在执行危险操作前，通过 GUI 界面仔细确认。
 
+### 场景 4：多窗口 AI 工作流
+
+VS Code 扩展、浏览器扩展和 CLI 会话会分别注册为监控源。多个 VS Code 窗口、多个 Codex/Claude Code 终端、多个浏览器标签页同时工作时，RemindAI 会在 GUI 中按来源显示事件。
+
 ## 🔧 CLI 命令
 
-| 命令 | 说明 |
-|------|------|
-| `remindai start` | 启动守护进程 |
-| `remindai stop` | 停止守护进程 |
-| `remindai status` | 查看守护进程状态 |
-| `remindai run -- <command>` | 使用 RemindAI 运行命令 |
-| `remindai notify <message>` | 发送测试通知 |
-| `remindai reply <sessionId> <input>` | 向会话发送响应 |
+| 命令 | 说明 | 示例 |
+|------|------|------|
+| `remindai start` | 启动守护进程 | `remindai start` |
+| `remindai stop` | 停止守护进程 | `remindai stop` |
+| `remindai restart` | 重启守护进程 | `remindai restart` |
+| `remindai status` | 查看守护进程状态 | `remindai status` |
+| `remindai run -- <command>` | 使用 RemindAI 运行命令 | `remindai run -- npm test` |
+| `remindai notify <title>` | 发送通知 | `remindai notify "完成" -m "任务已完成"` |
+| `remindai sessions` | 查看活动会话 | `remindai sessions` |
+| `remindai reply <sessionId> <input>` | 向会话发送响应 | `remindai reply abc123 "yes"` |
+| `remindai --version` | 查看版本 | `remindai --version` |
+| `remindai --help` | 查看帮助 | `remindai --help` |
+
+## 🔌 多源监控
+
+- CLI/PTTY：使用 `remindai run -- <command>`。
+- VS Code：加载 `packages/vscode-extension/` 扩展，每个 VS Code 窗口独立上报。
+- 浏览器：加载 `packages/browser-extension/` Chromium/Edge 扩展，在选项页配置 daemon token 和 allowlist 域名。
+- 外部工具：调用 `POST /sources/register` 和 `POST /events`。
+
+详细说明见 [docs/MONITORING_SOURCES.md](docs/MONITORING_SOURCES.md)。
+
+### 常见问题
+
+**Q: 提示 `remindai` 命令未找到？**
+
+A: 需要先执行 `npm link` 来全局安装 CLI：
+```bash
+cd packages/daemon
+npm link
+```
+
+**Q: daemon 启动失败？**
+
+A: 检查端口是否被占用，或查看日志：
+```bash
+remindai status
+# 查看配置文件：~/.remindai/config.json
+```
+
+**Q: GUI 无法连接到 daemon？**
+
+A: 确保 daemon 正在运行，并检查配置文件中的端口设置是否一致。
 
 ## 🏗️ 架构设计
 
@@ -167,20 +256,19 @@ remindai run -- git push --force
 
 ```json
 {
-  "daemon": {
-    "port": 3721,
-    "host": "127.0.0.1"
-  },
-  "notification": {
+  "port": 7777,
+  "token": "generated-token",
+  "promptIdleMs": 800,
+  "toast": {
     "enabled": true,
-    "sound": true
+    "soundOnPrompt": true,
+    "soundOnDone": true
   },
-  "promptDetection": {
-    "patterns": [
-      "\\(y/n\\)",
-      "\\[Y/n\\]",
-      "Press any key to continue"
-    ]
+  "monitors": {
+    "cli": true,
+    "vscode": true,
+    "browserExtension": true,
+    "browserAllowlist": ["chatgpt.com", "claude.ai"]
   }
 }
 ```

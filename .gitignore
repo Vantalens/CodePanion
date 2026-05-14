@@ -10,6 +10,7 @@ package-lock.json
 # Build outputs
 dist/
 build/
+publish/
 *.tsbuildinfo
 
 # .NET
@@ -62,4 +63,3 @@ logs/
 # Assets (optional - uncomment if you don't want to commit)
 # packages/gui/Assets/*.wav
 # packages/gui/Assets/*.ico
-

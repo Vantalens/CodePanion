@@ -26,6 +26,10 @@ export class SessionManager {
     args: string[];
     cwd?: string;
     cliPid: number;
+    source?: string;
+    sourceId?: string;
+    windowTitle?: string;
+    workspace?: string;
   }): SessionInfo {
     const id = randomUUID();
     const rec: SessionRecord = {
@@ -33,6 +37,10 @@ export class SessionManager {
       command: input.command,
       args: input.args,
       cwd: input.cwd,
+      source: input.source ?? 'cli',
+      sourceId: input.sourceId,
+      windowTitle: input.windowTitle,
+      workspace: input.workspace,
       cliPid: input.cliPid,
       startedAt: Date.now(),
       status: 'running',

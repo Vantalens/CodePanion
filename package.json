@@ -10,6 +10,7 @@
     "build": "npm run build -w packages/daemon",
     "dev:daemon": "npm run dev -w packages/daemon",
     "gui:run": "dotnet run --project packages/gui/RemindAI.Gui.csproj",
-    "gui:build": "dotnet build packages/gui/RemindAI.Gui.csproj -c Release"
+    "gui:build": "dotnet build packages/gui/RemindAI.Gui.csproj -c Release",
+    "validate:extensions": "node scripts/validate-extensions.mjs"
   }
 }

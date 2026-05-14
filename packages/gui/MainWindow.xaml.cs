@@ -4,11 +4,12 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using Microsoft.Web.WebView2.Core;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
-using RemindAI.Gui.Services;
 using RemindAI.Gui.Models;
+using RemindAI.Gui.Services;
 
 namespace RemindAI.Gui
 {
@@ -16,20 +17,17 @@ namespace RemindAI.Gui
     {
         private readonly DaemonClient _daemonClient;
         private readonly ObservableCollection<SessionViewModel> _sessions;
-        private string _currentSessionId = "";
-        private Hardcodet.Wpf.TaskbarNotification.TaskbarIcon? _trayIcon;
         private readonly SoundPlayer _soundPlayer;
+        private Hardcodet.Wpf.TaskbarNotification.TaskbarIcon? _trayIcon;
+        private bool _isConnected;
 
         public MainWindow()
         {
             InitializeComponent();
 
-            // 从资源获取托盘图标
             _trayIcon = (Hardcodet.Wpf.TaskbarNotification.TaskbarIcon?)FindResource("TrayIcon");
-
-            // 初始化声音播放器
+            TryLoadRuntimeIcons();
             _soundPlayer = new SoundPlayer();
-
             _sessions = new ObservableCollection<SessionViewModel>();
             SessionListView.ItemsSource = _sessions;
 
@@ -39,19 +37,43 @@ namespace RemindAI.Gui
             _daemonClient.SessionRegistered += OnSessionRegistered;
             _daemonClient.SessionPrompt += OnSessionPrompt;
             _daemonClient.SessionExited += OnSessionExited;
+            _daemonClient.NotificationReceived += OnNotificationReceived;
+            _daemonClient.SourceRegistered += OnSourceRegistered;
+            _daemonClient.MonitorEventReceived += OnMonitorEventReceived;
             _daemonClient.LogMessage += OnLogMessage;
 
             Loaded += MainWindow_Loaded;
         }
 
+        private void TryLoadRuntimeIcons()
+        {
+            try
+            {
+                var assetDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets");
+                var pngPath = Path.Combine(assetDir, "app-icon-64.png");
+                var icoPath = Path.Combine(assetDir, "tray-icon.ico");
+
+                if (File.Exists(pngPath))
+                {
+                    Icon = BitmapFrame.Create(new Uri(pngPath, UriKind.Absolute));
+                }
+
+                if (_trayIcon != null && File.Exists(icoPath))
+                {
+                    _trayIcon.Icon = new System.Drawing.Icon(icoPath);
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"加载图标失败，已继续启动：{ex.Message}");
+            }
+        }
+
         private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
-            // 初始化 WebView2
             await InitializeWebView();
-
-            // 连接到 daemon
             AddLog("正在连接到 RemindAI daemon...");
-            await _daemonClient.ConnectAsync();
+            await ConnectToDaemon();
         }
 
         private async System.Threading.Tasks.Task InitializeWebView()
@@ -59,20 +81,18 @@ namespace RemindAI.Gui
             try
             {
                 await ChatWebView.EnsureCoreWebView2Async();
-
-                // 设置 WebView2 消息接收
+                ChatWebView.CoreWebView2.Settings.IsScriptEnabled = true;
+                ChatWebView.CoreWebView2.Settings.AreDefaultScriptDialogsEnabled = false;
+                ChatWebView.CoreWebView2.Settings.AreDevToolsEnabled = false;
                 ChatWebView.CoreWebView2.WebMessageReceived += OnWebMessageReceived;
 
-                // 加载 HTML 文件
-                var htmlPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "wwwroot", "chat.html");
-                if (File.Exists(htmlPath))
-                {
-                    ChatWebView.CoreWebView2.Navigate(new Uri(htmlPath).AbsoluteUri);
-                }
-                else
-                {
-                    AddLog($"错误：找不到 chat.html 文件：{htmlPath}");
-                }
+                var wwwrootPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "wwwroot");
+                ChatWebView.CoreWebView2.SetVirtualHostNameToFolderMapping(
+                    "remindai.local",
+                    wwwrootPath,
+                    CoreWebView2HostResourceAccessKind.Allow
+                );
+                ChatWebView.CoreWebView2.Navigate("https://remindai.local/chat.html");
             }
             catch (Exception ex)
             {
@@ -86,33 +106,46 @@ namespace RemindAI.Gui
             }
         }
 
+        private async System.Threading.Tasks.Task ConnectToDaemon()
+        {
+            await _daemonClient.ConnectAsync();
+        }
+
         private void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
         {
             try
             {
-                var json = e.WebMessageAsJson;
-                var message = JObject.Parse(json);
+                var message = JObject.Parse(e.WebMessageAsJson);
                 var type = message["type"]?.Value<string>();
-
-                switch (type)
+                if (type == "ready")
                 {
-                    case "ready":
-                        AddLog("WebView2 已就绪");
-                        break;
-
-                    case "reply":
-                        var sessionId = message["sessionId"]?.Value<string>();
-                        var value = message["value"]?.Value<string>();
-                        if (!string.IsNullOrEmpty(sessionId) && !string.IsNullOrEmpty(value))
-                        {
-                            HandleUserReply(sessionId, value);
-                        }
-                        break;
-
-                    default:
-                        AddLog($"未知的 WebView 消息类型：{type}");
-                        break;
+                    SendMessageToWeb(new { type = "connection-status", connected = _isConnected });
+                    return;
                 }
+
+                if (type == "reply")
+                {
+                    var sessionId = message["sessionId"]?.Value<string>();
+                    var value = message["value"]?.Value<string>();
+                    if (!string.IsNullOrWhiteSpace(sessionId) && !string.IsNullOrWhiteSpace(value))
+                    {
+                        HandleUserReply(sessionId, value);
+                    }
+                    return;
+                }
+
+                if (type == "event-reply")
+                {
+                    var eventId = message["eventId"]?.Value<string>();
+                    var value = message["value"]?.Value<string>();
+                    if (!string.IsNullOrWhiteSpace(eventId) && !string.IsNullOrWhiteSpace(value))
+                    {
+                        HandleMonitorEventReply(eventId, value);
+                    }
+                    return;
+                }
+
+                AddLog($"未知 WebView 消息：{type}");
             }
             catch (Exception ex)
             {
@@ -122,29 +155,32 @@ namespace RemindAI.Gui
 
         private async void HandleUserReply(string sessionId, string value)
         {
-            try
-            {
-                // 确保以换行符结尾
-                var reply = value.EndsWith("\n") ? value : value + "\n";
-                await _daemonClient.SendReplyAsync(sessionId, reply);
-                AddLog($"[回复] 会话 {sessionId}: {value}");
-            }
-            catch (Exception ex)
-            {
-                AddLog($"发送回复失败：{ex.Message}");
-            }
+            var reply = value.EndsWith("\n", StringComparison.Ordinal) ? value : value + "\n";
+            await _daemonClient.SendReplyAsync(sessionId, reply);
+            AddLog($"[回复] {sessionId}: {value}");
+        }
+
+        private async void HandleMonitorEventReply(string eventId, string value)
+        {
+            var reply = value.EndsWith("\n", StringComparison.Ordinal) ? value : value + "\n";
+            await _daemonClient.SendMonitorEventReplyAsync(eventId, reply);
+            AddLog($"[事件回复] {eventId}: {value}");
         }
 
         private void SendMessageToWeb(object message)
         {
             try
             {
-                var json = JsonConvert.SerializeObject(message);
+                if (ChatWebView?.CoreWebView2 == null) return;
+                var json = JsonConvert.SerializeObject(message, new JsonSerializerSettings
+                {
+                    StringEscapeHandling = StringEscapeHandling.Default
+                });
                 ChatWebView.CoreWebView2.PostWebMessageAsJson(json);
             }
             catch (Exception ex)
             {
-                AddLog($"发送消息到 WebView 失败：{ex.Message}");
+                AddLog($"发送 WebView 消息失败：{ex.Message}");
             }
         }
 
@@ -152,11 +188,13 @@ namespace RemindAI.Gui
         {
             Dispatcher.Invoke(() =>
             {
+                _isConnected = true;
                 StatusIndicator.Fill = new SolidColorBrush(Colors.Green);
                 StatusText.Text = "已连接";
-                // ConnectionStatusMenuItem 在资源中，暂时不更新
                 StatusBarText.Text = "已连接到 daemon";
-                AddLog("✓ 已连接到 daemon");
+                ReconnectButton.Visibility = Visibility.Collapsed;
+                SendMessageToWeb(new { type = "connection-status", connected = true });
+                AddLog("已连接到 daemon");
             });
         }
 
@@ -164,11 +202,13 @@ namespace RemindAI.Gui
         {
             Dispatcher.Invoke(() =>
             {
+                _isConnected = false;
                 StatusIndicator.Fill = new SolidColorBrush(Colors.Gray);
                 StatusText.Text = "未连接";
-                // ConnectionStatusMenuItem 在资源中，暂时不更新
                 StatusBarText.Text = "与 daemon 断开连接";
-                AddLog("✗ 与 daemon 断开连接");
+                ReconnectButton.Visibility = Visibility.Visible;
+                SendMessageToWeb(new { type = "connection-status", connected = false });
+                AddLog("与 daemon 断开连接");
             });
         }
 
@@ -176,16 +216,10 @@ namespace RemindAI.Gui
         {
             Dispatcher.Invoke(() =>
             {
-                var vm = new SessionViewModel(session);
-                _sessions.Add(vm);
+                _sessions.Add(new SessionViewModel(session));
                 UpdateSessionCount();
-                AddLog($"新会话：{session.Command} (ID: {session.Id})");
-
-                // 如果是第一个会话，自动选中
-                if (_sessions.Count == 1)
-                {
-                    SessionListView.SelectedIndex = 0;
-                }
+                if (_sessions.Count == 1) SessionListView.SelectedIndex = 0;
+                SendMessageToWeb(new { type = "session-registered", session });
             });
         }
 
@@ -200,24 +234,24 @@ namespace RemindAI.Gui
                     session.LastPrompt = e.LastLines;
                 }
 
-                AddLog($"[提示] 会话 {e.SessionId}: {e.LastLines}");
-
-                // 播放提示音
                 if (!FocusAssistDetector.IsCurrentAppInForeground())
                 {
                     _soundPlayer.PlayPromptSound();
                 }
 
-                // 发送消息到 WebView
                 SendMessageToWeb(new
                 {
                     type = "add-message",
                     data = new
                     {
                         id = Guid.NewGuid().ToString(),
-                        sessionId = e.SessionId,
-                        timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds(),
                         type = "prompt",
+                        source = session?.Source ?? "cli",
+                        sourceId = session?.SourceId,
+                        sessionId = e.SessionId,
+                        windowTitle = session?.WindowTitle,
+                        workspace = session?.Workspace,
+                        timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds(),
                         content = e.FullOutput ?? e.LastLines,
                         options = e.Options
                     }
@@ -235,9 +269,67 @@ namespace RemindAI.Gui
                     session.Status = "exited";
                     session.ExitCode = e.ExitCode;
                 }
-
                 UpdateSessionCount();
-                AddLog($"会话结束：{e.SessionId} (退出码: {e.ExitCode})");
+                SendMessageToWeb(new
+                {
+                    type = "add-message",
+                    data = new
+                    {
+                        id = Guid.NewGuid().ToString(),
+                        type = e.ExitCode == 0 ? "done" : "error",
+                        source = session?.Source ?? "cli",
+                        sourceId = session?.SourceId,
+                        sessionId = e.SessionId,
+                        windowTitle = session?.WindowTitle,
+                        workspace = session?.Workspace,
+                        timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds(),
+                        content = $"会话结束，退出码：{e.ExitCode}"
+                    }
+                });
+            });
+        }
+
+        private void OnNotificationReceived(object? sender, NotificationEventArgs e)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                SendMessageToWeb(new
+                {
+                    type = "add-message",
+                    data = new
+                    {
+                        id = Guid.NewGuid().ToString(),
+                        type = "notification",
+                        source = string.IsNullOrWhiteSpace(e.Source) ? "daemon" : e.Source,
+                        sourceId = e.SourceId,
+                        sessionId = e.SessionId,
+                        windowTitle = e.WindowTitle,
+                        workspace = e.Workspace,
+                        timestamp = e.Timestamp == 0 ? DateTimeOffset.Now.ToUnixTimeMilliseconds() : e.Timestamp,
+                        content = $"**{e.Title}**\n\n{e.Message}",
+                        level = e.Level
+                    }
+                });
+            });
+        }
+
+        private void OnSourceRegistered(object? sender, MonitorSourceEventArgs e)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                SendMessageToWeb(new { type = "source-registered", source = e.Source });
+            });
+        }
+
+        private void OnMonitorEventReceived(object? sender, MonitorEventArgs e)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                SendMessageToWeb(new
+                {
+                    type = "monitor-event",
+                    data = e.Event
+                });
             });
         }
 
@@ -250,55 +342,68 @@ namespace RemindAI.Gui
         {
             foreach (var session in _sessions)
             {
-                if (session.Id == sessionId)
-                    return session;
+                if (session.Id == sessionId) return session;
             }
             return null;
         }
 
         private void UpdateSessionCount()
         {
-            int activeCount = 0;
+            var activeCount = 0;
             foreach (var session in _sessions)
             {
-                if (session.Status != "exited")
-                    activeCount++;
+                if (session.Status != "exited") activeCount++;
             }
             SessionCountText.Text = activeCount.ToString();
         }
 
         private void AddLog(string message)
         {
-            var timestamp = DateTime.Now.ToString("HH:mm:ss");
-            System.Diagnostics.Debug.WriteLine($"[{timestamp}] {message}");
+            var logMessage = $"[{DateTime.Now:HH:mm:ss}] {message}";
+            System.Diagnostics.Debug.WriteLine(logMessage);
+
+            try
+            {
+                var logDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".remindai");
+                Directory.CreateDirectory(logDir);
+                File.AppendAllText(Path.Combine(logDir, "gui.log"), logMessage + Environment.NewLine, System.Text.Encoding.UTF8);
+            }
+            catch
+            {
+            }
         }
 
         private void SessionListView_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (SessionListView.SelectedItem is SessionViewModel session)
             {
-                _currentSessionId = session.Id;
-                // TODO: 加载该会话的历史消息
                 AddLog($"切换到会话：{session.Command}");
             }
         }
 
         private void Settings_Click(object sender, RoutedEventArgs e)
         {
-            var settingsWindow = new SettingsWindow();
-            settingsWindow.Owner = this;
+            var settingsWindow = new SettingsWindow { Owner = this };
             settingsWindow.ShowDialog();
         }
 
-        private void TrayIcon_TrayMouseDoubleClick(object sender, RoutedEventArgs e)
+        private async void Reconnect_Click(object sender, RoutedEventArgs e)
         {
-            ShowWindow();
+            ReconnectButton.IsEnabled = false;
+            StatusBarText.Text = "正在重新连接...";
+            try
+            {
+                await _daemonClient.ReconnectAsync();
+            }
+            finally
+            {
+                ReconnectButton.IsEnabled = true;
+            }
         }
 
-        private void ShowWindow_Click(object sender, RoutedEventArgs e)
-        {
-            ShowWindow();
-        }
+        private void TrayIcon_TrayMouseDoubleClick(object sender, RoutedEventArgs e) => ShowWindow();
+
+        private void ShowWindow_Click(object sender, RoutedEventArgs e) => ShowWindow();
 
         private void ShowWindow()
         {
@@ -309,23 +414,23 @@ namespace RemindAI.Gui
 
         private void Exit_Click(object sender, RoutedEventArgs e)
         {
+            _daemonClient.Dispose();
+            _trayIcon?.Dispose();
             Application.Current.Shutdown();
         }
 
         private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
         {
-            // 最小化到托盘而不是关闭
             e.Cancel = true;
             Hide();
         }
 
         protected override void OnClosed(EventArgs e)
         {
-            _daemonClient?.Dispose();
+            _daemonClient.Dispose();
             _trayIcon?.Dispose();
-            _soundPlayer?.Dispose();
+            _soundPlayer.Dispose();
             base.OnClosed(e);
         }
     }
 }
-

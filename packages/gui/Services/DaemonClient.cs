@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Net.Http;
+using System.Net.WebSockets;
 using System.Text;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
@@ -22,6 +23,9 @@ namespace RemindAI.Gui.Services
         public event EventHandler<SessionInfo>? SessionRegistered;
         public event EventHandler<SessionPromptEventArgs>? SessionPrompt;
         public event EventHandler<SessionExitedEventArgs>? SessionExited;
+        public event EventHandler<NotificationEventArgs>? NotificationReceived;
+        public event EventHandler<MonitorSourceEventArgs>? SourceRegistered;
+        public event EventHandler<MonitorEventArgs>? MonitorEventReceived;
         public event EventHandler<string>? LogMessage;
 
         public DaemonClient()
@@ -42,7 +46,7 @@ namespace RemindAI.Gui.Services
 
                 if (File.Exists(configPath))
                 {
-                    var json = File.ReadAllText(configPath);
+                    var json = File.ReadAllText(configPath, Encoding.UTF8);
                     var config = JObject.Parse(json);
 
                     if (config["port"] != null)
@@ -73,34 +77,75 @@ namespace RemindAI.Gui.Services
         {
             try
             {
+                Log($"尝试连接到 daemon: {_daemonUrl}");
+
                 // 检查 daemon 健康状态
                 var healthUrl = $"{_daemonUrl}/health";
-                var response = await _httpClient.GetAsync(healthUrl);
 
-                if (!response.IsSuccessStatusCode)
+                try
                 {
-                    Log("Daemon 未运行");
+                    _httpClient.Timeout = TimeSpan.FromSeconds(5);
+                    var response = await _httpClient.GetAsync(healthUrl);
+
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        Log($"Daemon 健康检查失败，状态码: {response.StatusCode}");
+                        Disconnected?.Invoke(this, EventArgs.Empty);
+                        return;
+                    }
+
+                    var healthContent = await response.Content.ReadAsStringAsync();
+                    Log($"Daemon 健康检查成功: {healthContent}");
+                }
+                catch (HttpRequestException httpEx)
+                {
+                    Log($"无法连接到 daemon ({_daemonUrl}): {httpEx.Message}");
+                    Log("请确保 daemon 正在运行：remindai start");
+                    Disconnected?.Invoke(this, EventArgs.Empty);
+                    return;
+                }
+                catch (TaskCanceledException)
+                {
+                    Log($"连接 daemon 超时 ({_daemonUrl})");
+                    Log("请检查 daemon 是否正在运行");
+                    Disconnected?.Invoke(this, EventArgs.Empty);
                     return;
                 }
 
                 // 连接 WebSocket
-                var wsUrl = $"ws://127.0.0.1:{new Uri(_daemonUrl).Port}/ws?token={_token}&role=observer";
-                _wsClient = new WebsocketClient(new Uri(wsUrl));
+                var port = new Uri(_daemonUrl).Port;
+                var wsUrl = $"ws://127.0.0.1:{port}/ws?token={_token}&role=observer";
+                Log($"连接 WebSocket: {wsUrl}");
 
-                _wsClient.ReconnectTimeout = TimeSpan.FromSeconds(30);
+                var factory = new Func<ClientWebSocket>(() =>
+                {
+                    var client = new ClientWebSocket();
+                    client.Options.KeepAliveInterval = TimeSpan.FromSeconds(30);
+                    return client;
+                });
+
+                _wsClient = new WebsocketClient(new Uri(wsUrl), factory)
+                {
+                    ReconnectTimeout = null, // 禁用自动重连，手动控制
+                    ErrorReconnectTimeout = null
+                };
+
                 _wsClient.ReconnectionHappened.Subscribe(info =>
                 {
-                    Log($"WebSocket 重连：{info.Type}");
-                    if (info.Type == ReconnectionType.Initial)
-                    {
-                        Connected?.Invoke(this, EventArgs.Empty);
-                    }
+                    Log($"WebSocket 连接状态：{info.Type}");
+                    Log($"触发 Connected 事件，订阅者数量：{(Connected?.GetInvocationList()?.Length ?? 0)}");
+                    // 任何成功的连接都触发 Connected 事件
+                    Connected?.Invoke(this, EventArgs.Empty);
+                    Log("Connected 事件已触发");
                 });
 
                 _wsClient.DisconnectionHappened.Subscribe(info =>
                 {
-                    Log($"WebSocket 断开：{info.Type}");
-                    Disconnected?.Invoke(this, EventArgs.Empty);
+                    Log($"WebSocket 断开：{info.Type} - {info.CloseStatus}");
+                    if (info.Type != DisconnectionType.Exit)
+                    {
+                        Disconnected?.Invoke(this, EventArgs.Empty);
+                    }
                 });
 
                 _wsClient.MessageReceived.Subscribe(msg =>
@@ -112,11 +157,13 @@ namespace RemindAI.Gui.Services
                 });
 
                 await _wsClient.Start();
-                Log("WebSocket 已连接");
+                Log("WebSocket 启动成功");
             }
             catch (Exception ex)
             {
-                Log($"连接失败：{ex.Message}");
+                Log($"连接失败：{ex.GetType().Name} - {ex.Message}");
+                Log($"堆栈跟踪：{ex.StackTrace}");
+                Disconnected?.Invoke(this, EventArgs.Empty);
             }
         }
 
@@ -164,6 +211,49 @@ namespace RemindAI.Gui.Services
                         SessionExited?.Invoke(this, exitEvent);
                         break;
 
+                    case "notification":
+                        var data = json["data"];
+                        if (data != null)
+                        {
+                            var notificationEvent = new NotificationEventArgs
+                            {
+                                Title = data["title"]?.Value<string>() ?? "",
+                                Message = data["message"]?.Value<string>() ?? data["content"]?.Value<string>() ?? "",
+                                Source = data["source"]?.Value<string>() ?? "",
+                                SourceId = data["sourceId"]?.Value<string>() ?? "",
+                                SessionId = data["sessionId"]?.Value<string>() ?? "",
+                                Level = data["level"]?.Value<string>() ?? "",
+                                WindowTitle = data["windowTitle"]?.Value<string>() ?? "",
+                                Workspace = data["workspace"]?.Value<string>() ?? "",
+                                Timestamp = data["timestamp"]?.Value<long>() ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                            };
+                            Log($"收到通知：{notificationEvent.Title} - {notificationEvent.Message}");
+                            NotificationReceived?.Invoke(this, notificationEvent);
+                        }
+                        break;
+
+                    case "source-registered":
+                        var source = json["source"]?.ToObject<MonitorSourceInfo>();
+                        if (source != null)
+                        {
+                            Log($"监控源上线：{source.Kind}/{source.Name}");
+                            SourceRegistered?.Invoke(this, new MonitorSourceEventArgs { Source = source });
+                        }
+                        break;
+
+                    case "monitor-event":
+                        var monitorEvent = json["event"]?.ToObject<MonitorEventInfo>();
+                        if (monitorEvent != null)
+                        {
+                            Log($"监控事件：{monitorEvent.Type} - {monitorEvent.Title ?? monitorEvent.Content}");
+                            MonitorEventReceived?.Invoke(this, new MonitorEventArgs { Event = monitorEvent });
+                        }
+                        break;
+
+                    case "monitor-event-reply":
+                        Log($"监控事件回复：{json["eventId"]?.Value<string>()} - {json["text"]?.Value<string>()}");
+                        break;
+
                     case "session-output":
                         // 可选：处理会话输出
                         break;
@@ -208,9 +298,103 @@ namespace RemindAI.Gui.Services
             }
         }
 
+        public async Task SendMonitorEventReplyAsync(string eventId, string text)
+        {
+            try
+            {
+                var url = $"{_daemonUrl}/events/{Uri.EscapeDataString(eventId)}/reply";
+                var payload = new { text };
+                var content = new StringContent(
+                    JsonConvert.SerializeObject(payload),
+                    Encoding.UTF8,
+                    "application/json"
+                );
+
+                _httpClient.DefaultRequestHeaders.Clear();
+                _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {_token}");
+
+                var response = await _httpClient.PostAsync(url, content);
+                if (!response.IsSuccessStatusCode)
+                {
+                    var error = await response.Content.ReadAsStringAsync();
+                    Log($"发送监控事件回复失败：{error}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"发送监控事件回复异常：{ex.Message}");
+            }
+        }
+
+        public async Task<MonitorSourceInfo?> RegisterSourceAsync(object payload)
+        {
+            try
+            {
+                var url = $"{_daemonUrl}/sources/register";
+                var content = new StringContent(JsonConvert.SerializeObject(payload), Encoding.UTF8, "application/json");
+                _httpClient.DefaultRequestHeaders.Clear();
+                _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {_token}");
+                var response = await _httpClient.PostAsync(url, content);
+                var body = await response.Content.ReadAsStringAsync();
+                if (!response.IsSuccessStatusCode)
+                {
+                    Log($"注册监控源失败：{body}");
+                    return null;
+                }
+                return JsonConvert.DeserializeObject<MonitorSourceInfo>(body);
+            }
+            catch (Exception ex)
+            {
+                Log($"注册监控源异常：{ex.Message}");
+                return null;
+            }
+        }
+
+        public async Task DisconnectAsync()
+        {
+            try
+            {
+                if (_wsClient != null)
+                {
+                    await _wsClient.Stop(System.Net.WebSockets.WebSocketCloseStatus.NormalClosure, "User disconnect");
+                    _wsClient.Dispose();
+                    _wsClient = null;
+                }
+                Log("已断开连接");
+            }
+            catch (Exception ex)
+            {
+                Log($"断开连接时出错：{ex.Message}");
+            }
+        }
+
+        public async Task ReconnectAsync()
+        {
+            Log("开始重新连接...");
+            await DisconnectAsync();
+            await Task.Delay(500); // 等待一下再重连
+            await ConnectAsync();
+        }
+
         private void Log(string message)
         {
-            LogMessage?.Invoke(this, message);
+            var logMessage = $"[{DateTime.Now:HH:mm:ss.fff}] {message}";
+            LogMessage?.Invoke(this, logMessage);
+
+            // 同时写入日志文件
+            try
+            {
+                var logPath = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                    ".remindai",
+                    "gui.log"
+                );
+                File.AppendAllText(logPath, logMessage + Environment.NewLine, Encoding.UTF8);
+            }
+            catch
+            {
+                // 忽略日志写入错误
+            }
         }
 
         public void Dispose()
@@ -218,5 +402,59 @@ namespace RemindAI.Gui.Services
             _wsClient?.Dispose();
             _httpClient?.Dispose();
         }
+    }
+
+    public class NotificationEventArgs : EventArgs
+    {
+        public string Title { get; set; } = "";
+        public string Message { get; set; } = "";
+        public string Source { get; set; } = "";
+        public string SourceId { get; set; } = "";
+        public string SessionId { get; set; } = "";
+        public string Level { get; set; } = "";
+        public string WindowTitle { get; set; } = "";
+        public string Workspace { get; set; } = "";
+        public long Timestamp { get; set; }
+    }
+
+    public class MonitorSourceEventArgs : EventArgs
+    {
+        public MonitorSourceInfo Source { get; set; } = new MonitorSourceInfo();
+    }
+
+    public class MonitorEventArgs : EventArgs
+    {
+        public MonitorEventInfo Event { get; set; } = new MonitorEventInfo();
+    }
+
+    public class MonitorSourceInfo
+    {
+        public string Id { get; set; } = "";
+        public string Kind { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string? WindowTitle { get; set; }
+        public string? Workspace { get; set; }
+        public string? Url { get; set; }
+        public string[] Capabilities { get; set; } = Array.Empty<string>();
+        public long RegisteredAt { get; set; }
+        public long LastSeenAt { get; set; }
+        public string Status { get; set; } = "online";
+    }
+
+    public class MonitorEventInfo
+    {
+        public string Id { get; set; } = "";
+        public string Type { get; set; } = "";
+        public string? Source { get; set; }
+        public string? SourceId { get; set; }
+        public string? SessionId { get; set; }
+        public string? Title { get; set; }
+        public string Content { get; set; } = "";
+        public string[]? Options { get; set; }
+        public string? Level { get; set; }
+        public string? WindowTitle { get; set; }
+        public string? Workspace { get; set; }
+        public string? Url { get; set; }
+        public long Timestamp { get; set; }
     }
 }

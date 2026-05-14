@@ -4,8 +4,11 @@ import type { Server } from 'node:http';
 import type { Config } from '../config.js';
 import { Notifier } from './notifier.js';
 import { SessionManager } from './sessionManager.js';
+import { SourceManager } from './sourceManager.js';
 import {
+  MonitorEventSchema,
   NotifyRequestSchema,
+  RegisterSourceRequestSchema,
   RegisterSessionRequestSchema,
   ReplyRequestSchema,
   SessionExitRequestSchema,
@@ -21,6 +24,16 @@ export function createServer(cfg: Config): {
   const app = express();
   const notifier = new Notifier(cfg);
   const sessions = new SessionManager();
+  const sources = new SourceManager();
+
+  // 存储所有观察者 WebSocket 连接
+  const observerSockets = new Set<WebSocket>();
+
+  // 设置默认字符编码为 UTF-8
+  app.use((_req, res, next) => {
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    next();
+  });
 
   app.use(express.json({ limit: '2mb' }));
 
@@ -44,10 +57,101 @@ export function createServer(cfg: Config): {
       res.status(400).json({ error: parsed.error.message });
       return;
     }
-    const { title, message, source, level } = parsed.data;
+    const { title, message, source, level, sessionId, sourceId, windowTitle, workspace } = parsed.data;
     logger.info({ title, message, source, level }, 'notify');
+
     notifier.show(title, message, { sound: level === 'prompt' });
+    broadcastNotification(observerSockets, {
+      title,
+      message,
+      source,
+      sourceId,
+      sessionId,
+      level,
+      windowTitle,
+      workspace,
+      timestamp: Date.now(),
+    });
+
     res.json({ ok: true });
+  });
+
+  app.post('/sources/register', (req, res) => {
+    const parsed = RegisterSourceRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.message });
+      return;
+    }
+    const source = sources.register(parsed.data);
+    res.json(source);
+  });
+
+  app.get('/sources', (_req, res) => {
+    res.json(sources.list());
+  });
+
+  app.post('/events', (req, res) => {
+    const parsed = MonitorEventSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.message });
+      return;
+    }
+
+    const event = sources.emitEvent(parsed.data);
+    const level = event.level ?? (
+      event.type === 'prompt'
+        ? 'prompt'
+        : event.type === 'error'
+          ? 'error'
+          : event.type === 'done'
+            ? 'done'
+            : 'info'
+    );
+
+    if (event.type === 'prompt' || event.type === 'done' || event.type === 'error' || event.type === 'notification') {
+      const title = event.title ?? `${event.source ?? 'RemindAI'} ${event.type}`;
+      const message = event.content || event.windowTitle || 'RemindAI event';
+      notifier.show(title, message, { sound: level === 'prompt' || level === 'done' });
+      if (event.type === 'notification') {
+        broadcastNotification(observerSockets, {
+          title,
+          message,
+          source: event.source,
+          sourceId: event.sourceId,
+          sessionId: event.sessionId,
+          level,
+          windowTitle: event.windowTitle,
+          workspace: event.workspace,
+          timestamp: event.timestamp,
+        });
+      }
+    }
+
+    res.json({ ok: true, event });
+  });
+
+  app.post('/events/:id/reply', (req, res) => {
+    const parsed = ReplyRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.message });
+      return;
+    }
+
+    const ok = sources.reply(req.params.id, parsed.data.text);
+    if (!ok) {
+      res.status(404).json({ error: 'event not found' });
+      return;
+    }
+    res.json({ ok: true });
+  });
+
+  app.get('/events/:id/replies', (req, res) => {
+    const replies = sources.listReplies(req.params.id);
+    if (!replies) {
+      res.status(404).json({ error: 'event not found' });
+      return;
+    }
+    res.json({ eventId: req.params.id, replies });
   });
 
   app.post('/sessions', (req, res) => {
@@ -150,10 +254,30 @@ export function createServer(cfg: Config): {
       });
 
       const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
-      wss.on('connection', (ws, req) => handleWs(ws, req, cfg, sessions));
+      wss.on('connection', (ws, req) => handleWs(ws, req, cfg, sessions, sources, observerSockets));
     });
 
   return { start, notifier, sessions };
+}
+
+function broadcastNotification(
+  observerSockets: Set<WebSocket>,
+  data: {
+    title: string;
+    message: string;
+    source?: string;
+    sourceId?: string;
+    sessionId?: string;
+    level?: string;
+    windowTitle?: string;
+    workspace?: string;
+    timestamp: number;
+  },
+) {
+  const notification = JSON.stringify({ type: 'notification', data });
+  observerSockets.forEach((ws) => {
+    if (ws.readyState === ws.OPEN) ws.send(notification);
+  });
 }
 
 function handleWs(
@@ -161,6 +285,8 @@ function handleWs(
   req: { url?: string; headers: Record<string, string | string[] | undefined> },
   cfg: Config,
   sessions: SessionManager,
+  sources: SourceManager,
+  observerSockets: Set<WebSocket>,
 ): void {
   const url = new URL(req.url ?? '/ws', 'http://localhost');
   const token = url.searchParams.get('token');
@@ -179,10 +305,23 @@ function handleWs(
     logger.info({ sessionId }, 'cli ws attached');
   } else {
     logger.info({ role }, 'observer ws attached');
-    const unsubscribe = sessions.onEvent((event) => {
+
+    // 添加到观察者集合
+    observerSockets.add(ws);
+
+    const unsubscribeSessions = sessions.onEvent((event) => {
       if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(event));
     });
-    ws.on('close', () => unsubscribe());
+    const unsubscribeSources = sources.onEvent((event) => {
+      if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(event));
+    });
+
+    ws.on('close', () => {
+      unsubscribeSessions();
+      unsubscribeSources();
+      observerSockets.delete(ws);
+    });
+
     ws.send(JSON.stringify({ type: 'hello', pid: process.pid, version: '0.1.0' }));
   }
 

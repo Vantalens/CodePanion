@@ -14,6 +14,25 @@ const TemplateSchema = z.object({
   text: z.string(),
 });
 
+const MonitorsSchema = z
+  .object({
+    cli: z.boolean().default(true),
+    vscode: z.boolean().default(true),
+    browserExtension: z.boolean().default(true),
+    browserAllowlist: z.array(z.string()).default([
+      'chat.openai.com',
+      'chatgpt.com',
+      'claude.ai',
+      'github.com',
+    ]),
+  })
+  .default({
+    cli: true,
+    vscode: true,
+    browserExtension: true,
+    browserAllowlist: ['chat.openai.com', 'chatgpt.com', 'claude.ai', 'github.com'],
+  });
+
 const ConfigSchema = z.object({
   port: z.number().int().min(1024).max(65535).default(7777),
   token: z.string().min(16),
@@ -25,6 +44,7 @@ const ConfigSchema = z.object({
       soundOnDone: z.boolean().default(true),
     })
     .default({ enabled: true, soundOnPrompt: true, soundOnDone: true }),
+  monitors: MonitorsSchema,
   templates: z.array(TemplateSchema).default([
     { label: '继续', text: '继续\n' },
     { label: '全部接受', text: '1\n' },

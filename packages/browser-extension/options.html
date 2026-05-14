@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>RemindAI Browser Monitor</title>
+  <style>
+    body { max-width: 720px; margin: 32px auto; font: 14px/1.6 "Segoe UI", sans-serif; }
+    label { display: block; margin-top: 16px; font-weight: 600; }
+    input, textarea { width: 100%; box-sizing: border-box; padding: 8px; }
+    button { margin-top: 16px; padding: 8px 14px; }
+  </style>
+</head>
+<body>
+  <h1>RemindAI Browser Monitor</h1>
+  <label>Daemon port</label>
+  <input id="port" type="number" min="1024" max="65535">
+  <label>Daemon token</label>
+  <input id="token" type="password">
+  <label>Allowlist domains, one per line</label>
+  <textarea id="allowlist" rows="8"></textarea>
+  <button id="save">保存</button>
+  <script src="options.js"></script>
+</body>
+</html>

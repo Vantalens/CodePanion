@@ -2,7 +2,9 @@
 
 ## 概述
 
-RemindAI 是一个用于监控命令行工具交互的智能提示系统，主要服务于 AI 编程工具（如 Claude Code、GitHub Copilot）的使用场景。
+RemindAI 是一个多源提醒中心，用于监控命令行工具、VS Code 窗口、Codex/Claude Code 会话和浏览器 Web 对话状态。核心架构是 daemon 事件中心：CLI/PTTY、VS Code 扩展、浏览器扩展和外部适配器统一向 daemon 注册来源并上报事件，GUI 通过 WebSocket 接收统一事件流。
+
+第一阶段不做默认系统级 OCR 或全局窗口内容读取；多窗口监控优先通过插件、扩展和显式适配器完成。
 
 ## 系统架构
 
@@ -159,19 +161,19 @@ class PromptDetector {
 #### HTTP REST API
 
 ```
-POST /api/notify
+POST /notify
   发送通知
   Body: { message: string, sessionId?: string }
 
-POST /api/reply
+POST /sessions/:id/reply
   发送响应到会话
   Body: { sessionId: string, input: string }
 
-GET /api/sessions
+GET /sessions
   获取所有活动会话
   Response: { sessions: Session[] }
 
-GET /api/status
+GET /health
   获取守护进程状态
   Response: { running: boolean, uptime: number, sessions: number }
 ```

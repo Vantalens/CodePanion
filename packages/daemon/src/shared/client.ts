@@ -1,5 +1,12 @@
 import { loadConfig } from '../config.js';
-import type { NotifyRequest, RegisterSessionRequest, SessionInfo } from './protocol.js';
+import type {
+  MonitorEvent,
+  MonitorSource,
+  NotifyRequest,
+  RegisterSessionRequest,
+  RegisterSourceRequest,
+  SessionInfo,
+} from './protocol.js';
 
 function baseUrl() {
   const cfg = loadConfig();
@@ -40,6 +47,29 @@ export function notify(payload: NotifyRequest): Promise<unknown> {
 
 export function registerSession(payload: RegisterSessionRequest): Promise<SessionInfo> {
   return request<SessionInfo>('POST', '/sessions', payload);
+}
+
+export function registerSource(payload: RegisterSourceRequest): Promise<MonitorSource> {
+  return request<MonitorSource>('POST', '/sources/register', payload);
+}
+
+export function postMonitorEvent(payload: MonitorEvent): Promise<unknown> {
+  return request('POST', '/events', payload);
+}
+
+export function postMonitorEventReply(eventId: string, text: string): Promise<unknown> {
+  return request('POST', `/events/${encodeURIComponent(eventId)}/reply`, { text });
+}
+
+export function listMonitorEventReplies(eventId: string): Promise<{
+  eventId: string;
+  replies: Array<{ eventId: string; sourceId?: string; text: string; timestamp: number }>;
+}> {
+  return request('GET', `/events/${encodeURIComponent(eventId)}/replies`);
+}
+
+export function listSources(): Promise<MonitorSource[]> {
+  return request<MonitorSource[]>('GET', '/sources');
 }
 
 export function postOutput(id: string, chunk: string): Promise<unknown> {

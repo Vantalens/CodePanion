@@ -91,19 +91,33 @@ ls packages/daemon/dist/
 # 应看到: cli/, daemon/, pty/, shared/, index.js 等
 ```
 
-#### 4. 构建 GUI
+#### 4. 全局安装 CLI 工具
 
 ```bash
-dotnet build packages/gui/RemindAI.Gui.csproj
+cd packages/daemon
+npm link
+cd ../..
+```
+
+验证安装：
+```bash
+remindai --version
+# 应输出: 0.1.0
+```
+
+#### 5. 构建 GUI
+
+```bash
+npm run gui:build
 ```
 
 验证构建：
 ```bash
 ls packages/gui/bin/Debug/net8.0-windows/
-# 应看到: RemindAI.Gui.dll, wwwroot/, Assets/ 等
+# 应看到: RemindAI.Gui.exe, wwwroot/, Assets/ 等
 ```
 
-#### 5. 配置（可选）
+#### 6. 配置（可选）
 
 创建配置文件：
 ```bash
@@ -154,42 +168,84 @@ mkdir -p ~/.remindai
 
 ## ✅ 验证安装
 
-### 1. 测试 Daemon
+### 1. 测试 CLI 命令
+
+```bash
+# 查看版本
+remindai --version
+# 应输出: 0.1.0
+
+# 查看帮助
+remindai --help
+```
+
+### 2. 测试 Daemon
 
 ```bash
 # 启动 daemon
-node packages/daemon/dist/index.js start
+remindai start
+# 应输出: [remindai] daemon ready (pid=XXXXX)
 
 # 检查状态
-node packages/daemon/dist/index.js status
+remindai status
 # 应输出: [remindai] daemon running (pid=XXXXX, port=7777)
 
-# 停止 daemon
-node packages/daemon/dist/index.js stop
+# 停止 daemon（稍后测试）
+# remindai stop
 ```
 
-### 2. 测试 GUI
+### 3. 测试 GUI
 
 ```bash
 # 启动 GUI
-packages/gui/bin/Debug/net8.0-windows/RemindAI.Gui.exe
+npm run gui:run
 ```
 
 **预期结果**:
 - ✅ 窗口打开
 - ✅ 显示 "已连接" 状态
 - ✅ WebView2 加载成功
-- ✅ 显示空状态界面
+- ✅ 左侧显示会话列表（空）
+- ✅ 右侧显示欢迎界面
 
-### 3. 运行测试
+### 4. 测试通知功能
 
 ```bash
-# 运行验证测试
-bash test-validation.sh
-
-# 运行 E2E 测试
-bash test-e2e.sh
+# 发送测试通知
+remindai notify "测试通知" -m "RemindAI 安装成功！"
 ```
+
+**预期结果**:
+- ✅ 系统托盘显示通知
+- ✅ GUI 中显示通知记录
+
+### 5. 可选：安装多源监控扩展
+
+**VS Code 扩展**
+
+1. 在 VS Code 中打开 `packages/vscode-extension/`。
+2. 使用开发模式加载扩展。
+3. 扩展会读取 `~/.remindai/config.json` 中的 `port` 和 `token`，每个 VS Code 窗口都会注册为独立监控源。
+
+**Chromium / Edge 浏览器扩展**
+
+1. 打开浏览器扩展管理页，启用开发者模式。
+2. 加载 `packages/browser-extension/`。
+3. 在扩展选项页填写 daemon token，并配置 allowlist 域名，例如 `chatgpt.com`、`claude.ai`。
+4. 只有 allowlist 中的页面会开始监控。
+
+### 5. 测试交互式命令
+
+```bash
+# 运行一个需要输入的命令
+remindai run -- bash -c 'read -p "请输入你的名字: " name && echo "你好, $name!"'
+```
+
+**预期结果**:
+1. ✅ GUI 左侧显示新会话
+2. ✅ 右侧显示提示消息 "请输入你的名字:"
+3. ✅ 可以在输入框中输入并发送
+4. ✅ 命令继续执行并显示结果
 
 ---
 
@@ -245,7 +301,17 @@ GUI 配置存储在 `~/.remindai/gui-settings.json`（自动生成）。
 
 ## 🚀 启动 RemindAI
 
-### 方法 1: 手动启动
+### 方法 1: 使用 CLI 命令（推荐）
+
+```bash
+# 启动 daemon
+remindai start
+
+# 启动 GUI
+npm run gui:run
+```
+
+### 方法 2: 手动启动
 
 ```bash
 # 终端 1: 启动 daemon
@@ -255,7 +321,7 @@ node packages/daemon/dist/index.js start
 packages/gui/bin/Debug/net8.0-windows/RemindAI.Gui.exe
 ```
 
-### 方法 2: 使用脚本（推荐）
+### 方法 3: 使用脚本
 
 创建 `start.bat`：
 ```batch
@@ -263,7 +329,7 @@ packages/gui/bin/Debug/net8.0-windows/RemindAI.Gui.exe
 echo Starting RemindAI...
 
 REM 启动 daemon
-start /B node packages/daemon/dist/index.js start
+start /B remindai start
 
 REM 等待 daemon 启动
 timeout /t 2 /nobreak >nul
@@ -276,7 +342,7 @@ echo RemindAI started!
 
 双击运行 `start.bat`。
 
-### 方法 3: 开机自启动（可选）
+### 方法 4: 开机自启动（可选）
 
 1. 按 `Win + R`，输入 `shell:startup`
 2. 创建 `start.bat` 的快捷方式
@@ -305,7 +371,23 @@ node packages/daemon/dist/index.js run -- node test-interactive.js
 
 ## 🐛 故障排查
 
-### 问题 1: Daemon 启动失败
+### 问题 1: `remindai` 命令未找到
+
+**症状**: `'remindai' 不是内部或外部命令`
+
+**解决方案**:
+```bash
+# 进入 daemon 目录
+cd packages/daemon
+
+# 全局链接 CLI 工具
+npm link
+
+# 验证安装
+remindai --version
+```
+
+### 问题 2: Daemon 启动失败
 
 **症状**: `daemon not running`
 
@@ -315,34 +397,73 @@ node packages/daemon/dist/index.js run -- node test-interactive.js
    netstat -ano | findstr :7777
    ```
 2. 修改配置文件中的端口
-3. 检查 Node.js 版本
+3. 检查 Node.js 版本：
+   ```bash
+   node --version  # 应该 >= 18.0.0
+   ```
 
-### 问题 2: GUI 无法连接
+### 问题 3: GUI 无法连接
 
-**症状**: 显示 "未连接"
+**症状**: 显示 "未连接" 或 "连接失败"
 
 **解决方案**:
-1. 确认 daemon 正在运行
-2. 检查防火墙设置
-3. 验证端口和 token 配置
+1. 确认 daemon 正在运行：
+   ```bash
+   remindai status
+   ```
+2. 检查配置文件 `~/.remindai/config.json` 中的端口和 token
+3. 检查防火墙设置（允许 127.0.0.1:7777）
 
-### 问题 3: WebView2 加载失败
+### 问题 4: WebView2 加载失败
 
 **症状**: GUI 显示空白或错误
 
 **解决方案**:
-1. 安装 WebView2 Runtime
-2. 检查 wwwroot 文件是否存在
-3. 查看 Debug 输出
+1. 安装 WebView2 Runtime：
+   - 访问 https://developer.microsoft.com/microsoft-edge/webview2/
+   - 下载并安装 "Evergreen Standalone Installer"
+2. 检查 wwwroot 文件是否存在：
+   ```bash
+   ls packages/gui/bin/Debug/net8.0-windows/wwwroot/
+   ```
+3. 重新构建 GUI：
+   ```bash
+   npm run gui:build
+   ```
 
-### 问题 4: 提示检测不工作
+### 问题 5: 提示检测不工作
 
-**症状**: 没有提示显示
+**症状**: 运行命令后没有提示显示
 
 **解决方案**:
-1. 增加 `promptIdleMs` 值（如 1500）
-2. 检查命令输出格式
-3. 查看 daemon 日志
+1. 增加 `promptIdleMs` 值（编辑 `~/.remindai/config.json`）：
+   ```json
+   {
+     "promptIdleMs": 1500
+   }
+   ```
+2. 重启 daemon：
+   ```bash
+   remindai restart
+   ```
+3. 查看 daemon 日志（检查是否检测到提示）
+
+### 问题 6: npm install 失败
+
+**症状**: Git 权限错误或依赖下载失败
+
+**解决方案**:
+1. 确保网络连接正常
+2. 清理缓存：
+   ```bash
+   npm cache clean --force
+   rm -rf node_modules package-lock.json
+   npm install
+   ```
+3. 使用国内镜像（可选）：
+   ```bash
+   npm config set registry https://registry.npmmirror.com
+   ```
 
 ---
 

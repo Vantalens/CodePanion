@@ -1,224 +1,256 @@
-// 配置 marked
-marked.setOptions({
-    highlight: function(code, lang) {
-        if (lang && hljs.getLanguage(lang)) {
-            return hljs.highlight(code, { language: lang }).value;
-        }
-        return hljs.highlightAuto(code).value;
-    },
-    breaks: true,
-    gfm: true
-});
+marked.setOptions({ breaks: true, gfm: true });
 
-// 消息存储
-let messages = [];
-let currentSessionId = null;
+const state = {
+    connected: false,
+    messages: [],
+    sources: new Map()
+};
 
-// 显示空状态
+function updateConnectionStatus(connected) {
+    state.connected = Boolean(connected);
+    const statusDot = document.querySelector('.status-dot');
+    const statusText = document.querySelector('.status-text');
+    if (!statusDot || !statusText) return;
+    statusDot.dataset.state = state.connected ? 'online' : 'offline';
+    statusText.textContent = state.connected ? '已连接' : '未连接';
+}
+
+function sourceLabel(message) {
+    const source = message.source || 'daemon';
+    const title = message.windowTitle || message.workspace || message.url || '';
+    return title ? `${source} · ${title}` : source;
+}
+
+function normalizeMessage(message) {
+    const now = Date.now();
+    return {
+        id: message.id || message.Id || generateId(),
+        type: message.type || message.Type || 'activity',
+        source: message.source || message.Source || 'daemon',
+        sourceId: message.sourceId || message.SourceId || '',
+        sessionId: message.sessionId || message.SessionId || '',
+        windowTitle: message.windowTitle || message.WindowTitle || '',
+        workspace: message.workspace || message.Workspace || '',
+        url: message.url || message.Url || '',
+        timestamp: Number(message.timestamp || message.Timestamp || now),
+        content: String(message.content || message.Content || message.message || message.Message || ''),
+        options: Array.isArray(message.options) ? message.options : Array.isArray(message.Options) ? message.Options : undefined,
+        level: message.level || message.Level || ''
+    };
+}
+
 function showEmptyState() {
     const container = document.getElementById('chat-container');
     container.innerHTML = `
         <div class="empty-state">
-            <div class="empty-state-icon">💬</div>
-            <div class="empty-state-title">等待会话</div>
+            <div class="empty-state-icon">AI</div>
+            <div class="empty-state-title">等待监控事件</div>
             <div class="empty-state-description">
-                当 AI 需要输入时，对话将显示在这里。<br>
-                您可以在左侧选择不同的会话。
+                CLI、VS Code、Codex、Claude Code 和浏览器扩展的提醒会显示在这里。
             </div>
         </div>
     `;
 }
 
-// 渲染消息
-function renderMessage(message) {
-    const messageDiv = document.createElement('div');
-    messageDiv.className = `message message-${message.type}`;
-    messageDiv.dataset.messageId = message.id;
+function renderMessage(input) {
+    const message = normalizeMessage(input);
+    const item = document.createElement('article');
+    item.className = `message message-${message.type}`;
+    item.dataset.messageId = message.id;
+    if (message.sessionId) item.dataset.sessionId = message.sessionId;
 
-    // 时间戳
-    const timestamp = new Date(message.timestamp).toLocaleTimeString('zh-CN');
-    const timestampDiv = document.createElement('div');
-    timestampDiv.className = 'message-timestamp';
-    timestampDiv.textContent = timestamp;
-    messageDiv.appendChild(timestampDiv);
+    const timestamp = new Date(message.timestamp).toLocaleTimeString('zh-CN', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+    });
 
-    // Markdown 内容
-    const contentDiv = document.createElement('div');
-    contentDiv.className = 'message-content';
+    const meta = document.createElement('div');
+    meta.className = 'message-meta';
 
-    try {
-        contentDiv.innerHTML = marked.parse(message.content);
+    const badge = document.createElement('span');
+    badge.className = `message-badge badge-${message.type}`;
+    badge.textContent = typeLabel(message.type);
 
-        // 为代码块添加语言标签
-        const codeBlocks = contentDiv.querySelectorAll('pre code');
-        codeBlocks.forEach(block => {
-            const pre = block.parentElement;
-            const language = block.className.match(/language-(\w+)/)?.[1] || 'text';
+    const source = document.createElement('span');
+    source.className = 'message-source';
+    source.textContent = sourceLabel(message);
 
-            const header = document.createElement('div');
-            header.className = 'code-block-header';
-            header.innerHTML = `
-                <span class="code-language">${language}</span>
-            `;
+    const time = document.createElement('time');
+    time.className = 'message-time';
+    time.textContent = timestamp;
 
-            pre.insertBefore(header, block);
-        });
-    } catch (error) {
-        console.error('Markdown parsing error:', error);
-        contentDiv.textContent = message.content;
+    meta.appendChild(badge);
+    meta.appendChild(source);
+    meta.appendChild(time);
+    item.appendChild(meta);
+
+    const body = document.createElement('div');
+    body.className = 'message-content';
+    body.innerHTML = DOMPurify.sanitize(marked.parse(message.content));
+    body.querySelectorAll('a').forEach(link => {
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+    });
+    item.appendChild(body);
+
+    if (message.type === 'prompt') {
+        item.appendChild(renderOptions(message.sessionId, message.options || [], message.id));
     }
 
-    messageDiv.appendChild(contentDiv);
-
-    // 如果是提示消息，添加选项按钮
-    if (message.type === 'prompt' && message.options) {
-        const optionsDiv = renderOptions(message.sessionId, message.options);
-        messageDiv.appendChild(optionsDiv);
-    }
-
-    return messageDiv;
+    return item;
 }
 
-// 渲染选项按钮
-function renderOptions(sessionId, options) {
+function typeLabel(type) {
+    switch (type) {
+        case 'prompt': return '等待输入';
+        case 'notification': return '通知';
+        case 'done': return '完成';
+        case 'error': return '错误';
+        case 'user-reply': return '回复';
+        default: return '动态';
+    }
+}
+
+function renderOptions(sessionId, options, messageId) {
     const container = document.createElement('div');
     container.className = 'prompt-options';
+    container.dataset.promptId = sessionId || messageId || generateId();
 
-    // 编号选项
-    if (Array.isArray(options) && options.length > 0) {
-        options.forEach((option, index) => {
-            const button = document.createElement('button');
-            button.className = 'option-button';
-            if (index === 0) {
-                button.classList.add('recommended');
-            }
+    options.forEach((option, index) => {
+        const button = document.createElement('button');
+        button.className = 'option-button';
+        button.type = 'button';
+        button.innerHTML = `<span class="option-number">${index + 1}</span><span class="option-label"></span>`;
+        button.querySelector('.option-label').textContent = String(option);
+        button.addEventListener('click', () => selectOption(sessionId, option, container.dataset.promptId));
+        container.appendChild(button);
+    });
 
-            const numberSpan = document.createElement('span');
-            numberSpan.className = 'option-number';
-            numberSpan.textContent = index + 1;
-
-            const labelSpan = document.createElement('span');
-            labelSpan.className = 'option-label';
-            labelSpan.textContent = option;
-
-            button.appendChild(numberSpan);
-            button.appendChild(labelSpan);
-
-            button.onclick = () => selectOption(sessionId, option);
-            container.appendChild(button);
-        });
-    }
-
-    // 自定义输入框容器
-    const inputContainer = document.createElement('div');
-    inputContainer.className = 'custom-input-container';
-
-    const customInput = document.createElement('input');
-    customInput.type = 'text';
-    customInput.placeholder = 'Tell Claude what to do instead';
-    customInput.className = 'custom-input';
-    customInput.onkeydown = (e) => {
-        if (e.key === 'Enter' && customInput.value.trim()) {
-            selectOption(sessionId, customInput.value.trim());
+    const input = document.createElement('input');
+    input.className = 'custom-input';
+    input.type = 'text';
+    input.placeholder = sessionId ? '输入自定义回复，按 Enter 发送' : '记录本次选择，按 Enter 确认';
+    input.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' && input.value.trim()) {
+            selectOption(sessionId, input.value.trim(), container.dataset.promptId);
         }
-    };
-
-    const hint = document.createElement('div');
-    hint.className = 'custom-input-hint';
-    hint.textContent = 'Press Enter to send';
-
-    inputContainer.appendChild(customInput);
-    inputContainer.appendChild(hint);
-    container.appendChild(inputContainer);
+    });
+    container.appendChild(input);
+    setTimeout(() => input.focus(), 80);
 
     return container;
 }
 
-// 选择选项
-function selectOption(sessionId, value) {
-    // 发送到 C#
-    sendToHost({
-        type: 'reply',
-        sessionId: sessionId,
-        value: value
-    });
-
-    // 添加用户回复消息
-    addMessage({
-        id: generateId(),
-        sessionId: sessionId,
-        timestamp: Date.now(),
-        type: 'user-reply',
-        content: '**回复**: ' + value
-    });
-}
-
-// 添加消息
-function addMessage(message) {
-    messages.push(message);
-    const container = document.getElementById('chat-container');
-    const messageElement = renderMessage(message);
-    container.appendChild(messageElement);
-
-    // 滚动到底部
-    container.scrollTop = container.scrollHeight;
-}
-
-// 清空消息
-function clearMessages() {
-    messages = [];
-    document.getElementById('chat-container').innerHTML = '';
-}
-
-// 发送消息到 C# 宿主
-function sendToHost(message) {
-    if (window.chrome && window.chrome.webview) {
-        window.chrome.webview.postMessage(message);
-    } else {
-        console.log('WebView2 not available, message:', message);
+function selectOption(sessionId, value, promptId) {
+    if (sessionId) {
+        sendToHost({ type: 'reply', sessionId, value: String(value) });
+    } else if (promptId) {
+        sendToHost({ type: 'event-reply', eventId: promptId, value: String(value) });
     }
-}
-
-// 接收来自 C# 的消息
-if (window.chrome && window.chrome.webview) {
-    window.chrome.webview.addEventListener('message', (event) => {
-        const message = event.data;
-        handleMessage(message);
+    addMessage({
+        type: 'user-reply',
+        sessionId,
+        source: 'user',
+        timestamp: Date.now(),
+        content: sessionId ? `**您的回复**：${value}` : `**已记录选择**：${value}`
     });
+    disableOptionsForPrompt(promptId);
 }
 
-// 处理消息
+function disableOptionsForPrompt(promptId) {
+    if (!promptId) return;
+    document.querySelectorAll(`[data-prompt-id="${CSS.escape(promptId)}"] .option-button, [data-prompt-id="${CSS.escape(promptId)}"] .custom-input`)
+        .forEach(el => { el.disabled = true; });
+}
+
+function addMessage(message) {
+    const normalized = normalizeMessage(message);
+    state.messages.push(normalized);
+    const container = document.getElementById('chat-container');
+    if (state.messages.length === 1) container.innerHTML = '';
+    container.appendChild(renderMessage(normalized));
+    requestAnimationFrame(() => container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' }));
+}
+
+function clearMessages() {
+    state.messages = [];
+    showEmptyState();
+}
+
 function handleMessage(message) {
     switch (message.type) {
+        case 'connection-status':
+            updateConnectionStatus(message.connected);
+            break;
         case 'add-message':
-            addMessage(message.data);
+            if (message.data) addMessage(message.data);
+            break;
+        case 'monitor-event':
+            if (message.data) addMessage({
+                ...message.data,
+                type: message.data.type || message.data.Type || 'activity',
+                content: message.data.content || message.data.Content || message.data.title || message.data.Title || ''
+            });
+            break;
+        case 'source-registered':
+            if (message.source) {
+                const sourceId = message.source.id || message.source.Id || generateId();
+                state.sources.set(sourceId, message.source);
+                addMessage({
+                    type: 'activity',
+                    source: message.source.kind || message.source.Kind,
+                    sourceId,
+                    windowTitle: message.source.windowTitle || message.source.WindowTitle,
+                    workspace: message.source.workspace || message.source.Workspace,
+                    timestamp: message.source.lastSeenAt || message.source.LastSeenAt || Date.now(),
+                    content: `监控源已连接：**${message.source.name || message.source.Name || '未命名来源'}**`
+                });
+            }
+            break;
+        case 'session-registered':
+            if (message.session) addMessage({
+                type: 'activity',
+                source: message.session.source || 'cli',
+                sourceId: message.session.sourceId,
+                sessionId: message.session.id,
+                windowTitle: message.session.windowTitle,
+                workspace: message.session.workspace,
+                timestamp: message.session.startedAt || Date.now(),
+                content: `会话已开始：\`${message.session.command}\``
+            });
             break;
         case 'clear':
             clearMessages();
             break;
-        case 'init':
-            // 初始化，加载历史消息
-            if (message.messages) {
-                message.messages.forEach(msg => addMessage(msg));
-            }
-            break;
         default:
-            console.log('Unknown message type:', message.type);
+            console.log('Unknown message type:', message.type, message);
     }
 }
 
-// 工具函数
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+function sendToHost(message) {
+    if (window.chrome && window.chrome.webview) {
+        window.chrome.webview.postMessage(message);
+    }
 }
 
 function generateId() {
-    return Date.now().toString(36) + Math.random().toString(36).substr(2);
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-// 初始化
-console.log('RemindAI Chat initialized');
-showEmptyState();
-sendToHost({ type: 'ready' });
+function initApp() {
+    showEmptyState();
+    updateConnectionStatus(false);
+    if (window.chrome && window.chrome.webview) {
+        window.chrome.webview.addEventListener('message', event => handleMessage(event.data));
+    }
+    sendToHost({ type: 'ready' });
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initApp);
+} else {
+    initApp();
+}
+
+window.RemindAI = { addMessage, clearMessages, updateConnectionStatus };

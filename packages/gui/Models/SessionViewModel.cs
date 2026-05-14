@@ -13,6 +13,10 @@ namespace RemindAI.Gui.Models
         public string Command { get; set; }
         public string[] Args { get; set; }
         public string? Cwd { get; set; }
+        public string? Source { get; set; }
+        public string? SourceId { get; set; }
+        public string? WindowTitle { get; set; }
+        public string? Workspace { get; set; }
         public long StartedAt { get; set; }
 
         public string Status
@@ -84,6 +88,10 @@ namespace RemindAI.Gui.Models
             Command = info.Command;
             Args = info.Args ?? Array.Empty<string>();
             Cwd = info.Cwd;
+            Source = info.Source;
+            SourceId = info.SourceId;
+            WindowTitle = info.WindowTitle;
+            Workspace = info.Workspace;
             StartedAt = info.StartedAt;
             _status = info.Status;
             _lastPrompt = info.LastPrompt;
@@ -104,6 +112,10 @@ namespace RemindAI.Gui.Models
         public string Command { get; set; } = "";
         public string[]? Args { get; set; }
         public string? Cwd { get; set; }
+        public string? Source { get; set; }
+        public string? SourceId { get; set; }
+        public string? WindowTitle { get; set; }
+        public string? Workspace { get; set; }
         public long StartedAt { get; set; }
         public string Status { get; set; } = "running";
         public int? ExitCode { get; set; }

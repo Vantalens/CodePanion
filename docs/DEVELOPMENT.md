@@ -161,6 +161,31 @@ RemindAI/
 
 ## 开发工作流
 
+### 当前质量门禁
+
+任何涉及 daemon、GUI、扩展或文档的变更，提交前至少运行：
+
+```bash
+npm run build
+npm run validate:extensions
+dotnet build packages/gui/RemindAI.Gui.csproj -c Release
+git diff --check
+```
+
+涉及通知、编码或 WebView 的变更还必须手动验证：
+
+- 中文通知标题和正文在 daemon 日志、GUI 日志、WebView 中不乱码。
+- GUI 在线时同时收到系统通知和 GUI 时间线消息。
+- GUI 离线时系统通知仍可触发，失败时日志有明确 warning。
+- WebView 断网后仍能加载本地 `chat.html`、`chat.css`、`chat.js` 和 `vendor/remindai-markdown.js`。
+- Markdown 内容必须经过安全渲染，不能执行 `<script>`、`onerror=` 等 HTML。
+
+### 多源监控开发边界
+
+新增监控来源时优先使用 `/sources/register` 和 `/events`，不要直接复用 PTY 会话协议。来源应提供 `kind`、`name`、`windowTitle` 或 `workspace`，GUI 依靠这些字段区分多窗口。
+
+默认禁止系统级 OCR、全局窗口内容读取或无 allowlist 的浏览器全文采集。需要更强监控能力时，应先为具体工具实现插件、扩展或外部适配器。
+
 ### 1. 创建功能分支
 
 ```bash
@@ -231,7 +256,7 @@ const sessionId = 'abc123';
 
 // 常量：UPPER_SNAKE_CASE
 const MAX_SESSIONS = 10;
-const DEFAULT_PORT = 3721;
+const DEFAULT_PORT = 7777;
 
 // 私有成员：下划线前缀（可选）
 class Example {
@@ -449,10 +474,10 @@ describe('API Integration', () => {
     await server.close();
   });
 
-  describe('POST /api/notify', () => {
+  describe('POST /notify', () => {
     it('should send notification', async () => {
       const response = await request(server)
-        .post('/api/notify')
+        .post('/notify')
         .send({ message: 'Test notification' })
         .expect(200);
 
@@ -462,7 +487,7 @@ describe('API Integration', () => {
 
     it('should validate request body', async () => {
       await request(server)
-        .post('/api/notify')
+        .post('/notify')
         .send({})  // 缺少 message
         .expect(400);
     });
@@ -534,10 +559,10 @@ tail -f ~/.remindai/logs/daemon.log
 
 ```bash
 # 使用 curl
-curl -v http://127.0.0.1:3721/api/status
+curl -v http://127.0.0.1:7777/health
 
 # 使用 httpie
-http GET http://127.0.0.1:3721/api/status
+http GET http://127.0.0.1:7777/health
 ```
 
 #### 调试 WebSocket
@@ -545,7 +570,7 @@ http GET http://127.0.0.1:3721/api/status
 ```bash
 # 使用 wscat
 npm install -g wscat
-wscat -c ws://127.0.0.1:3721
+wscat -c ws://127.0.0.1:7777
 
 # 发送消息
 > {"type":"subscribe"}

@@ -69,17 +69,12 @@ npm install
 npm run build
 ```
 
-#### 4. 全局安装（可选）
-
-```bash
-npm install -g packages/daemon
-```
-
-或者使用 npm link：
+#### 4. 全局安装 CLI 工具
 
 ```bash
 cd packages/daemon
 npm link
+cd ../..
 ```
 
 #### 5. 验证安装
@@ -88,7 +83,9 @@ npm link
 remindai --version
 ```
 
-应该输出：`remindai version 0.1.0`
+应该输出：`0.1.0`
+
+详细安装说明请参考 [INSTALL.md](../INSTALL.md)。
 
 ---
 
@@ -104,9 +101,8 @@ remindai start
 
 **输出示例**：
 ```
-✓ RemindAI daemon started successfully
-  PID: 12345
-  Port: 3721
+[remindai] starting daemon (child pid=12345)...
+[remindai] daemon ready (pid=12345)
 ```
 
 **验证守护进程状态**：
@@ -116,10 +112,7 @@ remindai status
 
 **输出示例**：
 ```
-✓ RemindAI daemon is running
-  PID: 12345
-  Uptime: 5 minutes
-  Active sessions: 0
+[remindai] daemon running (pid=12345, port=7777)
 ```
 
 ---
@@ -132,7 +125,7 @@ GUI 界面提供可视化的提示响应功能。
 npm run gui:run
 ```
 
-GUI 会自动连接到守护进程，并在系统托盘显示图标。
+GUI 会自动连接到守护进程，并显示实时会话信息。
 
 ---
 
@@ -141,23 +134,34 @@ GUI 会自动连接到守护进程，并在系统托盘显示图标。
 使用 `remindai run` 包装你想监控的命令：
 
 ```bash
-remindai run -- claude code
+remindai run -- bash -c 'read -p "请输入你的名字: " name && echo "你好, $name!"'
 ```
 
 **发生了什么？**
 
-1. RemindAI 启动 Claude Code
-2. 当 Claude 需要确认时（如 "Modify file.ts? (y/n)"）
-3. RemindAI 检测到提示
-4. 发送桌面通知
-5. 在 GUI 中显示对话框
-6. 你点击 "Yes" 或 "No"
-7. 响应自动发送给 Claude
-8. Claude 继续执行
+1. RemindAI 启动命令并监控输出
+2. 当检测到提示 "请输入你的名字:" 时
+3. RemindAI 检测到提示模式
+4. 发送桌面通知（如果启用）
+5. 在 GUI 中显示提示对话框
+6. 你在输入框中输入名字并点击发送
+7. 响应自动发送给命令
+8. 命令继续执行并显示结果
 
 ---
 
 ## 使用场景
+
+### 多窗口监控
+
+RemindAI 支持多源事件中心：
+
+- 使用 `remindai run --` 启动的 CLI 会话会被作为 `cli` 来源监控。
+- VS Code 扩展会把每个 VS Code 窗口注册为独立来源。
+- 浏览器扩展会在 allowlist 页面检测 Web 对话完成或错误状态。
+- Codex / Claude Code 多窗口优先通过 CLI/PTTY 或 VS Code 终端来源区分。
+
+GUI 会在时间线中显示来源、窗口标题、工作区和事件类型。多个来源同时触发时，回复会按 `sessionId` 写回对应会话。
 
 ### 场景 1：使用 Claude Code
 
@@ -251,13 +255,14 @@ About to drop table 'users'. Are you sure? (yes/no)
 
 启动守护进程。
 
-**选项**：
-- `--port <port>`: 指定端口（默认：3721）
-- `--log-level <level>`: 日志级别（debug/info/warn/error）
-
-**示例**：
 ```bash
-remindai start --port 8080 --log-level debug
+remindai start
+```
+
+**输出**：
+```
+[remindai] starting daemon (child pid=12345)...
+[remindai] daemon ready (pid=12345)
 ```
 
 ---
@@ -272,6 +277,16 @@ remindai stop
 
 ---
 
+### `remindai restart`
+
+重启守护进程。
+
+```bash
+remindai restart
+```
+
+---
+
 ### `remindai status`
 
 查看守护进程状态。
@@ -282,11 +297,7 @@ remindai status
 
 **输出**：
 ```
-✓ RemindAI daemon is running
-  PID: 12345
-  Uptime: 1 hour 23 minutes
-  Active sessions: 2
-  Port: 3721
+[remindai] daemon running (pid=12345, port=7777)
 ```
 
 ---
@@ -300,57 +311,46 @@ remindai status
 **示例**：
 ```bash
 # 正确 ✓
-remindai run -- claude code
+remindai run -- bash -c 'read -p "输入: " var && echo $var'
 remindai run -- npm install
-remindai run -- git commit -m "message"
+remindai run -- git commit
 
 # 错误 ✗
-remindai run claude code  # 缺少 --
+remindai run bash -c 'read -p "输入: " var'  # 缺少 --
 ```
 
 ---
 
-### `remindai notify <message>`
+### `remindai notify <title> [options]`
 
 发送测试通知。
 
 ```bash
-remindai notify "Hello from RemindAI!"
+remindai notify "测试通知"
 ```
 
 **选项**：
-- `--title <title>`: 通知标题
-- `--type <type>`: 通知类型（info/warning/error）
+- `-m, --message <text>`: 通知消息内容
+- `-l, --level <level>`: 通知级别（info/prompt/done/error）
+- `-s, --source <source>`: 通知来源
 
 **示例**：
 ```bash
-remindai notify "Build completed" --title "CI/CD" --type info
+remindai notify "构建完成" -m "项目已成功构建" -l done
+remindai notify "错误" -m "构建失败" -l error
 ```
 
 ---
 
-### `remindai reply <sessionId> <input>`
+### `remindai reply <sessionId> <text>`
 
 向指定会话发送响应（高级用法）。
 
 ```bash
-remindai reply abc123 "y"
+remindai reply abc123 "yes"
 ```
 
----
-
-### `remindai install`
-
-安装 RemindAI 为系统服务（自动启动）。
-
-```bash
-remindai install
-```
-
-**支持的系统**：
-- Windows: 使用 NSSM
-- macOS: 使用 launchd
-- Linux: 使用 systemd
+**说明**：通常不需要手动使用此命令，GUI 会自动调用。
 
 ---
 
@@ -369,114 +369,97 @@ RemindAI 的配置文件位于：
 
 ```json
 {
-  "daemon": {
-    "port": 3721,
-    "host": "127.0.0.1",
-    "logLevel": "info"
-  },
-  "notification": {
+  "port": 7777,
+  "token": "随机生成的32字符token",
+  "promptIdleMs": 800,
+  "toast": {
     "enabled": true,
-    "sound": true,
-    "timeout": 10
+    "soundOnPrompt": true,
+    "soundOnDone": true
   },
-  "promptDetection": {
-    "patterns": [
-      {
-        "name": "yesno-parens",
-        "regex": "\\(y/n\\)",
-        "type": "yesno"
-      },
-      {
-        "name": "yesno-brackets-yes",
-        "regex": "\\[Y/n\\]",
-        "type": "yesno"
-      },
-      {
-        "name": "yesno-brackets-no",
-        "regex": "\\[y/N\\]",
-        "type": "yesno"
-      },
-      {
-        "name": "press-enter",
-        "regex": "Press .* to continue",
-        "type": "confirm"
-      },
-      {
-        "name": "enter-input",
-        "regex": "Enter .*:",
-        "type": "input"
-      }
-    ],
-    "bufferSize": 4096,
-    "timeout": 300
-  },
-  "gui": {
-    "autoLaunch": false,
-    "theme": "system"
-  }
+  "templates": [
+    {
+      "label": "继续",
+      "text": "继续\n"
+    },
+    {
+      "label": "全部接受",
+      "text": "1\n"
+    },
+    {
+      "label": "取消",
+      "text": "no\n"
+    }
+  ]
 }
 ```
 
 ### 配置说明
 
-#### daemon 配置
+#### 核心配置
 
 | 选项 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `port` | number | 3721 | 守护进程监听端口 |
-| `host` | string | "127.0.0.1" | 监听地址（不要改为 0.0.0.0） |
-| `logLevel` | string | "info" | 日志级别 |
+| `port` | number | 7777 | HTTP/WebSocket 服务端口 |
+| `token` | string | 随机生成 | API 认证 token（32字符） |
+| `promptIdleMs` | number | 800 | 提示检测空闲时间（毫秒） |
 
-#### notification 配置
-
-| 选项 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `enabled` | boolean | true | 是否启用通知 |
-| `sound` | boolean | true | 是否播放通知声音 |
-| `timeout` | number | 10 | 通知显示时长（秒） |
-
-#### promptDetection 配置
+#### toast 通知配置
 
 | 选项 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `patterns` | array | 见上 | 提示检测模式列表 |
-| `bufferSize` | number | 4096 | 输出缓冲区大小（字节） |
-| `timeout` | number | 300 | 等待输入超时（秒） |
+| `enabled` | boolean | true | 是否启用桌面通知 |
+| `soundOnPrompt` | boolean | true | 检测到提示时播放声音 |
+| `soundOnDone` | boolean | true | 命令完成时播放声音 |
 
-#### gui 配置
+#### templates 快捷回复模板
 
-| 选项 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `autoLaunch` | boolean | false | 是否随系统启动 |
-| `theme` | string | "system" | 主题（light/dark/system） |
+快捷回复模板允许你预设常用的响应。
+
+**示例**：
+```json
+{
+  "templates": [
+    {
+      "label": "是",
+      "text": "y\n"
+    },
+    {
+      "label": "否",
+      "text": "n\n"
+    },
+    {
+      "label": "继续",
+      "text": "\n"
+    }
+  ]
+}
+```
 
 ### 自定义提示模式
 
-你可以添加自定义的提示检测模式。
+RemindAI 使用智能算法检测命令行提示。如果某些提示未被检测到，你可以调整 `promptIdleMs` 参数。
 
-**示例**：添加检测 "Continue?" 的模式
+**示例**：增加检测等待时间
 
 编辑 `~/.remindai/config.json`：
 
 ```json
 {
-  "promptDetection": {
-    "patterns": [
-      // ... 现有模式 ...
-      {
-        "name": "custom-continue",
-        "regex": "Continue\\?",
-        "type": "yesno"
-      }
-    ]
-  }
+  "promptIdleMs": 1500
 }
 ```
 
-**模式类型**：
-- `yesno`: 是/否问题（响应 "y" 或 "n"）
-- `confirm`: 确认（响应 Enter 键）
-- `input`: 自定义输入（响应任意文本）
+**说明**：
+- `promptIdleMs` 是检测提示前等待的空闲时间（毫秒）
+- 默认值 800ms 适合大多数情况
+- 如果命令输出很快，可以减少到 500ms
+- 如果提示检测不准确，可以增加到 1500ms 或更高
+
+重启 daemon 使配置生效：
+```bash
+remindai restart
+```
 
 ---
 
@@ -645,10 +628,10 @@ rm -rf ~/.remindai
 1. 检查端口是否被占用：
    ```bash
    # Windows
-   netstat -ano | findstr :3721
+   netstat -ano | findstr :7777
    
    # macOS/Linux
-   lsof -i :3721
+   lsof -i :7777
    ```
 
 2. 尝试使用不同端口：

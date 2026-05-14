@@ -2,15 +2,39 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RemindAI Chat</title>
-    <link rel="stylesheet" href="chat.css">
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11/highlight.min.js"></script>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github-dark.min.css">
+    <title>RemindAI - 多源提醒中心</title>
+    <link rel="stylesheet" href="https://remindai.local/chat.css">
+    <script src="https://remindai.local/vendor/remindai-markdown.js"></script>
 </head>
 <body>
-    <div id="chat-container"></div>
-    <script src="chat.js"></script>
+    <div id="app">
+        <header id="app-header">
+            <div class="header-content">
+                <div class="header-left">
+                    <div class="app-logo">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                            <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                            <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <h1 class="app-title">RemindAI</h1>
+                        <div class="app-subtitle">多源提醒中心</div>
+                    </div>
+                </div>
+                <div class="header-right">
+                    <div class="status-indicator">
+                        <span class="status-dot"></span>
+                        <span class="status-text">已连接</span>
+                    </div>
+                </div>
+            </div>
+        </header>
+        <main id="chat-container"></main>
+    </div>
+    <script src="https://remindai.local/chat.js"></script>
 </body>
 </html>
