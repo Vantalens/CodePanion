@@ -18,19 +18,12 @@ const MonitorsSchema = z
   .object({
     cli: z.boolean().default(true),
     vscode: z.boolean().default(true),
-    browserExtension: z.boolean().default(true),
-    browserAllowlist: z.array(z.string()).default([
-      'chat.openai.com',
-      'chatgpt.com',
-      'claude.ai',
-      'github.com',
-    ]),
+    codexDesktop: z.boolean().default(true),
   })
   .default({
     cli: true,
     vscode: true,
-    browserExtension: true,
-    browserAllowlist: ['chat.openai.com', 'chatgpt.com', 'claude.ai', 'github.com'],
+    codexDesktop: true,
   });
 
 const ConfigSchema = z.object({

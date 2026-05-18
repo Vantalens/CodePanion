@@ -4,36 +4,54 @@
     <meta charset="UTF-8">
     <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RemindAI - 多源提醒中心</title>
+    <title>RemindAI - 对话</title>
     <link rel="stylesheet" href="https://remindai.local/chat.css">
     <script src="https://remindai.local/vendor/remindai-markdown.js"></script>
 </head>
 <body>
-    <div id="app">
-        <header id="app-header">
-            <div class="header-content">
-                <div class="header-left">
-                    <div class="app-logo">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                            <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                            <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                        </svg>
-                    </div>
-                    <div>
-                        <h1 class="app-title">RemindAI</h1>
-                        <div class="app-subtitle">多源提醒中心</div>
-                    </div>
-                </div>
-                <div class="header-right">
-                    <div class="status-indicator">
-                        <span class="status-dot"></span>
-                        <span class="status-text">已连接</span>
-                    </div>
+    <div id="app-shell">
+        <aside id="conversation-sidebar">
+            <div class="brand-row">
+                <div class="app-mark">AI</div>
+                <div>
+                    <h1>RemindAI</h1>
+                    <p>任务提醒</p>
                 </div>
             </div>
-        </header>
-        <main id="chat-container"></main>
+            <div class="sidebar-tools">
+                <button class="tool-button active" type="button" data-view="active">当前</button>
+                <button class="tool-button" type="button" data-view="waiting">等待</button>
+                <button class="tool-button" type="button" data-view="code">代码</button>
+            </div>
+            <div id="conversation-list" class="conversation-list"></div>
+        </aside>
+
+        <main id="conversation-main">
+            <header id="conversation-header">
+                <div>
+                    <div class="crumb">RemindAI</div>
+                    <h2 id="conversation-title">当前任务</h2>
+                </div>
+                <div class="status-indicator">
+                    <span class="status-dot"></span>
+                    <span class="status-text">未连接</span>
+                </div>
+            </header>
+            <section id="chat-container" aria-live="polite"></section>
+        </main>
+
+        <aside id="code-browser">
+            <header class="code-header">
+                <div>
+                    <h2>代码 Artifact</h2>
+                    <p id="code-count">0 段代码</p>
+                </div>
+            </header>
+            <div id="code-list" class="code-list"></div>
+            <article id="code-preview" class="code-preview">
+                <div class="empty-code">选中的任务没有代码。</div>
+            </article>
+        </aside>
     </div>
     <script src="https://remindai.local/chat.js"></script>
 </body>

@@ -130,6 +130,12 @@ namespace RemindAI.Gui.Models
         public string? FullOutput { get; set; }  // 新增
     }
 
+    public class SessionOutputEventArgs : EventArgs
+    {
+        public string SessionId { get; set; } = "";
+        public string Chunk { get; set; } = "";
+    }
+
     public class SessionExitedEventArgs : EventArgs
     {
         public string SessionId { get; set; } = "";

@@ -17,7 +17,9 @@ export const SourceKindSchema = z.enum([
   'vscode',
   'claude-code',
   'codex',
-  'browser-extension',
+  'codex-desktop',
+  'cursor',
+  'antigravity',
   'external',
 ]);
 
@@ -63,6 +65,55 @@ export interface MonitorSource {
   lastSeenAt: number;
   status: 'online' | 'offline';
 }
+
+export const WorkflowItemKindSchema = z.enum([
+  'message',
+  'tool_call',
+  'command',
+  'file_change',
+  'artifact',
+  'prompt',
+  'status',
+]);
+
+export const WorkflowStatusSchema = z.enum([
+  'running',
+  'waiting',
+  'done',
+  'error',
+  'paused',
+]);
+
+export const WorkflowItemSchema = z.object({
+  id: z.string(),
+  threadId: z.string(),
+  source: z.string().default('codex-desktop'),
+  kind: WorkflowItemKindSchema,
+  role: z.string().optional(),
+  title: z.string().optional(),
+  content: z.string().default(''),
+  language: z.string().optional(),
+  filePath: z.string().optional(),
+  status: WorkflowStatusSchema.optional(),
+  timestamp: z.number().int().positive(),
+});
+export type WorkflowItem = z.infer<typeof WorkflowItemSchema>;
+
+export const WorkflowThreadSchema = z.object({
+  id: z.string(),
+  source: z.string().default('codex-desktop'),
+  title: z.string(),
+  workspace: z.string().optional(),
+  status: WorkflowStatusSchema.default('running'),
+  updatedAt: z.number().int().positive(),
+  itemCount: z.number().int().nonnegative().default(0),
+});
+export type WorkflowThread = z.infer<typeof WorkflowThreadSchema>;
+
+export type WorkflowSnapshot = {
+  threads: WorkflowThread[];
+  items: WorkflowItem[];
+};
 
 export const RegisterSessionRequestSchema = z.object({
   command: z.string().min(1),
@@ -118,4 +169,6 @@ export type WsServerEvent =
   | { type: 'source-registered'; source: MonitorSource }
   | { type: 'source-disconnected'; sourceId: string }
   | { type: 'monitor-event'; event: MonitorEvent & { id: string; timestamp: number } }
+  | { type: 'workflow-snapshot'; snapshot: WorkflowSnapshot }
+  | { type: 'workflow-event'; event: { action: 'thread-upsert' | 'item-append' | 'status'; thread?: WorkflowThread; item?: WorkflowItem } }
   | { type: 'hello'; pid: number; version: string };

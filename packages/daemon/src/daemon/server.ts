@@ -5,6 +5,8 @@ import type { Config } from '../config.js';
 import { Notifier } from './notifier.js';
 import { SessionManager } from './sessionManager.js';
 import { SourceManager } from './sourceManager.js';
+import { WorkflowManager } from './workflowManager.js';
+import { CodexDesktopAdapter } from '../adapters/codexDesktopAdapter.js';
 import {
   MonitorEventSchema,
   NotifyRequestSchema,
@@ -25,6 +27,91 @@ export function createServer(cfg: Config): {
   const notifier = new Notifier(cfg);
   const sessions = new SessionManager();
   const sources = new SourceManager();
+  const workflows = new WorkflowManager();
+  const codexAdapter = new CodexDesktopAdapter(workflows);
+
+  sessions.onEvent((event) => {
+    const now = Date.now();
+    if (event.type === 'session-registered') {
+      workflows.upsertThread({
+        id: `session:${event.session.id}`,
+        source: event.session.source ?? 'cli',
+        title: event.session.command,
+        workspace: event.session.cwd ?? event.session.workspace,
+        status: 'running',
+        updatedAt: event.session.startedAt,
+        itemCount: 0,
+      });
+      workflows.appendItem({
+        id: `session:${event.session.id}:registered`,
+        threadId: `session:${event.session.id}`,
+        source: event.session.source ?? 'cli',
+        kind: 'status',
+        title: '会话开始',
+        content: `${event.session.command} ${event.session.args.join(' ')}`.trim(),
+        status: 'running',
+        timestamp: event.session.startedAt,
+      });
+    } else if (event.type === 'session-output') {
+      workflows.appendItem({
+        id: `session:${event.sessionId}:output:${now}:${Buffer.byteLength(event.chunk, 'utf8')}`,
+        threadId: `session:${event.sessionId}`,
+        source: 'cli',
+        kind: 'command',
+        title: '终端输出',
+        content: event.chunk,
+        timestamp: now,
+      });
+    } else if (event.type === 'session-prompt') {
+      workflows.appendItem({
+        id: `session:${event.sessionId}:prompt:${now}`,
+        threadId: `session:${event.sessionId}`,
+        source: 'cli',
+        kind: 'prompt',
+        title: '等待输入',
+        content: event.fullOutput || event.lastLines,
+        status: 'waiting',
+        timestamp: now,
+      });
+    } else if (event.type === 'session-exited') {
+      workflows.appendItem({
+        id: `session:${event.sessionId}:exit:${now}`,
+        threadId: `session:${event.sessionId}`,
+        source: 'cli',
+        kind: 'status',
+        title: '会话结束',
+        content: `退出码：${event.exitCode}`,
+        status: event.exitCode === 0 ? 'done' : 'error',
+        timestamp: now,
+      });
+    }
+  });
+
+  sources.onEvent((event) => {
+    if (event.type !== 'monitor-event') return;
+    const monitor = event.event;
+    const threadId = `source:${monitor.sourceId ?? monitor.source ?? 'external'}`;
+    const timestamp = monitor.timestamp ?? Date.now();
+    workflows.upsertThread({
+      id: threadId,
+      source: monitor.source ?? 'external',
+      title: monitor.windowTitle ?? monitor.title ?? monitor.source ?? '外部事件',
+      workspace: monitor.workspace,
+      status: monitor.type === 'prompt' ? 'waiting' : monitor.type === 'error' ? 'error' : monitor.type === 'done' ? 'done' : 'running',
+      updatedAt: timestamp,
+      itemCount: 0,
+    });
+    workflows.appendItem({
+      id: `monitor:${event.event.id}`,
+      threadId,
+      source: monitor.source ?? 'external',
+      kind: monitor.type === 'prompt' ? 'prompt' : monitor.type === 'done' || monitor.type === 'error' ? 'status' : 'message',
+      title: monitor.title,
+      content: monitor.content,
+      status: monitor.type === 'prompt' ? 'waiting' : monitor.type === 'error' ? 'error' : monitor.type === 'done' ? 'done' : undefined,
+      timestamp,
+    });
+  });
 
   // 存储所有观察者 WebSocket 连接
   const observerSockets = new Set<WebSocket>();
@@ -88,6 +175,23 @@ export function createServer(cfg: Config): {
 
   app.get('/sources', (_req, res) => {
     res.json(sources.list());
+  });
+
+  app.get('/workflow/threads', (_req, res) => {
+    res.json(workflows.snapshot().threads);
+  });
+
+  app.get('/workflow/threads/:id', (req, res) => {
+    const snapshot = workflows.threadSnapshot(req.params.id);
+    if (!snapshot) {
+      res.status(404).json({ error: 'thread not found' });
+      return;
+    }
+    res.json(snapshot);
+  });
+
+  app.get('/workflow/snapshot', (_req, res) => {
+    res.json(workflows.snapshot());
   });
 
   app.post('/events', (req, res) => {
@@ -250,11 +354,12 @@ export function createServer(cfg: Config): {
     new Promise((resolve) => {
       const httpServer = app.listen(cfg.port, '127.0.0.1', () => {
         logger.info({ port: cfg.port }, 'http listening');
+        if (cfg.monitors.codexDesktop) codexAdapter.start();
         resolve(httpServer);
       });
 
       const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
-      wss.on('connection', (ws, req) => handleWs(ws, req, cfg, sessions, sources, observerSockets));
+      wss.on('connection', (ws, req) => handleWs(ws, req, cfg, sessions, sources, workflows, observerSockets));
     });
 
   return { start, notifier, sessions };
@@ -286,6 +391,7 @@ function handleWs(
   cfg: Config,
   sessions: SessionManager,
   sources: SourceManager,
+  workflows: WorkflowManager,
   observerSockets: Set<WebSocket>,
 ): void {
   const url = new URL(req.url ?? '/ws', 'http://localhost');
@@ -315,14 +421,19 @@ function handleWs(
     const unsubscribeSources = sources.onEvent((event) => {
       if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(event));
     });
+    const unsubscribeWorkflows = workflows.onEvent((event) => {
+      if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(event));
+    });
 
     ws.on('close', () => {
       unsubscribeSessions();
       unsubscribeSources();
+      unsubscribeWorkflows();
       observerSockets.delete(ws);
     });
 
     ws.send(JSON.stringify({ type: 'hello', pid: process.pid, version: '0.1.0' }));
+    ws.send(JSON.stringify({ type: 'workflow-snapshot', snapshot: workflows.snapshot() }));
   }
 
   ws.on('error', (err) => logger.warn({ err }, 'ws error'));

@@ -35,11 +35,14 @@ namespace RemindAI.Gui
             _daemonClient.Connected += OnDaemonConnected;
             _daemonClient.Disconnected += OnDaemonDisconnected;
             _daemonClient.SessionRegistered += OnSessionRegistered;
+            _daemonClient.SessionOutput += OnSessionOutput;
             _daemonClient.SessionPrompt += OnSessionPrompt;
             _daemonClient.SessionExited += OnSessionExited;
             _daemonClient.NotificationReceived += OnNotificationReceived;
             _daemonClient.SourceRegistered += OnSourceRegistered;
             _daemonClient.MonitorEventReceived += OnMonitorEventReceived;
+            _daemonClient.WorkflowSnapshotReceived += OnWorkflowSnapshotReceived;
+            _daemonClient.WorkflowEventReceived += OnWorkflowEventReceived;
             _daemonClient.LogMessage += OnLogMessage;
 
             Loaded += MainWindow_Loaded;
@@ -108,6 +111,18 @@ namespace RemindAI.Gui
 
         private async System.Threading.Tasks.Task ConnectToDaemon()
         {
+            var connected = await _daemonClient.ConnectAsync();
+            if (connected) return;
+
+            AddLog("未检测到 daemon，正在后台自动启动...");
+            var started = await DaemonProcessManager.EnsureStartedAsync(_daemonClient.DaemonUrl, AddLog);
+            if (!started)
+            {
+                AddLog("daemon 自动启动失败，请检查 Node.js 或发布包完整性。");
+                return;
+            }
+
+            _daemonClient.ReloadConfig();
             await _daemonClient.ConnectAsync();
         }
 
@@ -259,6 +274,32 @@ namespace RemindAI.Gui
             });
         }
 
+        private void OnSessionOutput(object? sender, SessionOutputEventArgs e)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                if (string.IsNullOrWhiteSpace(e.Chunk)) return;
+
+                var session = FindSession(e.SessionId);
+                SendMessageToWeb(new
+                {
+                    type = "add-message",
+                    data = new
+                    {
+                        id = Guid.NewGuid().ToString(),
+                        type = "output",
+                        source = session?.Source ?? "cli",
+                        sourceId = session?.SourceId,
+                        sessionId = e.SessionId,
+                        windowTitle = session?.WindowTitle,
+                        workspace = session?.Workspace,
+                        timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds(),
+                        content = e.Chunk
+                    }
+                });
+            });
+        }
+
         private void OnSessionExited(object? sender, SessionExitedEventArgs e)
         {
             Dispatcher.Invoke(() =>
@@ -329,6 +370,30 @@ namespace RemindAI.Gui
                 {
                     type = "monitor-event",
                     data = e.Event
+                });
+            });
+        }
+
+        private void OnWorkflowSnapshotReceived(object? sender, JToken snapshot)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                SendMessageToWeb(new
+                {
+                    type = "workflow-snapshot",
+                    snapshot
+                });
+            });
+        }
+
+        private void OnWorkflowEventReceived(object? sender, JToken workflowEvent)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                SendMessageToWeb(new
+                {
+                    type = "workflow-event",
+                    data = workflowEvent
                 });
             });
         }

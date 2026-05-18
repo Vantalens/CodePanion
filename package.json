@@ -7,7 +7,8 @@
     "packages/daemon"
   ],
   "scripts": {
-    "build": "npm run build -w packages/daemon",
+    "build": "npm run build -w packages/daemon && npm run build:daemon-bundle",
+    "build:daemon-bundle": "node scripts/build-daemon-bundle.mjs",
     "dev:daemon": "npm run dev -w packages/daemon",
     "gui:run": "dotnet run --project packages/gui/RemindAI.Gui.csproj",
     "gui:build": "dotnet build packages/gui/RemindAI.Gui.csproj -c Release",

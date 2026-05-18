@@ -1,6 +1,6 @@
 # RemindAI 开发指南
 
-本文档面向希望参与 RemindAI 开发或基于 RemindAI 进行二次开发的开发者。
+本文档面向希望参与 RemindAI 开发或基于 RemindAI 进行二次开发的开发者。RemindAI 当前定位为个人本地 AI 工作流中控台，开发优先级应先服务“统一接入、状态总览、提醒、上下文查看和接管”，再逐步扩展到本地工作流编排。
 
 ## 目录
 
@@ -20,7 +20,7 @@
 ### 前置要求
 
 - **Node.js**: >= 18.0.0
-- **.NET SDK**: >= 6.0 (GUI 开发)
+- **.NET SDK**: >= 8.0 (GUI 开发)
 - **Git**: 最新版本
 - **编辑器**: VS Code (推荐) 或其他
 
@@ -122,18 +122,21 @@ RemindAI/
 │   │   │   │   ├── notify.ts  # notify 命令
 │   │   │   │   ├── reply.ts   # reply 命令
 │   │   │   │   └── install.ts # install 命令
+│   │   │   ├── adapters/      # 本地工作流适配器
 │   │   │   ├── daemon/        # 守护进程核心
 │   │   │   │   ├── boot.ts    # 守护进程启动
 │   │   │   │   ├── server.ts  # HTTP/WebSocket 服务器
-│   │   │   │   ├── sessionManager.ts  # 会话管理
+│   │   │   │   ├── sessionManager.ts  # CLI 会话管理
+│   │   │   │   ├── sourceManager.ts   # 多源注册与事件管理
+│   │   │   │   ├── workflowManager.ts # 工作流线程聚合
 │   │   │   │   ├── notifier.ts        # 通知系统
 │   │   │   │   └── pidfile.ts         # PID 文件管理
 │   │   │   ├── pty/           # 伪终端管理
 │   │   │   │   ├── runner.ts          # PTY 运行器
 │   │   │   │   └── promptDetector.ts  # 提示检测
-│   │   │   ├── shared/        # 共享模块
+│   │   │   ├── shared/        # 共享协议与客户端
 │   │   │   │   ├── client.ts  # API 客户端
-│   │   │   │   └── types.ts   # 类型定义
+│   │   │   │   └── protocol.ts # 协议与类型定义
 │   │   │   ├── config.ts      # 配置管理
 │   │   │   ├── logger.ts      # 日志系统
 │   │   │   └── index.ts       # 主入口
@@ -141,12 +144,13 @@ RemindAI/
 │   │   ├── dist/              # 构建输出
 │   │   ├── package.json
 │   │   └── tsconfig.json
-│   └── gui/                   # C# .NET GUI
+│   ├── gui/                   # C# .NET GUI
 │       ├── App.xaml           # 应用程序定义
 │       ├── MainWindow.xaml    # 主窗口
-│       ├── ViewModels/        # MVVM 视图模型
+│       ├── Models/            # 视图模型
 │       ├── Services/          # 服务层
 │       └── RemindAI.Gui.csproj
+│   └── vscode-extension/      # VS Code 监控源扩展
 ├── docs/                      # 文档
 │   ├── ARCHITECTURE.md
 │   ├── API.md
@@ -184,7 +188,13 @@ git diff --check
 
 新增监控来源时优先使用 `/sources/register` 和 `/events`，不要直接复用 PTY 会话协议。来源应提供 `kind`、`name`、`windowTitle` 或 `workspace`，GUI 依靠这些字段区分多窗口。
 
-默认禁止系统级 OCR、全局窗口内容读取或无 allowlist 的浏览器全文采集。需要更强监控能力时，应先为具体工具实现插件、扩展或外部适配器。
+默认禁止系统级 OCR 和全局窗口内容读取。需要更强监控能力时，应先为具体工具实现插件、扩展或外部适配器。
+
+开发时先判断新能力属于哪一层：
+
+- **阶段 1**：是否提升了个人本地控制台的接入质量、可见性、提醒或接管能力。
+- **阶段 2**：是否属于工作流模板、任务编排、结果归档或流程复用。
+- 不要把多用户、权限、共享空间或企业协作能力引入当前路线。
 
 ### 1. 创建功能分支
 
@@ -198,16 +208,7 @@ git checkout -b feature/your-feature-name
 
 ### 3. 测试
 
-```bash
-# 运行所有测试
-npm test
-
-# 运行特定测试
-npm test -- promptDetector.test.ts
-
-# 运行测试并生成覆盖率报告
-npm run test:coverage
-```
+当前仓库还没有稳定的首方自动化测试套件。提交前至少执行“当前质量门禁”中的构建和校验命令；如果本次改动涉及协议、会话状态、提示检测或工作流聚合，应同时补上对应测试后再合并。
 
 ### 4. 提交
 
@@ -386,11 +387,18 @@ export function loadConfig(): Config {
 
 ## 测试
 
-### 测试框架
+### 当前状态
 
-使用 **Jest** 进行单元测试和集成测试。
+当前仓库仍处于首方测试补齐阶段，尚未形成稳定的自动化测试目录和统一测试命令。继续开发前应优先补齐以下覆盖面：
 
-### 测试文件组织
+- `promptDetector`
+- `sessionManager`
+- `sourceManager`
+- `workflowManager`
+- `codexDesktopAdapter`
+- 关键 HTTP/WebSocket 协议
+
+### 建议组织方式
 
 ```
 packages/daemon/
@@ -400,7 +408,9 @@ packages/daemon/
 │   │   └── promptDetector.test.ts  # 测试文件与源文件同目录
 │   └── daemon/
 │       ├── sessionManager.ts
-│       └── sessionManager.test.ts
+│       ├── sourceManager.ts
+│       ├── workflowManager.ts
+│       └── *.test.ts
 └── test/
     ├── integration/               # 集成测试
     │   └── api.test.ts
@@ -518,22 +528,7 @@ test('should send notification', async () => {
 
 ### 运行测试
 
-```bash
-# 运行所有测试
-npm test
-
-# 监听模式
-npm test -- --watch
-
-# 覆盖率报告
-npm run test:coverage
-
-# 运行特定测试文件
-npm test -- promptDetector.test.ts
-
-# 运行特定测试用例
-npm test -- -t "should detect yesno pattern"
-```
+在补齐测试框架之前，先以仓库当前已有校验命令作为最低门槛。引入测试框架后，应把统一测试命令补充回根目录 `package.json` 和本节文档。
 
 ---
 
@@ -631,10 +626,12 @@ node --prof-process isolate-*.log > profile.txt
 
 3. **编写代码和测试**
 
-4. **确保测试通过**
+4. **确保质量门禁通过**
    ```bash
-   npm test
-   npm run lint
+   npm run build
+   npm run validate:extensions
+   dotnet build packages/gui/RemindAI.Gui.csproj -c Release
+   git diff --check
    ```
 
 5. **提交代码**
@@ -698,10 +695,12 @@ node --prof-process isolate-*.log > profile.txt
    npm run build
    ```
 
-4. **测试**
+4. **验证**
    ```bash
-   npm test
-   npm run test:e2e
+   npm run build
+   npm run validate:extensions
+   dotnet build packages/gui/RemindAI.Gui.csproj -c Release
+   git diff --check
    ```
 
 5. **提交和打标签**

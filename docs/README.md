@@ -1,6 +1,6 @@
 # RemindAI 文档中心
 
-欢迎来到 RemindAI 文档中心！这里包含了所有你需要的文档资源。
+欢迎来到 RemindAI 文档中心！这里包含了围绕“个人本地 AI 工作流中控台”所需的文档资源。
 
 ## 📚 文档导航
 
@@ -15,16 +15,17 @@
 - **[架构设计](ARCHITECTURE.md)** - 系统架构和设计决策
 - **[开发指南](DEVELOPMENT.md)** - 开发环境设置和贡献指南
 - **[API 文档](API.md)** - HTTP/WebSocket API 参考
-- **[监控源说明](MONITORING_SOURCES.md)** - CLI、VS Code、浏览器扩展和外部适配器的能力边界
+- **[监控源说明](MONITORING_SOURCES.md)** - CLI、VS Code 和外部适配器的能力边界
+- **[产品路线](PRODUCT_ROADMAP.md)** - 从本地控制台到本地工作流操作台的演进路线
 - **[重新设计文档](REDESIGN.md)** - 架构重构和改进计划
 
-### 📋 项目报告
+### 📋 历史报告
 
-- **[代码审核报告](reports/CODE_REVIEW_REPORT.md)** - 全面的代码质量审核
-- **[项目最终报告](reports/PROJECT_FINAL_REPORT.md)** - 项目完成总结
-- **[项目总结](reports/PROJECT_SUMMARY.md)** - 项目概览和成果
-- **[完成总结](reports/COMPLETION_SUMMARY.md)** - 开发完成情况
-- **[发布就绪报告](reports/RELEASE_READY.md)** - 发布前检查清单
+- **[代码审核报告](reports/CODE_REVIEW_REPORT.md)** - 旧版本代码审查快照
+- **[项目最终报告](reports/PROJECT_FINAL_REPORT.md)** - 旧路线阶段性总结
+- **[项目总结](reports/PROJECT_SUMMARY.md)** - 早期产品定义下的总结
+- **[完成总结](reports/COMPLETION_SUMMARY.md)** - 旧计划完成情况
+- **[发布就绪报告](reports/RELEASE_READY.md)** - 旧范围下的发布判断
 
 ### 🧪 测试文档
 
@@ -69,9 +70,9 @@
 
 ### 📊 我想了解项目状态
 
-1. 查看 [项目最终报告](reports/PROJECT_FINAL_REPORT.md) 了解整体情况
-2. 阅读 [代码审核报告](reports/CODE_REVIEW_REPORT.md) 了解代码质量
-3. 查看 [测试报告](reports/E2E_TEST_REPORT.md) 了解测试覆盖率
+1. 先看 [产品路线](PRODUCT_ROADMAP.md) 了解当前定位和方向
+2. 再看 [架构设计](ARCHITECTURE.md) 与 [开发指南](DEVELOPMENT.md) 了解当前实现边界
+3. 如需回顾历史，再查看 `reports/` 下的旧报告
 4. 阅读 [更新日志](../CHANGELOG.md) 了解版本历史
 
 ---
@@ -117,6 +118,7 @@
 ### 核心概念
 
 - [什么是 RemindAI？](USER_GUIDE.md#什么是-remindai)
+- [产品路线](PRODUCT_ROADMAP.md)
 - [工作原理](ARCHITECTURE.md#核心组件)
 - [提示检测机制](ARCHITECTURE.md#提示检测)
 - [会话管理](ARCHITECTURE.md#会话管理)

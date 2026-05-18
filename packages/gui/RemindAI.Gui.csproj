@@ -24,6 +24,7 @@
     <None Update="Assets\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Include="..\daemon\bundle\daemon.cjs" Link="daemon\daemon.cjs" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

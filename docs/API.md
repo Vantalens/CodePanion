@@ -1,6 +1,6 @@
 # RemindAI API 文档
 
-RemindAI daemon 默认监听 `http://127.0.0.1:7777`，WebSocket 默认路径为 `ws://127.0.0.1:7777/ws`。
+RemindAI daemon 是本地 AI 工作流中控台的数据与事件中枢。它默认监听 `http://127.0.0.1:7777`，WebSocket 默认路径为 `ws://127.0.0.1:7777/ws`。
 
 除 `GET /health` 外，所有 HTTP API 都需要 `Authorization: Bearer <token>`。token 位于 `~/.remindai/config.json`。
 
@@ -103,11 +103,11 @@ RemindAI daemon 默认监听 `http://127.0.0.1:7777`，WebSocket 默认路径为
 }
 ```
 
-## 多源监控 API
+## 工作流来源 API
 
 ### `POST /sources/register`
 
-注册一个监控来源。
+注册一个本地工作流来源。
 
 ```json
 {
@@ -120,25 +120,25 @@ RemindAI daemon 默认监听 `http://127.0.0.1:7777`，WebSocket 默认路径为
 }
 ```
 
-`kind` 可选：`cli`、`vscode`、`claude-code`、`codex`、`browser-extension`、`external`。
+`kind` 可选：`cli`、`vscode`、`claude-code`、`codex`、`codex-desktop`、`cursor`、`antigravity`、`external`。
 
 ### `GET /sources`
 
-返回当前已注册监控来源。
+返回当前已注册工作流来源。
 
 ### `POST /events`
 
-上报统一监控事件。
+上报统一工作流事件。
 
 ```json
 {
   "type": "done",
-  "source": "browser-extension",
+  "source": "codex",
   "sourceId": "source-id",
-  "title": "浏览器对话已结束",
-  "content": "ChatGPT 已生成完成",
-  "windowTitle": "ChatGPT",
-  "url": "https://chatgpt.com/"
+  "title": "任务已结束",
+  "content": "Codex 会话已完成",
+  "windowTitle": "Codex",
+  "workspace": "D:\\RemindAI"
 }
 ```
 
@@ -169,6 +169,24 @@ observer 事件：
 - `source-registered`
 - `source-disconnected`
 - `monitor-event`
+- `workflow-snapshot`
+- `workflow-event`
+
+## Workflow API
+
+### `GET /workflow/snapshot`
+
+返回当前所有 workflow 线程和已同步条目。第一阶段会包含 Codex Desktop 本地会话同步结果。
+
+### `GET /workflow/threads`
+
+返回 workflow 线程列表。
+
+### `GET /workflow/threads/:id`
+
+返回单个 workflow 线程及其条目。
+
+Workflow 条目统一为 `message`、`tool_call`、`command`、`file_change`、`artifact`、`prompt`、`status`。状态统一为 `running`、`waiting`、`done`、`error`、`paused`。
 
 CLI 会话事件：
 

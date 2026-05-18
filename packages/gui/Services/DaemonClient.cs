@@ -21,18 +21,25 @@ namespace RemindAI.Gui.Services
         public event EventHandler? Connected;
         public event EventHandler? Disconnected;
         public event EventHandler<SessionInfo>? SessionRegistered;
+        public event EventHandler<SessionOutputEventArgs>? SessionOutput;
         public event EventHandler<SessionPromptEventArgs>? SessionPrompt;
         public event EventHandler<SessionExitedEventArgs>? SessionExited;
         public event EventHandler<NotificationEventArgs>? NotificationReceived;
         public event EventHandler<MonitorSourceEventArgs>? SourceRegistered;
         public event EventHandler<MonitorEventArgs>? MonitorEventReceived;
+        public event EventHandler<JToken>? WorkflowSnapshotReceived;
+        public event EventHandler<JToken>? WorkflowEventReceived;
         public event EventHandler<string>? LogMessage;
 
         public DaemonClient()
         {
-            _httpClient = new HttpClient();
+            _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
             LoadConfig();
         }
+
+        public string DaemonUrl => _daemonUrl;
+
+        public void ReloadConfig() => LoadConfig();
 
         private void LoadConfig()
         {
@@ -73,7 +80,7 @@ namespace RemindAI.Gui.Services
             }
         }
 
-        public async Task ConnectAsync()
+        public async Task<bool> ConnectAsync()
         {
             try
             {
@@ -84,14 +91,13 @@ namespace RemindAI.Gui.Services
 
                 try
                 {
-                    _httpClient.Timeout = TimeSpan.FromSeconds(5);
                     var response = await _httpClient.GetAsync(healthUrl);
 
                     if (!response.IsSuccessStatusCode)
                     {
                         Log($"Daemon 健康检查失败，状态码: {response.StatusCode}");
                         Disconnected?.Invoke(this, EventArgs.Empty);
-                        return;
+                        return false;
                     }
 
                     var healthContent = await response.Content.ReadAsStringAsync();
@@ -100,16 +106,14 @@ namespace RemindAI.Gui.Services
                 catch (HttpRequestException httpEx)
                 {
                     Log($"无法连接到 daemon ({_daemonUrl}): {httpEx.Message}");
-                    Log("请确保 daemon 正在运行：remindai start");
                     Disconnected?.Invoke(this, EventArgs.Empty);
-                    return;
+                    return false;
                 }
                 catch (TaskCanceledException)
                 {
                     Log($"连接 daemon 超时 ({_daemonUrl})");
-                    Log("请检查 daemon 是否正在运行");
                     Disconnected?.Invoke(this, EventArgs.Empty);
-                    return;
+                    return false;
                 }
 
                 // 连接 WebSocket
@@ -158,12 +162,14 @@ namespace RemindAI.Gui.Services
 
                 await _wsClient.Start();
                 Log("WebSocket 启动成功");
+                return true;
             }
             catch (Exception ex)
             {
                 Log($"连接失败：{ex.GetType().Name} - {ex.Message}");
                 Log($"堆栈跟踪：{ex.StackTrace}");
                 Disconnected?.Invoke(this, EventArgs.Empty);
+                return false;
             }
         }
 
@@ -254,8 +260,26 @@ namespace RemindAI.Gui.Services
                         Log($"监控事件回复：{json["eventId"]?.Value<string>()} - {json["text"]?.Value<string>()}");
                         break;
 
+                    case "workflow-snapshot":
+                        if (json["snapshot"] != null)
+                        {
+                            WorkflowSnapshotReceived?.Invoke(this, json["snapshot"]!);
+                        }
+                        break;
+
+                    case "workflow-event":
+                        if (json["event"] != null)
+                        {
+                            WorkflowEventReceived?.Invoke(this, json["event"]!);
+                        }
+                        break;
+
                     case "session-output":
-                        // 可选：处理会话输出
+                        SessionOutput?.Invoke(this, new SessionOutputEventArgs
+                        {
+                            SessionId = json["sessionId"]?.Value<string>() ?? "",
+                            Chunk = json["chunk"]?.Value<string>() ?? ""
+                        });
                         break;
 
                     default:

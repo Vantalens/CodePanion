@@ -219,7 +219,7 @@ remindai notify "测试通知" -m "RemindAI 安装成功！"
 - ✅ 系统托盘显示通知
 - ✅ GUI 中显示通知记录
 
-### 5. 可选：安装多源监控扩展
+### 5. 可选：安装 VS Code 监控扩展
 
 **VS Code 扩展**
 
@@ -227,14 +227,7 @@ remindai notify "测试通知" -m "RemindAI 安装成功！"
 2. 使用开发模式加载扩展。
 3. 扩展会读取 `~/.remindai/config.json` 中的 `port` 和 `token`，每个 VS Code 窗口都会注册为独立监控源。
 
-**Chromium / Edge 浏览器扩展**
-
-1. 打开浏览器扩展管理页，启用开发者模式。
-2. 加载 `packages/browser-extension/`。
-3. 在扩展选项页填写 daemon token，并配置 allowlist 域名，例如 `chatgpt.com`、`claude.ai`。
-4. 只有 allowlist 中的页面会开始监控。
-
-### 5. 测试交互式命令
+### 6. 测试交互式命令
 
 ```bash
 # 运行一个需要输入的命令

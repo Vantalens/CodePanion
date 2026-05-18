@@ -28,90 +28,17 @@
     </Window.Resources>
 
     <Grid>
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
-        </Grid.RowDefinitions>
+        <wv2:WebView2 x:Name="ChatWebView"/>
 
-        <!-- 顶部工具栏 -->
-        <Border Grid.Row="0" Background="#F5F5F5" BorderBrush="#E0E0E0" BorderThickness="0,0,0,1" Padding="12">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock Text="RemindAI" FontSize="18" FontWeight="Bold" Margin="0,0,16,0"/>
-                    <Ellipse x:Name="StatusIndicator" Width="12" Height="12" Fill="Gray" Margin="0,0,8,0"/>
-                    <TextBlock x:Name="StatusText" Text="未连接" VerticalAlignment="Center"/>
-                </StackPanel>
-
-                <StackPanel Grid.Column="1" Orientation="Horizontal">
-                    <Button Content="设置" Click="Settings_Click" Width="80"/>
-                </StackPanel>
-            </Grid>
-        </Border>
-
-        <!-- 主内容区：会话列表 + 对话区域 -->
-        <Grid Grid.Row="1">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="250"/>
-                <ColumnDefinition Width="*"/>
-            </Grid.ColumnDefinitions>
-
-            <!-- 左侧：会话列表 -->
-            <Border Grid.Column="0" BorderBrush="#E0E0E0" BorderThickness="0,0,1,0" Background="White">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="*"/>
-                    </Grid.RowDefinitions>
-
-                    <Border Grid.Row="0" Background="#FAFAFA" Padding="12" BorderBrush="#E0E0E0" BorderThickness="0,0,0,1">
-                        <TextBlock FontWeight="Bold">
-                            <Run Text="会话列表 ("/>
-                            <Run x:Name="SessionCountText" Text="0"/>
-                            <Run Text=")"/>
-                        </TextBlock>
-                    </Border>
-
-                    <ListView Grid.Row="1" x:Name="SessionListView"
-                              SelectionChanged="SessionListView_SelectionChanged"
-                              BorderThickness="0">
-                        <ListView.ItemTemplate>
-                            <DataTemplate>
-                                <StackPanel Margin="4">
-                                    <TextBlock Text="{Binding Command}" FontWeight="Bold" TextTrimming="CharacterEllipsis"/>
-                                    <TextBlock Text="{Binding StatusText}" FontSize="11" Foreground="Gray"/>
-                                </StackPanel>
-                            </DataTemplate>
-                        </ListView.ItemTemplate>
-                    </ListView>
-                </Grid>
-            </Border>
-
-            <!-- 右侧：对话区域 (WebView2) -->
-            <Grid Grid.Column="1" Background="#1E1E1E">
-                <wv2:WebView2 x:Name="ChatWebView"/>
-            </Grid>
+        <!-- Legacy named controls kept hidden for daemon/session plumbing. The WebView owns the visible shell. -->
+        <Grid Visibility="Collapsed">
+            <Ellipse x:Name="StatusIndicator" Width="12" Height="12" Fill="Gray"/>
+            <TextBlock x:Name="StatusText" Text="未连接"/>
+            <TextBlock x:Name="StatusBarText" Text="就绪"/>
+            <Button x:Name="ReconnectButton" Content="重新连接" Click="Reconnect_Click"/>
+            <TextBlock x:Name="VersionText" Text="v0.2.0"/>
+            <TextBlock x:Name="SessionCountText" Text="0"/>
+            <ListView x:Name="SessionListView" SelectionChanged="SessionListView_SelectionChanged"/>
         </Grid>
-
-        <!-- 底部状态栏 -->
-        <Border Grid.Row="2" Background="#F5F5F5" BorderBrush="#E0E0E0" BorderThickness="0,1,0,0" Padding="8">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-
-                <TextBlock x:Name="StatusBarText" Text="就绪" VerticalAlignment="Center"/>
-                <Button x:Name="ReconnectButton" Grid.Column="1" Content="重新连接" Click="Reconnect_Click"
-                        Width="80" Margin="0,0,8,0" Visibility="Collapsed"/>
-                <TextBlock Grid.Column="2" x:Name="VersionText" Text="v0.2.0" VerticalAlignment="Center" Foreground="Gray"/>
-            </Grid>
-        </Border>
     </Grid>
 </Window>
