@@ -8,6 +8,7 @@
     <AssemblyName>RemindAI.Gui</AssemblyName>
     <RootNamespace>RemindAI.Gui</RootNamespace>
     <ApplicationIcon>Assets\app-icon.ico</ApplicationIcon>
+    <NuGetAudit>false</NuGetAudit>
   </PropertyGroup>
 
   <ItemGroup>

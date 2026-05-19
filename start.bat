@@ -44,7 +44,12 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 echo [3/3] 启动 GUI...
-start packages\gui\bin\Debug\net8.0-windows\RemindAI.Gui.exe
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\run-gui.ps1
+if %ERRORLEVEL% NEQ 0 (
+    echo [错误] GUI 启动失败
+    pause
+    exit /b 1
+)
 
 echo.
 echo ========================================

@@ -7,6 +7,7 @@ import { SessionManager } from './sessionManager.js';
 import { SourceManager } from './sourceManager.js';
 import { WorkflowManager } from './workflowManager.js';
 import { CodexDesktopAdapter } from '../adapters/codexDesktopAdapter.js';
+import { AiToolProcessAdapter } from '../adapters/aiToolProcessAdapter.js';
 import {
   MonitorEventSchema,
   NotifyRequestSchema,
@@ -29,6 +30,7 @@ export function createServer(cfg: Config): {
   const sources = new SourceManager();
   const workflows = new WorkflowManager();
   const codexAdapter = new CodexDesktopAdapter(workflows);
+  const aiToolAdapter = new AiToolProcessAdapter(sources);
 
   sessions.onEvent((event) => {
     const now = Date.now();
@@ -355,6 +357,7 @@ export function createServer(cfg: Config): {
       const httpServer = app.listen(cfg.port, '127.0.0.1', () => {
         logger.info({ port: cfg.port }, 'http listening');
         if (cfg.monitors.codexDesktop) codexAdapter.start();
+        if (cfg.monitors.aiTools) aiToolAdapter.start();
         resolve(httpServer);
       });
 

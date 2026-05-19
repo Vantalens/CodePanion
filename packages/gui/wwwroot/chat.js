@@ -14,6 +14,9 @@ const state = {
     workflowThreads: new Map()
 };
 
+const ACTIVE_CONVERSATION_WINDOW_MS = 1000 * 60 * 60 * 24 * 3;
+const ARCHIVE_CONVERSATION_WINDOW_MS = 1000 * 60 * 60 * 24 * 14;
+
 function updateConnectionStatus(connected) {
     state.connected = Boolean(connected);
     const statusDot = document.querySelector('.status-dot');
@@ -32,6 +35,7 @@ function normalizeMessage(message) {
         source: message.source || message.Source || 'daemon',
         sourceId: message.sourceId || message.SourceId || '',
         sessionId: message.sessionId || message.SessionId || '',
+        eventId: message.eventId || message.EventId || '',
         threadId: message.threadId || message.ThreadId || '',
         windowTitle: message.windowTitle || message.WindowTitle || '',
         workspace: message.workspace || message.Workspace || '',
@@ -73,6 +77,14 @@ function sourceLabel(message) {
     if (message.source === 'codex-desktop' || message.source === 'codex') return 'Codex';
     if (message.source === 'cli') return '终端';
     if (message.source === 'vscode') return 'VS Code';
+    if (message.source === 'trae') return 'Trae';
+    if (message.source === 'codebuddy') return 'CodeBuddy';
+    if (message.source === 'lingma') return '通义灵码';
+    if (message.source === 'marscode') return '豆包 / MarsCode';
+    if (message.source === 'codegeex') return 'CodeGeeX';
+    if (message.source === 'comate') return '百度 Comate';
+    if (message.source === 'qwen-code') return 'Qwen Code';
+    if (message.source === 'ai-ide') return 'AI IDE';
     return message.source || 'RemindAI';
 }
 
@@ -153,8 +165,8 @@ function renderConversationList() {
 
     let conversations = allConversations;
     if (state.activeView === 'active') {
-        conversations = allConversations.filter(item => item.status !== 'done');
-        if (conversations.length === 0) conversations = allConversations.slice(0, 12);
+        conversations = allConversations.filter(isCurrentConversation);
+        if (conversations.length === 0) conversations = allConversations.filter(isRecentConversation).slice(0, 12);
     }
     conversations = conversations.slice(0, state.activeView === 'active' ? 24 : 60);
 
@@ -172,6 +184,25 @@ function renderConversationList() {
     }
 
     conversations.forEach(item => list.appendChild(makeConversationButton(item)));
+}
+
+function isCurrentConversation(item) {
+    if (item.status === 'done') return false;
+    if (!isRecentConversation(item)) return false;
+    if (isArchivedConversation(item)) return false;
+    return true;
+}
+
+function isRecentConversation(item) {
+    const lastAt = Number(item.lastAt || 0);
+    return lastAt > 0 && Date.now() - lastAt <= ACTIVE_CONVERSATION_WINDOW_MS;
+}
+
+function isArchivedConversation(item) {
+    const lastAt = Number(item.lastAt || 0);
+    if (lastAt > 0 && Date.now() - lastAt > ARCHIVE_CONVERSATION_WINDOW_MS) return true;
+    const title = `${item.title || ''}\n${item.lastContent || ''}`.trim();
+    return /<turn_aborted>|<environment_context>|Context from my IDE setup/i.test(title);
 }
 
 function makeConversationButton(item) {
@@ -287,7 +318,7 @@ function renderMessage(message) {
     }
 
     if (message.type === 'prompt') {
-        card.appendChild(renderOptions(message.sessionId, message.options || [], message.id));
+        card.appendChild(renderOptions(message.sessionId, message.eventId, message.options || [], message.id));
     }
 
     item.appendChild(avatar);
@@ -319,10 +350,10 @@ function typeLabel(type) {
     }
 }
 
-function renderOptions(sessionId, options, messageId) {
+function renderOptions(sessionId, eventId, options, messageId) {
     const container = document.createElement('div');
     container.className = 'prompt-options';
-    container.dataset.promptId = sessionId || messageId || generateId();
+    container.dataset.promptId = sessionId || eventId || messageId || generateId();
 
     options.forEach((option, index) => {
         const button = document.createElement('button');
@@ -330,17 +361,17 @@ function renderOptions(sessionId, options, messageId) {
         button.type = 'button';
         button.innerHTML = `<span class="option-number">${index + 1}</span><span class="option-label"></span>`;
         button.querySelector('.option-label').textContent = String(option);
-        button.addEventListener('click', () => selectOption(sessionId, option, container.dataset.promptId));
+        button.addEventListener('click', () => selectOption(sessionId, eventId, option, container.dataset.promptId));
         container.appendChild(button);
     });
 
     const input = document.createElement('input');
     input.className = 'custom-input';
     input.type = 'text';
-    input.placeholder = sessionId ? '输入自定义回复，按 Enter 发送' : '记录本次选择，按 Enter 确认';
+    input.placeholder = sessionId || eventId ? '输入自定义回复，按 Enter 发送' : '记录本次选择，按 Enter 确认';
     input.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' && input.value.trim()) {
-            selectOption(sessionId, input.value.trim(), container.dataset.promptId);
+            selectOption(sessionId, eventId, input.value.trim(), container.dataset.promptId);
         }
     });
     container.appendChild(input);
@@ -349,19 +380,20 @@ function renderOptions(sessionId, options, messageId) {
     return container;
 }
 
-function selectOption(sessionId, value, promptId) {
+function selectOption(sessionId, eventId, value, promptId) {
     if (sessionId) {
         sendToHost({ type: 'reply', sessionId, value: String(value) });
-    } else if (promptId) {
-        sendToHost({ type: 'event-reply', eventId: promptId, value: String(value) });
+    } else if (eventId) {
+        sendToHost({ type: 'event-reply', eventId, value: String(value) });
     }
 
     addMessage({
         type: 'user-reply',
         sessionId,
+        eventId,
         source: 'user',
         timestamp: Date.now(),
-        content: sessionId ? `**您的回复**：${value}` : `**已记录选择**：${value}`
+        content: sessionId || eventId ? `**您的回复**：${value}` : `**已记录选择**：${value}`
     });
     disableOptionsForPrompt(promptId);
 }
@@ -378,18 +410,28 @@ function extractCodeBlocks(message) {
     while ((match = regex.exec(message.content)) !== null) {
         const code = match[2].trimEnd();
         if (!code.trim()) continue;
+        const language = match[1] || 'text';
+        if (!isUsefulCodeBlock(language, code)) continue;
         const block = {
             id: `${message.id}:code:${state.codeBlocks.length}`,
             messageId: message.id,
             conversationId: message.conversationId,
             title: message.conversationTitle,
-            language: match[1] || 'text',
+            language,
             code,
             timestamp: message.timestamp
         };
         state.codeBlocks.push(block);
         if (!state.activeCodeId) state.activeCodeId = block.id;
     }
+}
+
+function isUsefulCodeBlock(language, code) {
+    const normalized = code.trim();
+    if (!normalized) return false;
+    if (language && !/^text$/i.test(language)) return true;
+    if (normalized.split(/\r?\n/).length >= 3) return true;
+    return /^(diff --git|[+\-]{3}\s|@@\s|import\s|export\s|function\s|class\s|const\s|let\s|var\s|interface\s|type\s|namespace\s|using\s|public\s|private\s|protected\s|def\s|async\s|await\s|SELECT\s|CREATE\s|INSERT\s|UPDATE\s|DELETE\s)/m.test(normalized);
 }
 
 function renderCodeBrowser() {
@@ -401,12 +443,12 @@ function renderCodeBrowser() {
         ? state.codeBlocks
         : state.codeBlocks.filter(block => block.conversationId === state.activeConversation);
 
-    shell.classList.toggle('has-code', blocks.length > 0);
+    shell.classList.toggle('has-code', state.activeView === 'code' && blocks.length > 0);
     count.textContent = `${blocks.length} 个片段`;
     list.innerHTML = '';
 
     if (blocks.length === 0) {
-        preview.innerHTML = '<div class="empty-code">当前对话没有可浏览的代码块。</div>';
+        preview.innerHTML = '<div class="empty-code"><strong>暂无可预览产物</strong><span>只展示真实代码块，不再显示普通 text 片段。</span></div>';
         return;
     }
 
@@ -458,6 +500,7 @@ function handleMessage(message) {
         case 'monitor-event':
             if (message.data) addMessage({
                 ...message.data,
+                eventId: message.data.id || message.data.Id,
                 type: message.data.type || message.data.Type || 'activity',
                 content: message.data.content || message.data.Content || message.data.title || message.data.Title || ''
             });
@@ -483,6 +526,24 @@ function handleMessage(message) {
                 });
             }
             break;
+        case 'source-disconnected': {
+            const sourceId = message.sourceId || message.SourceId || '';
+            const source = state.sources.get(sourceId);
+            if (source) {
+                source.status = 'offline';
+                source.Status = 'offline';
+                addMessage({
+                    type: 'done',
+                    source: source.kind || source.Kind,
+                    sourceId,
+                    windowTitle: source.windowTitle || source.WindowTitle,
+                    workspace: source.workspace || source.Workspace,
+                    timestamp: Date.now(),
+                    content: `监控源已离线：**${source.name || source.Name || '未命名来源'}**`
+                });
+            }
+            break;
+        }
         case 'session-registered':
             if (message.session) addMessage({
                 type: 'activity',
@@ -634,7 +695,15 @@ function shouldIgnoreWorkflowItem(item) {
 
     const content = item.content.trim();
     if (!content) return item.kind === 'message';
+    if (isInternalWorkflowContent(content)) return true;
+    return false;
+}
+
+function isInternalWorkflowContent(content) {
     if (/^<permissions instructions>/i.test(content)) return true;
+    if (/^<environment_context>/i.test(content)) return true;
+    if (/^<turn_aborted>/i.test(content)) return true;
+    if (/^# Context from my IDE setup:/i.test(content)) return true;
     if (/^#\s*Tools\s*$/im.test(content) && /namespace:?\s*(functions|web|image_gen)/i.test(content)) return true;
     if (/^You are Codex,/i.test(content)) return true;
     if (/^Knowledge cutoff:/i.test(content)) return true;
@@ -671,6 +740,7 @@ function refreshWorkflowConversation(threadId) {
     const thread = state.workflowThreads.get(threadId);
     if (!thread) return;
     const summary = summarizeWorkflow(threadId);
+    const status = workflowStatusToMessageType(thread.status || summary.status);
     state.conversations.set(`workflow:${threadId}`, {
         id: `workflow:${threadId}`,
         title: deriveWorkflowTitle(threadId, thread.title),
@@ -678,7 +748,9 @@ function refreshWorkflowConversation(threadId) {
         lastContent: workflowPreview(threadId, summary),
         lastAt: Number(thread.updatedAt || summary.lastAt || Date.now()),
         count: summary.totalCount,
-        status: workflowStatusToMessageType(thread.status || summary.status)
+        status: isArchivedConversation({ title: thread.title, lastContent: workflowPreview(threadId, summary), lastAt: Number(thread.updatedAt || summary.lastAt || Date.now()) })
+            ? 'done'
+            : status
     });
 }
 
@@ -805,6 +877,8 @@ function buildIntegratedWorkflowMessages(threadId) {
                 id: `workflow-message:${item.id}`,
                 type: workflowKindToMessageType(item.kind, item.status),
                 source: String(item.role || item.title).toLowerCase() === 'user' ? 'user' : item.source || meta.source || 'workflow',
+                sessionId: inferWorkflowSessionId(threadId),
+                eventId: inferWorkflowEventId(item.id),
                 threadId,
                 windowTitle: deriveWorkflowTitle(threadId, meta.title),
                 workspace: item.filePath || meta.workspace || '',
@@ -821,6 +895,14 @@ function buildIntegratedWorkflowMessages(threadId) {
     flushActivity();
 
     return trimIntegratedMessages(messages);
+}
+
+function inferWorkflowSessionId(threadId) {
+    return String(threadId || '').startsWith('session:') ? String(threadId).slice('session:'.length) : '';
+}
+
+function inferWorkflowEventId(itemId) {
+    return String(itemId || '').startsWith('monitor:') ? String(itemId).slice('monitor:'.length) : '';
 }
 
 function trimIntegratedMessages(messages) {

@@ -1,6 +1,8 @@
 # RemindAI 文档中心
 
-欢迎来到 RemindAI 文档中心！这里包含了围绕“个人本地 AI 工作流中控台”所需的文档资源。
+欢迎来到 RemindAI 文档中心！这里包含了围绕“本地优先、供应商中立、单入口多出口的 AI 开发工作流控制台 / 控制平面”所需的文档资源。
+
+当前战略采用《AI IDE 个人本地工作流控制台市场分析与 RemindAI 策略报告》的核心判断：保留现有 Windows Alpha 产品和本地 daemon 架构，不推倒重做；把现有提醒、多源监控和 workflow 模型收束为本地控制平面。旧路线报告已从仓库中清理，当前路线以 [产品路线](PRODUCT_ROADMAP.md)、[架构设计](ARCHITECTURE.md)、[监控源说明](MONITORING_SOURCES.md) 和根目录 [开发任务清单](../DEVELOPMENT_TASKS.md) 为准。
 
 ## 📚 文档导航
 
@@ -16,28 +18,18 @@
 - **[开发指南](DEVELOPMENT.md)** - 开发环境设置和贡献指南
 - **[API 文档](API.md)** - HTTP/WebSocket API 参考
 - **[监控源说明](MONITORING_SOURCES.md)** - CLI、VS Code 和外部适配器的能力边界
-- **[产品路线](PRODUCT_ROADMAP.md)** - 从本地控制台到本地工作流操作台的演进路线
+- **[产品路线](PRODUCT_ROADMAP.md)** - 报告策略、现有产品保留决策、Alpha/Beta/GA 演进路线
 - **[重新设计文档](REDESIGN.md)** - 架构重构和改进计划
 
-### 📋 历史报告
+### 📋 战略依据
 
-- **[代码审核报告](reports/CODE_REVIEW_REPORT.md)** - 旧版本代码审查快照
-- **[项目最终报告](reports/PROJECT_FINAL_REPORT.md)** - 旧路线阶段性总结
-- **[项目总结](reports/PROJECT_SUMMARY.md)** - 早期产品定义下的总结
-- **[完成总结](reports/COMPLETION_SUMMARY.md)** - 旧计划完成情况
-- **[发布就绪报告](reports/RELEASE_READY.md)** - 旧范围下的发布判断
-
-### 🧪 测试文档
-
-- **[E2E 测试指南](../E2E_TEST_GUIDE.md)** - 端到端测试说明
-- **[E2E 测试报告](reports/E2E_TEST_REPORT.md)** - 测试结果和覆盖率
-- **[验证报告](reports/VALIDATION_REPORT.md)** - 功能验证结果
+- **外部研究报告** - `D:\Owen\Documents\OneDrive\桌面\RemindAI_report.md`，作为当前定位、工具优先级、商业化和风险策略的主要依据
+- **研究报告 PDF** - `D:\Owen\Documents\OneDrive\桌面\AI IDE 个人本地工作流控制台市场分析与 RemindAI 策略报告.pdf`
 
 ### 📦 发布文档
 
 - **[更新日志](../CHANGELOG.md)** - 版本历史和变更记录
-- **[发布说明](../RELEASE_NOTES.md)** - 最新版本发布说明
-- **[发布检查清单](../RELEASE_CHECKLIST.md)** - 发布前检查项
+- **[开发任务清单](../DEVELOPMENT_TASKS.md)** - 当前阶段验收、质量门禁和验证记录
 
 ### 📦 组件文档
 
@@ -65,14 +57,14 @@
 
 1. 阅读 [开发指南](DEVELOPMENT.md) 了解开发流程
 2. 查看 [架构设计](ARCHITECTURE.md) 理解系统设计
-3. 运行 [E2E 测试](../E2E_TEST_GUIDE.md) 验证功能
+3. 按 [开发任务清单](../DEVELOPMENT_TASKS.md) 和 [开发指南](DEVELOPMENT.md#开发工作流) 运行当前质量门禁
 4. 提交 Pull Request
 
 ### 📊 我想了解项目状态
 
-1. 先看 [产品路线](PRODUCT_ROADMAP.md) 了解当前定位和方向
+1. 先看 [产品路线](PRODUCT_ROADMAP.md) 了解当前定位、产品保留决策和方向
 2. 再看 [架构设计](ARCHITECTURE.md) 与 [开发指南](DEVELOPMENT.md) 了解当前实现边界
-3. 如需回顾历史，再查看 `reports/` 下的旧报告
+3. 如需了解战略依据，再查看桌面上的 RemindAI 研究报告
 4. 阅读 [更新日志](../CHANGELOG.md) 了解版本历史
 
 ---
@@ -100,9 +92,7 @@
 
 ### 测试和质量
 
-- [E2E 测试指南](../E2E_TEST_GUIDE.md) - 测试方法
-- [代码审核报告](reports/CODE_REVIEW_REPORT.md) - 代码质量分析
-- [验证报告](reports/VALIDATION_REPORT.md) - 功能验证
+- [开发任务清单](../DEVELOPMENT_TASKS.md) - 当前质量缺口、验收标准和验证记录
 
 ---
 
@@ -120,6 +110,8 @@
 - [什么是 RemindAI？](USER_GUIDE.md#什么是-remindai)
 - [产品路线](PRODUCT_ROADMAP.md)
 - [工作原理](ARCHITECTURE.md#核心组件)
+- [控制平面语义](API.md#控制平面语义)
+- [监控源能力分层](MONITORING_SOURCES.md#能力分层)
 - [提示检测机制](ARCHITECTURE.md#提示检测)
 - [会话管理](ARCHITECTURE.md#会话管理)
 
@@ -152,7 +144,7 @@
 
 ## 📅 文档更新
 
-- **最后更新**: 2026-05-14
+- **最后更新**: 2026-05-19
 - **版本**: v0.2.0
 - **维护者**: RemindAI Team
 

@@ -20,6 +20,14 @@ export const SourceKindSchema = z.enum([
   'codex-desktop',
   'cursor',
   'antigravity',
+  'ai-ide',
+  'trae',
+  'codebuddy',
+  'lingma',
+  'marscode',
+  'codegeex',
+  'comate',
+  'qwen-code',
   'external',
 ]);
 

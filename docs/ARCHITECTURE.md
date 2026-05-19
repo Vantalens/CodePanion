@@ -2,14 +2,25 @@
 
 ## 概述
 
-RemindAI 是一个本地优先的个人 AI 工作流中控台，用于统一接入、查看、提醒和接管本机上的多个 AI 开发任务。核心架构是 daemon 事件中心：CLI/PTTY、Codex Desktop 本地会话同步器、VS Code 扩展和外部适配器统一输出 workflow event，GUI 通过 WebSocket 接收统一事件流，并把分散的任务状态收束到一个本地操作界面。
+RemindAI 是一个本地优先、供应商中立、单入口多出口的 AI 开发工作流控制台 / 控制平面，用于统一接入、查看、提醒和接管本机上的多个 AI 开发任务。核心架构是 daemon 事件中心：CLI/PTTY、Codex Desktop 本地会话同步器、本地 AI 编程工具进程扫描、VS Code 扩展和外部适配器统一输出 workflow event，GUI 通过 WebSocket 接收统一事件流，并把分散的任务状态收束到一个本地操作界面。
+
+当前架构不废弃。Node daemon、HTTP/WebSocket、WPF/WebView2 GUI、`source` / `session` / `workflow` / `event` 语义模型是后续控制平面路线的稳定基础。Alpha 阶段继续保留 Windows GUI 和双击 `RemindAI.Gui.exe` 的普通用户入口；Tauri/Avalonia、provider adapter、Enterprise 治理能力和规则跨生态同步放入 Beta 或更后阶段评估。
 
 产品路线分为两个阶段：
 
-1. **个人本地控制台**：先解决多源接入、任务总览、提醒、上下文查看和统一回复。
+1. **Windows Alpha 个人本地控制台**：先解决 Claude Code、Codex、VS Code/Copilot、CLI/PTTY、Codex Desktop 的多源接入、任务总览、提醒、上下文查看和统一回复。
 2. **本地 AI 工作流操作台**：再在本地能力基础上增加工作流模板、任务编排、跨工具协作和结果归档。
 
-第一阶段不做默认系统级 OCR 或全局窗口内容读取；多窗口监控优先通过插件、扩展和显式适配器完成。RemindAI 明确不以多用户协作或团队平台为目标。
+第一阶段不做默认系统级 OCR 或全局窗口内容读取；多窗口监控优先通过进程级识别、插件、扩展、CLI 包装和显式适配器完成。国产 AI 编程工具采用分层覆盖策略，首批按通义灵码 / Qoder、CodeBuddy、Trae、百度 Comate、CodeGeeX 推进，MarsCode、CodeArts 放入下一梯队验证。RemindAI 明确不以多用户协作或团队平台为目标，也不做模型聊天客户端、完整 AI IDE 或 token 二次分销平台。
+
+## 架构契约
+
+- **本地优先**：daemon 默认监听 `127.0.0.1`，除健康检查外请求需要本地 token；运行权限保持在当前用户范围内。
+- **最小采集**：默认只采集完成控制台能力所需的会话状态、来源元数据、事件、必要上下文和用户明确接入的数据。
+- **显式接入**：深度状态优先通过 CLI/PTTY、公开扩展 API、companion extension 或外部适配器接入。
+- **不读私有状态**：不读取账号、token、cookie、插件私有数据库、上游工具私有 API 或全局屏幕内容。
+- **能力分层**：L1 表示工具存在识别，L2 表示状态事件，L3 表示回复或继续执行，L4 表示工作流编排。文档和 GUI 不应把低层能力描述为深度集成。
+- **接口稳定**：`source`、`session`、`workflow`、`event` 是控制平面的核心语义，后续适配器 SDK、审计快照和 provider adapter 都应建立在这些语义上。
 
 ## 系统架构
 

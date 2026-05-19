@@ -19,11 +19,13 @@ const MonitorsSchema = z
     cli: z.boolean().default(true),
     vscode: z.boolean().default(true),
     codexDesktop: z.boolean().default(true),
+    aiTools: z.boolean().default(true),
   })
   .default({
     cli: true,
     vscode: true,
     codexDesktop: true,
+    aiTools: true,
   });
 
 const ConfigSchema = z.object({

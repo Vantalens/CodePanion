@@ -3,7 +3,6 @@ node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-package-lock.json
 .npm
 .eslintcache
 
@@ -11,6 +10,7 @@ package-lock.json
 dist/
 build/
 publish/
+packages/daemon/bundle/daemon.cjs
 *.tsbuildinfo
 
 # .NET
@@ -41,6 +41,7 @@ Desktop.ini
 # Test outputs
 test-results/
 coverage/
+output/
 
 # Temporary files
 *.tmp

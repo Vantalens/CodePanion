@@ -10,8 +10,9 @@
     "build": "npm run build -w packages/daemon && npm run build:daemon-bundle",
     "build:daemon-bundle": "node scripts/build-daemon-bundle.mjs",
     "dev:daemon": "npm run dev -w packages/daemon",
-    "gui:run": "dotnet run --project packages/gui/RemindAI.Gui.csproj",
+    "gui:run": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/run-gui.ps1",
     "gui:build": "dotnet build packages/gui/RemindAI.Gui.csproj -c Release",
+    "package:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/package-windows.ps1",
     "validate:extensions": "node scripts/validate-extensions.mjs"
   }
 }

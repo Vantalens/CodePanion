@@ -38,13 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `outputChunks` 字段 - 结构化输出块
 
 #### Testing & Documentation
-- 功能验证测试脚本（test-validation.sh）
-- 端到端测试脚本（test-e2e.sh）
-- 交互式测试脚本（test-interactive.js）
-- 验证报告（VALIDATION_REPORT.md）
-- E2E 测试报告（E2E_TEST_REPORT.md）
-- E2E 测试指南（E2E_TEST_GUIDE.md）
-- 项目完成总结（COMPLETION_SUMMARY.md）
+- 早期功能验证、端到端和交互式测试材料曾用于阶段性验收；这些旧脚本已在后续清理中移除，当前质量门禁以 `DEVELOPMENT_TASKS.md` 和 `docs/DEVELOPMENT.md` 为准
 
 ### Changed
 - 项目名称统一为 RemindAI（驼峰命名）
@@ -63,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 更新所有文档中的项目结构
 - 添加图标文件说明（icon-README.md）
 - 添加提示音文件说明（Assets/README.md）
+- 旧路线阶段性报告已在后续清理中移除，当前状态以 README、产品路线和开发任务清单为准
 
 ### Technical Improvements
 - 构建状态: 0 个警告，0 个错误
@@ -101,24 +96,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## 即将推出 (Roadmap)
 
-### v0.3.0 (计划中)
-- [ ] 跨平台支持（macOS, Linux）
-- [ ] 历史记录查看
-- [ ] 会话导出功能
-- [ ] 设置界面
-- [ ] 主题切换
-
-### v0.4.0 (计划中)
-- [ ] 插件系统
-- [ ] 自定义提示检测规则
-- [ ] 远程会话支持
-- [ ] 性能优化
-
-### v1.0.0 (长期目标)
-- [ ] 生产级稳定性
-- [ ] 完整的文档和教程
-- [ ] 社区支持
-- [ ] 安装程序
+当前路线以 [产品路线](docs/PRODUCT_ROADMAP.md) 和 [开发任务清单](DEVELOPMENT_TASKS.md) 为准。旧版本号路线不再维护，避免和 Windows Alpha / Beta / GA 路线重复。
 
 ---
 

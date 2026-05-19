@@ -10,7 +10,7 @@ echo [1/2] 停止 daemon...
 node packages\daemon\dist\index.js stop
 
 echo [2/2] 关闭 GUI...
-echo 请手动关闭 GUI 窗口（右键托盘图标 -> 退出）
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\stop-gui.ps1
 
 echo.
 echo ========================================

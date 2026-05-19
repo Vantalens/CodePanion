@@ -15,6 +15,9 @@ type TrackedFile = {
   threadId: string;
 };
 
+const RECENT_SESSION_LIMIT = 40;
+const ACTIVE_SESSION_WINDOW_MS = 1000 * 60 * 60 * 24 * 3;
+
 export class CodexDesktopAdapter {
   private readonly root = join(homedir(), '.codex', 'sessions');
   private readonly files = new Map<string, TrackedFile>();
@@ -40,7 +43,7 @@ export class CodexDesktopAdapter {
   }
 
   private async scan() {
-    const candidates = this.findRecentSessionFiles(80);
+    const candidates = this.findRecentSessionFiles(RECENT_SESSION_LIMIT);
     for (const path of candidates) {
       await this.consume(path);
     }
@@ -109,7 +112,7 @@ export class CodexDesktopAdapter {
         source: 'codex-desktop',
         title: titleFromMeta(payload, path),
         workspace: stringOrUndefined(payload.cwd),
-        status: 'running',
+        status: isFreshTimestamp(timestamp) ? 'running' : 'done',
         updatedAt: timestamp,
         itemCount: 0,
       });
@@ -126,7 +129,7 @@ export class CodexDesktopAdapter {
       id: threadId,
       source: 'codex-desktop',
       title: titleFromPath(path),
-      status: 'running',
+      status: isFreshTimestamp(timestamp) ? 'running' : 'done',
       updatedAt: timestamp,
       itemCount: 0,
     };
@@ -144,21 +147,25 @@ export class CodexDesktopAdapter {
     if (raw.type === 'event_msg') {
       const eventType = String(payload.type ?? 'event');
       if (eventType === 'user_message') {
+        const content = textFrom(payload.message) || textFrom(payload.text_elements) || '';
+        if (shouldHideCodexContent(content)) return null;
         return {
           ...base,
           kind: 'message',
           role: 'user',
           title: 'User',
-          content: textFrom(payload.message) || textFrom(payload.text_elements) || '',
+          content,
         };
       }
       if (eventType === 'agent_message') {
+        const content = textFrom(payload.message);
+        if (shouldHideCodexContent(content)) return null;
         return {
           ...base,
           kind: 'message',
           role: 'assistant',
           title: 'Codex',
-          content: textFrom(payload.message),
+          content,
         };
       }
       if (eventType === 'task_started') {
@@ -178,12 +185,14 @@ export class CodexDesktopAdapter {
       if (itemType === 'message') {
         const role = stringOrUndefined(payload.role) ?? 'assistant';
         if (role === 'system' || role === 'developer') return null;
+        const content = textFrom(payload.content);
+        if (shouldHideCodexContent(content)) return null;
         return {
           ...base,
           kind: 'message',
           role,
           title: role,
-          content: textFrom(payload.content),
+          content,
         };
       }
       if (itemType.includes('tool_call') || itemType === 'function_call') {
@@ -243,6 +252,10 @@ function toTimestamp(value: unknown): number | undefined {
   return undefined;
 }
 
+function isFreshTimestamp(timestamp: number): boolean {
+  return Date.now() - timestamp <= ACTIVE_SESSION_WINDOW_MS;
+}
+
 function statusFromEvent(eventType: string): WorkflowItem['status'] | undefined {
   if (/error|failed|fail/i.test(eventType)) return 'error';
   if (/complete|done|end/i.test(eventType)) return 'done';
@@ -266,6 +279,15 @@ function textFrom(value: unknown): string {
     if (typeof obj.message === 'string') return obj.message;
   }
   return JSON.stringify(value, null, 2);
+}
+
+function shouldHideCodexContent(content: string): boolean {
+  const text = content.trim();
+  if (!text) return false;
+  return /^<environment_context>/i.test(text)
+    || /^<turn_aborted>/i.test(text)
+    || /^<permissions instructions>/i.test(text)
+    || /^# Context from my IDE setup:/i.test(text);
 }
 
 function summarizePayload(payload: JsonObject): string {

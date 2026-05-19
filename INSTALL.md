@@ -197,7 +197,7 @@ remindai status
 ### 3. 测试 GUI
 
 ```bash
-# 启动 GUI
+# 开发环境启动 GUI
 npm run gui:run
 ```
 
@@ -294,7 +294,29 @@ GUI 配置存储在 `~/.remindai/gui-settings.json`（自动生成）。
 
 ## 🚀 启动 RemindAI
 
-### 方法 1: 使用 CLI 命令（推荐）
+### 方法 1: 双击便携版 EXE（普通用户推荐）
+
+运行打包命令：
+
+```bash
+npm run package:windows
+```
+
+打开发布目录：
+
+```text
+dist/RemindAI-win-x64/
+```
+
+双击：
+
+```text
+RemindAI.Gui.exe
+```
+
+GUI 会自动启动本地 daemon。普通使用不需要手动输入 `remindai start`、`npm run gui:run` 或 `dotnet run`。
+
+### 方法 2: 使用 CLI 命令（开发者）
 
 ```bash
 # 启动 daemon
@@ -304,7 +326,7 @@ remindai start
 npm run gui:run
 ```
 
-### 方法 2: 手动启动
+### 方法 3: 手动启动（开发者调试）
 
 ```bash
 # 终端 1: 启动 daemon
@@ -314,28 +336,11 @@ node packages/daemon/dist/index.js start
 packages/gui/bin/Debug/net8.0-windows/RemindAI.Gui.exe
 ```
 
-### 方法 3: 使用脚本
+### 方法 4: 使用脚本
 
-创建 `start.bat`：
-```batch
-@echo off
-echo Starting RemindAI...
+双击运行仓库根目录的 `start.bat`。该脚本用于开发环境，会启动 daemon 并打开 GUI；如果 GUI 已经运行，会跳过重复启动。
 
-REM 启动 daemon
-start /B remindai start
-
-REM 等待 daemon 启动
-timeout /t 2 /nobreak >nul
-
-REM 启动 GUI
-start packages/gui/bin/Debug/net8.0-windows/RemindAI.Gui.exe
-
-echo RemindAI started!
-```
-
-双击运行 `start.bat`。
-
-### 方法 4: 开机自启动（可选）
+### 方法 5: 开机自启动（可选）
 
 1. 按 `Win + R`，输入 `shell:startup`
 2. 创建 `start.bat` 的快捷方式
@@ -345,13 +350,11 @@ echo RemindAI started!
 
 ## 🧪 测试安装
 
-运行交互式测试：
+运行一个内联交互式命令，不需要额外测试脚本：
 
 ```bash
-# 启动 daemon 和 GUI
-
-# 在新终端运行测试命令
-node packages/daemon/dist/index.js run -- node test-interactive.js
+# 启动 daemon 和 GUI 后，在新终端运行
+node packages/daemon/dist/index.js run -- node -e "const readline=require('readline');const rl=readline.createInterface({input:process.stdin,output:process.stdout});rl.question('Continue? (y/n): ',a=>{console.log('answer:',a);rl.close();});"
 ```
 
 **预期结果**:
@@ -450,7 +453,7 @@ remindai --version
 2. 清理缓存：
    ```bash
    npm cache clean --force
-   rm -rf node_modules package-lock.json
+   rm -rf node_modules
    npm install
    ```
 3. 使用国内镜像（可选）：
