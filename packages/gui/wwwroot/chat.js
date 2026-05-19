@@ -14,6 +14,8 @@ const state = {
     workflowThreads: new Map()
 };
 
+const MAX_MESSAGES = 5000;
+const MAX_CODE_BLOCKS = 300;
 const ACTIVE_CONVERSATION_WINDOW_MS = 1000 * 60 * 60 * 24 * 3;
 const ARCHIVE_CONVERSATION_WINDOW_MS = 1000 * 60 * 60 * 24 * 14;
 
@@ -119,11 +121,48 @@ function addMessage(message, render = true) {
     state.messages.push(normalized);
     upsertConversation(normalized);
     extractCodeBlocks(normalized);
+    pruneMessageState();
     if (!render) return;
     renderConversationList();
     appendMessageIfVisible(normalized, wasEmpty);
     renderCodeBrowser();
     renderContextDrawer();
+}
+
+function pruneMessageState() {
+    let changed = false;
+
+    if (state.messages.length > MAX_MESSAGES) {
+        state.messages = state.messages.slice(-MAX_MESSAGES);
+        changed = true;
+    }
+
+    if (state.codeBlocks.length > MAX_CODE_BLOCKS) {
+        state.codeBlocks = state.codeBlocks.slice(-MAX_CODE_BLOCKS);
+        if (state.activeCodeId && !state.codeBlocks.some(block => block.id === state.activeCodeId)) {
+            state.activeCodeId = state.codeBlocks[0]?.id || '';
+        }
+    }
+
+    if (changed) rebuildConversationState();
+}
+
+function rebuildConversationState() {
+    const messages = state.messages;
+    state.conversations.clear();
+    state.codeBlocks = [];
+    state.activeCodeId = '';
+    messages.forEach(message => {
+        upsertConversation(message);
+        extractCodeBlocks(message);
+    });
+    if (state.codeBlocks.length > MAX_CODE_BLOCKS) {
+        state.codeBlocks = state.codeBlocks.slice(-MAX_CODE_BLOCKS);
+        state.activeCodeId = state.codeBlocks[0]?.id || '';
+    }
+    if (state.activeConversation && !state.conversations.has(state.activeConversation)) {
+        state.activeConversation = '';
+    }
 }
 
 function appendMessageIfVisible(message, wasEmpty) {
@@ -547,6 +586,9 @@ function extractCodeBlocks(message) {
             timestamp: message.timestamp
         };
         state.codeBlocks.push(block);
+        if (state.codeBlocks.length > MAX_CODE_BLOCKS) {
+            state.codeBlocks.splice(0, state.codeBlocks.length - MAX_CODE_BLOCKS);
+        }
         if (!state.activeCodeId) state.activeCodeId = block.id;
     }
 }

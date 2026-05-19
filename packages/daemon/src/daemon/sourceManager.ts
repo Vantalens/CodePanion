@@ -16,6 +16,9 @@ type MonitorEventReply = {
   timestamp: number;
 };
 
+const MAX_EVENTS = 1000;
+const MAX_REPLIES_PER_EVENT = 50;
+
 export class SourceManager {
   private sources = new Map<string, MonitorSource>();
   private events = new Map<string, StoredMonitorEvent>();
@@ -73,6 +76,7 @@ export class SourceManager {
       timestamp: input.timestamp ?? Date.now(),
     };
     this.events.set(event.id, event);
+    this.pruneEvents();
     this.broadcast({ type: 'monitor-event', event });
     logger.info({ event }, 'monitor event');
     return event;
@@ -90,6 +94,9 @@ export class SourceManager {
     };
     const replies = this.replies.get(eventId) ?? [];
     replies.push(reply);
+    if (replies.length > MAX_REPLIES_PER_EVENT) {
+      replies.splice(0, replies.length - MAX_REPLIES_PER_EVENT);
+    }
     this.replies.set(eventId, replies);
 
     this.broadcast({
@@ -125,6 +132,18 @@ export class SourceManager {
       } catch (err) {
         logger.error({ err }, 'source listener failed');
       }
+    }
+  }
+
+  private pruneEvents() {
+    if (this.events.size <= MAX_EVENTS) return;
+
+    const events = Array.from(this.events.values()).sort((a, b) => b.timestamp - a.timestamp);
+    const keep = new Set(events.slice(0, MAX_EVENTS).map((event) => event.id));
+    for (const eventId of this.events.keys()) {
+      if (keep.has(eventId)) continue;
+      this.events.delete(eventId);
+      this.replies.delete(eventId);
     }
   }
 }

@@ -208,7 +208,13 @@ git checkout -b feature/your-feature-name
 
 ### 3. 测试
 
-当前仓库还没有稳定的首方自动化测试套件。提交前至少执行“当前质量门禁”中的构建和校验命令；如果本次改动涉及协议、会话状态、提示检测或工作流聚合，应同时补上对应测试后再合并。
+提交前先运行根目录统一测试命令：
+
+```bash
+npm test
+```
+
+该命令会先构建 daemon TypeScript，再运行 `packages/daemon/test/*.test.mjs`。如果本次改动涉及协议、会话状态、提示检测、来源事件或 workflow 聚合，应同步补上对应测试后再合并。
 
 ### 4. 提交
 
@@ -389,16 +395,26 @@ export function loadConfig(): Config {
 
 ### 当前状态
 
-当前仓库仍处于首方测试补齐阶段，尚未形成稳定的自动化测试目录和统一测试命令。继续开发前应优先补齐以下覆盖面：
+仓库已经建立根目录统一测试命令：
+
+```bash
+npm test
+```
+
+当前首方测试覆盖以下核心面：
 
 - `promptDetector`
 - `sessionManager`
 - `sourceManager`
 - `workflowManager`
-- `codexDesktopAdapter`
 - 关键 HTTP/WebSocket 协议
 
-### 建议组织方式
+仍需继续补齐：
+
+- `codexDesktopAdapter`
+- 更完整的 GUI 交互和真实 Windows Alpha 验收记录
+
+### 测试组织方式
 
 ```
 packages/daemon/
@@ -528,7 +544,15 @@ test('should send notification', async () => {
 
 ### 运行测试
 
-在补齐测试框架之前，先以仓库当前已有校验命令作为最低门槛。引入测试框架后，应把统一测试命令补充回根目录 `package.json` 和本节文档。
+```bash
+npm test
+npm run build
+npm run validate:extensions
+dotnet build packages/gui/CodePanion.Gui.csproj -c Release
+git diff --check
+```
+
+阶段 1 的完整验收边界见 [PHASE1_ACCEPTANCE.md](PHASE1_ACCEPTANCE.md)。
 
 ---
 
@@ -628,6 +652,7 @@ node --prof-process isolate-*.log > profile.txt
 
 4. **确保质量门禁通过**
    ```bash
+   npm test
    npm run build
    npm run validate:extensions
    dotnet build packages/gui/CodePanion.Gui.csproj -c Release

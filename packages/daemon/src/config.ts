@@ -8,6 +8,7 @@ export const HOME_DIR = join(homedir(), '.codepanion');
 export const CONFIG_PATH = join(HOME_DIR, 'config.json');
 export const PID_PATH = join(HOME_DIR, 'daemon.pid');
 export const LOG_PATH = join(HOME_DIR, 'log.jsonl');
+export const WORKFLOW_SNAPSHOT_PATH = join(HOME_DIR, 'workflow-snapshot.json');
 
 const TemplateSchema = z.object({
   label: z.string().min(1),

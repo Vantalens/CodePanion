@@ -13,6 +13,7 @@
     "gui:run": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/run-gui.ps1",
     "gui:build": "dotnet build packages/gui/CodePanion.Gui.csproj -c Release",
     "package:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/package-windows.ps1",
+    "test": "npm run build -w packages/daemon && node --test packages/daemon/test/*.test.mjs",
     "validate:extensions": "node scripts/validate-extensions.mjs"
   }
 }

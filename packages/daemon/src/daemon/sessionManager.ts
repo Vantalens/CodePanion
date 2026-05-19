@@ -3,6 +3,9 @@ import type { WebSocket } from 'ws';
 import type { SessionInfo, WsServerEvent } from '../shared/protocol.js';
 import { logger } from '../logger.js';
 
+const MAX_FULL_OUTPUT_CHARS = 256 * 1024;
+const MAX_OUTPUT_CHUNKS = 1000;
+
 export interface OutputChunk {
   timestamp: number;
   content: string;
@@ -13,8 +16,9 @@ export interface SessionRecord extends SessionInfo {
   cliPid: number;
   cliSocket?: WebSocket;
   outputBuffer: string;
-  fullOutput: string[];        // 新增：完整输出历史（字符串数组）
-  outputChunks: OutputChunk[]; // 新增：结构化输出块
+  fullOutput: string[];
+  fullOutputChars: number;
+  outputChunks: OutputChunk[];
 }
 
 export class SessionManager {
@@ -45,8 +49,9 @@ export class SessionManager {
       startedAt: Date.now(),
       status: 'running',
       outputBuffer: '',
-      fullOutput: [],        // 初始化完整输出
-      outputChunks: [],      // 初始化输出块
+      fullOutput: [],
+      fullOutputChars: 0,
+      outputChunks: [],
     };
     this.sessions.set(id, rec);
     this.broadcast({ type: 'session-registered', session: this.toInfo(rec) });
@@ -65,14 +70,9 @@ export class SessionManager {
     const rec = this.sessions.get(id);
     if (!rec) return;
 
-    // 保留滑动窗口（用于提示检测）
     rec.outputBuffer = (rec.outputBuffer + chunk).slice(-8192);
-
-    // 保存完整历史
-    rec.fullOutput.push(chunk);
-
-    // 结构化存储
-    rec.outputChunks.push({
+    this.appendFullOutput(rec, chunk);
+    this.appendOutputChunk(rec, {
       timestamp: Date.now(),
       content: chunk,
       type: 'output'
@@ -88,14 +88,12 @@ export class SessionManager {
     rec.status = 'waiting';
     rec.lastPrompt = lastLines;
 
-    // 记录提示到输出块
-    rec.outputChunks.push({
+    this.appendOutputChunk(rec, {
       timestamp: Date.now(),
       content: lastLines,
       type: 'prompt'
     });
 
-    // 获取完整输出
     const fullOutput = rec.fullOutput.join('');
 
     this.broadcast({
@@ -103,7 +101,7 @@ export class SessionManager {
       sessionId: id,
       lastLines,
       options,
-      fullOutput  // 新增：完整输出
+      fullOutput
     });
   }
 
@@ -114,15 +112,14 @@ export class SessionManager {
     rec.exitCode = exitCode;
     const durationMs = Date.now() - rec.startedAt;
     this.broadcast({ type: 'session-exited', sessionId: id, exitCode, durationMs });
-    setTimeout(() => this.sessions.delete(id), 60_000);
+    setTimeout(() => this.sessions.delete(id), 60_000).unref();
   }
 
   injectReply(id: string, text: string): boolean {
     const rec = this.sessions.get(id);
     if (!rec || !rec.cliSocket || rec.cliSocket.readyState !== rec.cliSocket.OPEN) return false;
 
-    // 记录回复到输出块
-    rec.outputChunks.push({
+    this.appendOutputChunk(rec, {
       timestamp: Date.now(),
       content: text,
       type: 'reply'
@@ -171,7 +168,29 @@ export class SessionManager {
   }
 
   private toInfo(rec: SessionRecord): SessionInfo {
-    const { cliSocket, outputBuffer, cliPid, ...info } = rec;
+    const { cliSocket, outputBuffer, fullOutputChars, cliPid, ...info } = rec;
     return info;
+  }
+
+  private appendFullOutput(rec: SessionRecord, chunk: string) {
+    rec.fullOutput.push(chunk);
+    rec.fullOutputChars += chunk.length;
+
+    while (rec.fullOutputChars > MAX_FULL_OUTPUT_CHARS && rec.fullOutput.length > 1) {
+      const removed = rec.fullOutput.shift() ?? '';
+      rec.fullOutputChars -= removed.length;
+    }
+
+    if (rec.fullOutputChars > MAX_FULL_OUTPUT_CHARS && rec.fullOutput.length === 1) {
+      rec.fullOutput[0] = rec.fullOutput[0].slice(-MAX_FULL_OUTPUT_CHARS);
+      rec.fullOutputChars = rec.fullOutput[0].length;
+    }
+  }
+
+  private appendOutputChunk(rec: SessionRecord, chunk: OutputChunk) {
+    rec.outputChunks.push(chunk);
+    if (rec.outputChunks.length > MAX_OUTPUT_CHUNKS) {
+      rec.outputChunks.splice(0, rec.outputChunks.length - MAX_OUTPUT_CHUNKS);
+    }
   }
 }

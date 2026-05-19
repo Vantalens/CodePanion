@@ -47,12 +47,54 @@
 ## 阶段 1 退出标准
 
 - [-] 用户可以在一个 Windows GUI 中看到所有活跃的本地 AI 任务
+  - [x] GUI 使用统一 workflow 视图汇总 CLI/PTTY、Codex Desktop、VS Code、外部适配器和本地 AI 工具来源
+  - [x] 左侧任务收件箱可以按当前、待处理、运行中、失败、产物筛选
+  - [x] 主工作台可以展示任务上下文、事件流、输出和产物预览
+  - [ ] 两个以上真实 `codepanion run --` 会话同时运行时，GUI 能稳定展示独立任务
+  - [ ] Codex Desktop、VS Code 来源和 CLI 会话同时存在时，GUI 能正确区分来源、工作区和状态
+  - [ ] 真实运行截图或录屏已归档到阶段 1 验收记录
 - [-] 等待输入的任务能够被快速发现，且无需切换窗口也能识别
+  - [x] `prompt` / `waiting` 状态在任务列表、主区和统计区中有独立优先级
+  - [x] 等待输入事件会触发系统通知和 GUI 内消息
+  - [x] 任务收件箱支持只看待处理任务
+  - [ ] 多个任务同时等待输入时，排序能把最需要处理的任务置顶
+  - [ ] 等待输入任务能显示最后上下文、可选项、来源和工作区
+  - [ ] 断线重连后等待输入状态不会丢失或误判为普通运行中
 - [-] 支持交互的任务可以从 CodePanion 中回复并继续执行
+  - [x] CLI/PTTY 会话支持从 GUI 写回 `sessions/:id/reply`
+  - [x] 外部 monitor event 支持事件回复通道
+  - [x] GUI 会将可回复任务映射到真实 `sessionId` 或 `eventId`
+  - [ ] 回复失败时 GUI 能显示明确错误，而不是静默失败
+  - [ ] 同时存在多个等待输入会话时，回复只写回目标会话
+  - [ ] 事件回复与 CLI 回复的能力边界在 UI 中明确区分
 - [ ] Claude Code、Codex、VS Code/Copilot、CLI/PTTY、Codex Desktop 的基础闭环都具备可验证路径
-- [ ] 主要日常使用链路不会出现失控的内存增长
-- [ ] 核心路径具备稳定的自动化验证基线
+  - [ ] Claude Code 通过 `codepanion run --` 接入的示例命令、预期事件和回复步骤已记录
+  - [ ] Codex CLI 通过 `codepanion run --` 接入的示例命令、预期事件和回复步骤已记录
+  - [ ] VS Code/Copilot 来源注册、任务结束事件和终端事件的验收步骤已记录
+  - [ ] CLI/PTTY 的运行、等待输入、回复、退出码链路已自动化或半自动化验证
+  - [ ] Codex Desktop 本地线程同步的扫描窗口、噪音过滤和归档边界已验证
+  - [ ] 每类来源都明确标注 L1/L2/L3/L4 能力层级和不可读取的数据
+- [-] 主要日常使用链路不会出现失控的内存增长
+  - [x] `SessionManager` 输出历史具备大小、条数或时间保留上限
+  - [x] `WorkflowManager` 线程、条目和去重集合具备保留策略
+  - [x] `SourceManager` 事件与回复具备保留策略
+  - [-] GUI 消息列表、任务列表和产物列表具备清理或虚拟化方案
+  - [ ] 长时间运行和大量事件压测已记录内存曲线
+  - [x] daemon 重启后的最小有用历史恢复不依赖无限内存缓存
+- [-] 核心路径具备稳定的自动化验证基线
+  - [x] 根目录存在统一测试命令
+  - [x] `promptDetector`、`sessionManager`、`sourceManager`、`workflowManager` 有单元测试
+  - [x] HTTP 认证、session 注册、输出追加、prompt、reply、exit 有集成测试
+  - [x] WebSocket observer 和 CLI socket 的基本消息流有测试
+  - [x] VS Code extension manifest 校验纳入验证基线
+  - [-] Windows GUI 至少具备构建验证和关键配置读写验证
 - [-] 文档能够真实反映当前产品状态和已支持能力
+  - [x] README、架构、API、监控源和路线文档已统一为本地 AI 开发工作流控制台 / 控制平面定位
+  - [x] 文档明确不做完整 AI IDE、模型聊天客户端、团队协作平台、默认 OCR 或全局屏幕读取
+  - [x] 监控源文档已按 L1/L2/L3/L4 描述能力边界
+  - [ ] 故障排查和安装说明继续校准为普通用户双击便携版优先
+  - [x] 阶段 1 验收清单与真实验证记录保持同步
+  - [ ] 文档不得把进程级识别描述成深度接管或私有状态读取
 
 ---
 
@@ -60,55 +102,55 @@
 
 ### P0.1 建立首方自动化测试基线
 
-- [ ] 定义测试框架和目录结构
-- [ ] 增加根目录统一测试命令
-- [ ] 为 `promptDetector` 添加单元测试
-- [ ] 为 `sessionManager` 添加单元测试
-- [ ] 为 `sourceManager` 添加单元测试
-- [ ] 为 `workflowManager` 添加单元测试
+- [x] 定义测试框架和目录结构
+- [x] 增加根目录统一测试命令
+- [x] 为 `promptDetector` 添加单元测试
+- [x] 为 `sessionManager` 添加单元测试
+- [x] 为 `sourceManager` 添加单元测试
+- [x] 为 `workflowManager` 添加单元测试
 - [ ] 为 `codexDesktopAdapter` 添加解析测试
-- [ ] 为关键 HTTP/WebSocket 行为添加集成测试
-- [ ] 在开发文档中记录本地测试流程
-- [ ] 运行测试命令并记录通过结果
+- [x] 为关键 HTTP/WebSocket 行为添加集成测试
+- [x] 在开发文档中记录本地测试流程
+- [x] 运行测试命令并记录通过结果
 
 **验收标准：**
 
-- [ ] 全新检出仓库后，可以按文档成功运行测试命令
-- [ ] 对提示、会话、来源或工作流的修改都有回归覆盖
+- [x] 全新检出仓库后，可以按文档成功运行测试命令
+- [-] 对提示、会话、来源或工作流的修改都有回归覆盖
 
 ### P0.2 增加持久化与保留边界
 
-- [ ] 明确哪些状态属于实时状态
-- [ ] 明确哪些状态需要持久化
-- [ ] 设计工作流线程与关键历史的持久化方案
-- [ ] 设计会话输出保留策略
-- [ ] 设计工作流条目保留策略
-- [ ] 设计来源事件保留策略
-- [ ] 实现 daemon 重启后的最小历史恢复
-- [ ] 为持久化和保留策略添加测试
-- [ ] 在文档中说明持久化、保留和清理规则
+- [x] 明确哪些状态属于实时状态
+- [x] 明确哪些状态需要持久化
+- [x] 设计工作流线程与关键历史的持久化方案
+- [x] 设计会话输出保留策略
+- [x] 设计工作流条目保留策略
+- [x] 设计来源事件保留策略
+- [x] 实现 daemon 重启后的最小历史恢复
+- [x] 为持久化和保留策略添加测试
+- [x] 在文档中说明持久化、保留和清理规则
 
 **验收标准：**
 
-- [ ] daemon 重启后，不会丢失 GUI 继续有用所需的最小历史
-- [ ] 长时间运行不会出现无限制内存增长
-- [ ] 保留策略有文档说明，并在需要处支持配置
+- [x] daemon 重启后，不会丢失 GUI 继续有用所需的最小历史
+- [-] 长时间运行不会出现无限制内存增长
+- [-] 保留策略有文档说明，配置化仍待后续补齐
 
 ### P0.3 固化阶段 1 验收场景
 
-- [ ] 建立阶段 1 验收清单文档
+- [x] 建立阶段 1 验收清单文档
 - [ ] 覆盖多个 CLI 会话同时运行
-- [ ] 覆盖一个或多个会话等待输入
-- [ ] 覆盖回复准确写回对应会话
+- [-] 覆盖一个或多个会话等待输入
+- [x] 覆盖回复准确写回对应会话
 - [ ] 覆盖 Codex Desktop 线程接入
 - [ ] 覆盖 VS Code 来源注册
 - [ ] 覆盖中文文本在 daemon、GUI、WebView 全链路不乱码
-- [ ] 覆盖 daemon 重启后 GUI 可重新连接
-- [ ] 将可自动化场景接入测试命令
+- [-] 覆盖 daemon 重启后 GUI 可重新连接
+- [x] 将可自动化场景接入测试命令
 
 **验收标准：**
 
-- [ ] 后续开发者无需依赖口口相传，也能判断阶段 1 是否仍然成立
+- [-] 后续开发者无需依赖口口相传，也能判断阶段 1 是否仍然成立
 
 ---
 
@@ -179,6 +221,8 @@
 
 - [ ] 定义 GUI 断线后的可见状态
 - [ ] 定义 daemon 重启后的 GUI 重连行为
+- [x] 设置窗口保存后真实写回配置并触发 GUI 重载连接配置
+- [x] GUI WebSocket 连接日志不再泄露完整 daemon token
 - [ ] 增加过期来源处理
 - [ ] 增加 daemon 启停状态提示
 - [ ] 增强适配器失败日志
@@ -335,9 +379,9 @@
 - [x] 完成报告策略吸收到 README、产品路线、架构、API、监控源和文档中心
 - [x] 清理旧路线报告、预览输出、一次性测试脚本、旧发布清单和已跟踪生成 bundle
 - [ ] 用真实 GUI 运行数据做滚动、来源识别、等待任务视觉验收截图
-- [ ] 建立首方自动化测试基线，优先覆盖 `aiToolProcessAdapter`、`codexDesktopAdapter`、`workflowManager`
-- [ ] 把阶段 1 验收场景转成可重复执行的检查清单
-- [ ] 设计并确定持久化与保留方案
+- [-] 建立首方自动化测试基线，已覆盖 `promptDetector`、`sessionManager`、`sourceManager`、`workflowManager`、关键 HTTP/WebSocket 行为
+- [x] 把阶段 1 验收场景转成可重复执行的检查清单
+- [-] 设计并确定持久化与保留方案，已落地内存保留上限和 workflow 最小快照恢复，配置化仍待补齐
 - [ ] 清理故障排查和用户指南中的旧启动路径
 
 ---
@@ -354,4 +398,9 @@
 - [x] `npm run package:windows` 通过，已生成 `dist/CodePanion-win-x64/CodePanion.Gui.exe`、`runtime/node.exe` 和 `daemon/daemon.cjs`
 - [x] `git check-ignore -v dist packages/gui/bin packages/gui/obj` 确认发布和构建产物不会进入 git
 - [x] 修复已归档 Codex Desktop 历史任务误显示为当前错误任务的问题
+- [x] `npm test` 通过，11 项测试通过，覆盖提示检测、会话输出保留、workflow 保留、workflow 最小快照恢复、来源事件保留、HTTP session 生命周期和 WebSocket 回复注入
+- [x] `npm run build` 通过，确认 daemon TypeScript 和 bundle 可构建
+- [x] `npm run validate:extensions` 通过，确认 VS Code extension manifest 仍有效
+- [x] `git diff --check` 通过（仅有 Windows 换行提示）
+- [x] `dotnet build packages/gui/CodePanion.Gui.csproj -c Release` 通过，验证 GUI 设置保存和日志脱敏改动可编译
 - [x] 修复工作流提示无法回复的问题，并降噪右侧无意义 text 预览

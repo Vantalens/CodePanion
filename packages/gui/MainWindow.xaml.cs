@@ -446,10 +446,15 @@ namespace CodePanion.Gui
             }
         }
 
-        private void Settings_Click(object sender, RoutedEventArgs e)
+        private async void Settings_Click(object sender, RoutedEventArgs e)
         {
             var settingsWindow = new SettingsWindow { Owner = this };
-            settingsWindow.ShowDialog();
+            if (settingsWindow.ShowDialog() == true)
+            {
+                AddLog("设置已更新，正在重新加载 daemon 连接配置...");
+                _daemonClient.ReloadConfig();
+                await _daemonClient.ReconnectAsync();
+            }
         }
 
         private async void Reconnect_Click(object sender, RoutedEventArgs e)

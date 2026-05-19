@@ -6,13 +6,14 @@ import { dirname } from 'node:path';
 if (!existsSync(dirname(LOG_PATH))) mkdirSync(dirname(LOG_PATH), { recursive: true });
 
 const isDaemon = process.argv.includes('--daemon');
+const defaultLevel = process.env.npm_lifecycle_event === 'test' ? 'silent' : 'info';
+const level = process.env.LOG_LEVEL ?? defaultLevel;
 
 export const logger = isDaemon
-  ? pino(
-      { level: process.env.LOG_LEVEL ?? 'info' },
-      pino.destination({ dest: LOG_PATH, sync: false, mkdir: true }),
-    )
-  : pino({
-      level: process.env.LOG_LEVEL ?? 'info',
-      transport: { target: 'pino-pretty', options: { colorize: true } },
-    });
+  ? pino({ level }, pino.destination({ dest: LOG_PATH, sync: false, mkdir: true }))
+  : level === 'silent'
+    ? pino({ level })
+    : pino({
+        level,
+        transport: { target: 'pino-pretty', options: { colorize: true } },
+      });

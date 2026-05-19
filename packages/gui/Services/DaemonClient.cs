@@ -119,7 +119,7 @@ namespace CodePanion.Gui.Services
                 // 连接 WebSocket
                 var port = new Uri(_daemonUrl).Port;
                 var wsUrl = $"ws://127.0.0.1:{port}/ws?token={_token}&role=observer";
-                Log($"连接 WebSocket: {wsUrl}");
+                Log($"连接 WebSocket: ws://127.0.0.1:{port}/ws?token={MaskToken(_token)}&role=observer");
 
                 var factory = new Func<ClientWebSocket>(() =>
                 {
@@ -419,6 +419,13 @@ namespace CodePanion.Gui.Services
             {
                 // 忽略日志写入错误
             }
+        }
+
+        private static string MaskToken(string token)
+        {
+            if (string.IsNullOrEmpty(token)) return "";
+            if (token.Length <= 8) return "********";
+            return $"{token[..4]}...{token[^4..]}";
         }
 
         public void Dispose()

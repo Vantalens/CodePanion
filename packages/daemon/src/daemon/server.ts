@@ -2,6 +2,7 @@ import express, { type Request, type Response, type NextFunction } from 'express
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { Server } from 'node:http';
 import type { Config } from '../config.js';
+import { WORKFLOW_SNAPSHOT_PATH } from '../config.js';
 import { Notifier } from './notifier.js';
 import { SessionManager } from './sessionManager.js';
 import { SourceManager } from './sourceManager.js';
@@ -19,7 +20,19 @@ import {
 } from '../shared/protocol.js';
 import { logger } from '../logger.js';
 
+type CreateServerOptions = {
+  workflowSnapshotPath?: string | null;
+};
+
 export function createServer(cfg: Config): {
+  start: () => Promise<Server>;
+  notifier: Notifier;
+  sessions: SessionManager;
+};
+export function createServer(
+  cfg: Config,
+  options: CreateServerOptions = {},
+): {
   start: () => Promise<Server>;
   notifier: Notifier;
   sessions: SessionManager;
@@ -28,7 +41,9 @@ export function createServer(cfg: Config): {
   const notifier = new Notifier(cfg);
   const sessions = new SessionManager();
   const sources = new SourceManager();
-  const workflows = new WorkflowManager();
+  const workflows = new WorkflowManager({
+    snapshotPath: options.workflowSnapshotPath === null ? undefined : (options.workflowSnapshotPath ?? WORKFLOW_SNAPSHOT_PATH),
+  });
   const codexAdapter = new CodexDesktopAdapter(workflows);
   const aiToolAdapter = new AiToolProcessAdapter(sources);
 
@@ -363,6 +378,12 @@ export function createServer(cfg: Config): {
 
       const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
       wss.on('connection', (ws, req) => handleWs(ws, req, cfg, sessions, sources, workflows, observerSockets));
+      httpServer.on('close', () => {
+        for (const client of wss.clients) {
+          client.terminate();
+        }
+        wss.close();
+      });
     });
 
   return { start, notifier, sessions };
