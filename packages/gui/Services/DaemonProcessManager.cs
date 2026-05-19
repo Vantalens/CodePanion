@@ -4,7 +4,7 @@ using System.IO;
 using System.Net.Http;
 using System.Threading.Tasks;
 
-namespace RemindAI.Gui.Services
+namespace CodePanion.Gui.Services
 {
     public static class DaemonProcessManager
     {
@@ -30,7 +30,7 @@ namespace RemindAI.Gui.Services
                     CreateNoWindow = true,
                     WindowStyle = ProcessWindowStyle.Hidden,
                 };
-                startInfo.Environment["REMINDAI_STARTED_BY_GUI"] = "1";
+                startInfo.Environment["CODEPANION_STARTED_BY_GUI"] = "1";
 
                 var process = Process.Start(startInfo);
                 log($"已在后台启动 daemon：PID={process?.Id}");
@@ -67,7 +67,7 @@ namespace RemindAI.Gui.Services
 
         private static string FindNodeExecutable()
         {
-            var configured = Environment.GetEnvironmentVariable("REMINDAI_NODE_PATH");
+            var configured = Environment.GetEnvironmentVariable("CODEPANION_NODE_PATH");
             if (!string.IsNullOrWhiteSpace(configured) && File.Exists(configured)) return configured;
 
             var localNode = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "runtime", "node.exe");

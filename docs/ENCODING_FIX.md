@@ -2,7 +2,7 @@
 
 ## 问题描述
 
-RemindAI 在显示中文时出现乱码，主要原因是：
+CodePanion 在显示中文时出现乱码，主要原因是：
 
 1. **C# 文件读写默认编码**：Windows 上 `File.ReadAllText` 和 `File.AppendAllText` 默认使用系统编码（GBK），而不是 UTF-8
 2. **HTTP 响应头缺失**：Node.js daemon 没有明确指定 UTF-8 编码
@@ -72,10 +72,10 @@ dotnet build
 
 ```bash
 # 停止旧的 daemon
-remindai stop
+codepanion stop
 
 # 启动新的 daemon
-remindai start
+codepanion start
 
 # 运行 GUI
 npm run gui:run
@@ -96,10 +96,10 @@ node test-encoding.js
 
 ```bash
 # 发送中文通知
-remindai notify "测试通知" -m "这是一条中文消息"
+codepanion notify "测试通知" -m "这是一条中文消息"
 
 # 运行包含中文输出的命令
-remindai run -- echo "你好世界"
+codepanion run -- echo "你好世界"
 ```
 
 ## 常见问题
@@ -108,7 +108,7 @@ remindai run -- echo "你好世界"
 
 A: 确保：
 1. 完全关闭旧的 GUI 进程
-2. 重启 daemon：`remindai restart`
+2. 重启 daemon：`codepanion restart`
 3. 清除浏览器缓存（WebView2 缓存）
 4. 检查 Windows 系统区域设置
 

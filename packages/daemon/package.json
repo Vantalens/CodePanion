@@ -1,9 +1,9 @@
 {
-  "name": "remindai",
+  "name": "codepanion",
   "version": "0.1.0",
   "description": "AI tool completion notification and remote interaction daemon + CLI",
   "bin": {
-    "remindai": "./dist/index.js"
+    "codepanion": "./dist/index.js"
   },
   "main": "./dist/index.js",
   "type": "module",

@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to RemindAI will be documented in this file.
+All notable changes to CodePanion will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -41,7 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 早期功能验证、端到端和交互式测试材料曾用于阶段性验收；这些旧脚本已在后续清理中移除，当前质量门禁以 `DEVELOPMENT_TASKS.md` 和 `docs/DEVELOPMENT.md` 为准
 
 ### Changed
-- 项目名称统一为 RemindAI（驼峰命名）
+- 项目名称统一为 CodePanion（驼峰命名）
 - GUI 从简单界面重构为对话流界面
 - Markdown 样式优化（标题、代码块、表格等）
 - 选项按钮样式改进（类似 Claude Code）
@@ -53,7 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Assets 目录自动复制
 
 ### Documentation
-- 统一项目名称为 RemindAI
+- 统一项目名称为 CodePanion
 - 更新所有文档中的项目结构
 - 添加图标文件说明（icon-README.md）
 - 添加提示音文件说明（Assets/README.md）

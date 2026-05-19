@@ -1,9 +1,9 @@
 @echo off
-REM RemindAI 启动脚本
+REM CodePanion 启动脚本
 REM 自动启动 daemon 和 GUI
 
 echo ========================================
-echo RemindAI v0.2.0 启动脚本
+echo CodePanion v0.2.0 启动脚本
 echo ========================================
 echo.
 
@@ -23,8 +23,8 @@ if not exist "packages\daemon\dist\index.js" (
 )
 
 REM 检查 GUI 构建
-if not exist "packages\gui\bin\Debug\net8.0-windows\RemindAI.Gui.dll" (
-    echo [错误] GUI 未构建，请先运行: dotnet build packages/gui/RemindAI.Gui.csproj
+if not exist "packages\gui\bin\Debug\net8.0-windows\CodePanion.Gui.dll" (
+    echo [错误] GUI 未构建，请先运行: dotnet build packages/gui/CodePanion.Gui.csproj
     pause
     exit /b 1
 )
@@ -53,7 +53,7 @@ if %ERRORLEVEL% NEQ 0 (
 
 echo.
 echo ========================================
-echo RemindAI 已启动！
+echo CodePanion 已启动！
 echo ========================================
 echo.
 echo 提示:

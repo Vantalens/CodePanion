@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 
-export const HOME_DIR = join(homedir(), '.remindai');
+export const HOME_DIR = join(homedir(), '.codepanion');
 export const CONFIG_PATH = join(HOME_DIR, 'config.json');
 export const PID_PATH = join(HOME_DIR, 'daemon.pid');
 export const LOG_PATH = join(HOME_DIR, 'log.jsonl');

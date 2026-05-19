@@ -1,4 +1,4 @@
-# RemindAI 重新设计方案
+# CodePanion 重新设计方案
 
 ## 文档版本
 - **版本**: v2.0
@@ -70,7 +70,7 @@
 │  └──────┬───────┘              └──────┬───────┘            │
 └─────────┼──────────────────────────────┼──────────────────┘
           │                              │
-          │ remindai run -- <cmd>        │ WebSocket
+          │ codepanion run -- <cmd>        │ WebSocket
           │                              │
 ┌─────────┼──────────────────────────────┼──────────────────┐
 │         │         Daemon 层             │                  │
@@ -219,7 +219,7 @@ app.get('/sessions/:id/output', (req, res) => {
 
 #### 2.1 添加 WebView2 依赖
 
-**修改 `RemindAI.Gui.csproj`**:
+**修改 `CodePanion.Gui.csproj`**:
 ```xml
 <ItemGroup>
   <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2592.51" />
@@ -475,7 +475,7 @@ export class Notifier {
         message: message || ' ',
         sound: shouldPlaySound,
         wait: true,  // 持久化到通知中心
-        appID: 'RemindAI',
+        appID: 'CodePanion',
       },
       (err) => {
         if (err) logger.warn({ err }, 'toast failed');
@@ -565,8 +565,8 @@ app.post('/sessions/:id/exit', (req, res) => {
 - [ ] 完整输出捕获
 
 #### 5.3 端到端测试
-- [ ] 运行 `remindai run -- echo "test"`
-- [ ] 运行 `remindai run -- claude code`
+- [ ] 运行 `codepanion run -- echo "test"`
+- [ ] 运行 `codepanion run -- claude code`
 - [ ] 测试长输出（Plan 格式）
 - [ ] 测试多会话并发
 - [ ] 测试通知和提示音

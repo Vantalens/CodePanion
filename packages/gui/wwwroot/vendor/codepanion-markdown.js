@@ -71,7 +71,7 @@
         return blocks.join('\n');
     }
 
-    window.marked = { parse, setOptions: function () {}, version: 'remindai-local' };
+    window.marked = { parse, setOptions: function () {}, version: 'codepanion-local' };
     window.DOMPurify = { sanitize: function (html) { return String(html ?? ''); } };
     window.hljs = {
         getLanguage: function () { return false; },

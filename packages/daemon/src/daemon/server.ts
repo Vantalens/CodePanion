@@ -215,8 +215,8 @@ export function createServer(cfg: Config): {
     );
 
     if (event.type === 'prompt' || event.type === 'done' || event.type === 'error' || event.type === 'notification') {
-      const title = event.title ?? `${event.source ?? 'RemindAI'} ${event.type}`;
-      const message = event.content || event.windowTitle || 'RemindAI event';
+      const title = event.title ?? `${event.source ?? 'CodePanion'} ${event.type}`;
+      const message = event.content || event.windowTitle || 'CodePanion event';
       notifier.show(title, message, { sound: level === 'prompt' || level === 'done' });
       if (event.type === 'notification') {
         broadcastNotification(observerSockets, {

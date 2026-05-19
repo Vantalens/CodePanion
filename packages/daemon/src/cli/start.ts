@@ -19,7 +19,7 @@ async function waitForHealth(timeoutMs = 8000): Promise<boolean> {
 export async function startCommand() {
   const existing = await checkHealth();
   if (existing.ok) {
-    console.log(`[remindai] daemon already running (pid=${existing.pid})`);
+    console.log(`[codepanion] daemon already running (pid=${existing.pid})`);
     return;
   }
   const entry = resolve(__dirname, '..', 'index.js');
@@ -29,12 +29,12 @@ export async function startCommand() {
     windowsHide: true,
   });
   child.unref();
-  console.log(`[remindai] starting daemon (child pid=${child.pid})...`);
+  console.log(`[codepanion] starting daemon (child pid=${child.pid})...`);
   const ok = await waitForHealth();
   if (!ok) {
-    console.error('[remindai] daemon failed to become healthy in time');
+    console.error('[codepanion] daemon failed to become healthy in time');
     process.exit(1);
   }
   const r = await checkHealth();
-  console.log(`[remindai] daemon ready (pid=${r.pid})`);
+  console.log(`[codepanion] daemon ready (pid=${r.pid})`);
 }

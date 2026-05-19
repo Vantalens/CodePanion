@@ -1,4 +1,4 @@
-# RemindAI 开发任务清单
+# CodePanion 开发任务清单
 
 ## 使用说明
 
@@ -20,7 +20,7 @@
 - [x] 明确不做团队版
 - [x] 明确不做多用户协作
 - [x] 明确不做权限、审批流、共享空间和企业管理能力
-- [x] 明确不把 RemindAI 定位为 Codex、Claude Code、Copilot CLI 或 VS Code 的替代品
+- [x] 明确不把 CodePanion 定位为 Codex、Claude Code、Copilot CLI 或 VS Code 的替代品
 - [x] 明确不做完整 AI IDE、模型聊天客户端、默认 OCR、全局屏幕读取或 token 二次分销
 
 ---
@@ -48,7 +48,7 @@
 
 - [-] 用户可以在一个 Windows GUI 中看到所有活跃的本地 AI 任务
 - [-] 等待输入的任务能够被快速发现，且无需切换窗口也能识别
-- [-] 支持交互的任务可以从 RemindAI 中回复并继续执行
+- [-] 支持交互的任务可以从 CodePanion 中回复并继续执行
 - [ ] Claude Code、Codex、VS Code/Copilot、CLI/PTTY、Codex Desktop 的基础闭环都具备可验证路径
 - [ ] 主要日常使用链路不会出现失控的内存增长
 - [ ] 核心路径具备稳定的自动化验证基线
@@ -150,6 +150,9 @@
 ### P1.2 强化 GUI 的任务分诊能力
 
 - [x] 确认前端方向为面向开发者的极简工作台
+- [x] 根据前端重设计报告，将 WebView2 界面从对话优先改为控制平面优先
+- [x] 增加 Source Rail、任务收件箱、Main Stage、上下文抽屉和底部 Command Bar
+- [x] 在 GUI 中展示来源能力层级、数据边界和真实可用动作
 - [x] 保留现有颜色体系
 - [x] 使用接近 Claude 观感的字体栈
 - [x] 将主区从聊天块调整为事件流表达
@@ -162,10 +165,10 @@
 - [x] 工作流等待输入可从 `session:` / `monitor:` 线程映射回真实回复目标
 - [x] 产物预览只展示真实代码块，不再展示无意义 `text` 片段
 - [x] 优化 Markdown 渲染样式，提高列表、代码和技术摘要可读性
-- [ ] 建立更清晰的任务优先级排序
-- [ ] 优化左栏摘要，让任务可扫读性更强
-- [ ] 强化活跃、等待、完成、错误分组与筛选
-- [ ] 在 GUI 中直接浮出“当前最该处理什么”
+- [x] 建立更清晰的任务优先级排序
+- [x] 优化左栏摘要，让任务可扫读性更强
+- [x] 强化活跃、等待、运行中、失败和产物分组与筛选
+- [x] 在 GUI 中直接浮出“当前最该处理什么”
 - [!] 使用真实运行数据截图做最终视觉验收
 
 **验收标准：**
@@ -263,7 +266,7 @@
 ## 阶段 2 退出标准
 
 - [ ] 重复工作可以被沉淀为可复用的本地工作流
-- [ ] 至少有一条多步骤工作流，可以完全在 RemindAI 中执行、检查并再次运行
+- [ ] 至少有一条多步骤工作流，可以完全在 CodePanion 中执行、检查并再次运行
 - [ ] 阶段 2 的能力不会破坏阶段 1 已建立的优点：本地优先、个人可用、可理解、可靠
 
 ---
@@ -348,7 +351,7 @@
 - [x] GUI Release 构建已关闭离线 NuGet 审计噪音，当前为 0 警告、0 错误
 - [x] `npm run gui:run` 在 GUI 已运行时会跳过重复构建和启动，避免 Debug exe 锁定导致的 MSB3026 刷屏
 - [x] `npm run build` 已覆盖国产 AI 工具进程级来源扫描器编译和 daemon bundle 打包
-- [x] `npm run package:windows` 通过，已生成 `dist/RemindAI-win-x64/RemindAI.Gui.exe`、`runtime/node.exe` 和 `daemon/daemon.cjs`
+- [x] `npm run package:windows` 通过，已生成 `dist/CodePanion-win-x64/CodePanion.Gui.exe`、`runtime/node.exe` 和 `daemon/daemon.cjs`
 - [x] `git check-ignore -v dist packages/gui/bin packages/gui/obj` 确认发布和构建产物不会进入 git
 - [x] 修复已归档 Codex Desktop 历史任务误显示为当前错误任务的问题
 - [x] 修复工作流提示无法回复的问题，并降噪右侧无意义 text 预览

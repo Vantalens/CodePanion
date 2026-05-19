@@ -4,58 +4,141 @@
     <meta charset="UTF-8">
     <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RemindAI - 对话</title>
-    <link rel="stylesheet" href="https://remindai.local/chat.css">
-    <script src="https://remindai.local/vendor/remindai-markdown.js"></script>
+    <title>CodePanion - 控制台</title>
+    <link rel="stylesheet" href="https://codepanion.local/chat.css">
+    <script src="https://codepanion.local/vendor/codepanion-markdown.js"></script>
 </head>
 <body>
     <div id="app-shell">
-        <aside id="conversation-sidebar">
-            <div class="brand-row">
-                <div class="app-mark">AI</div>
-                <div>
-                    <h1>RemindAI</h1>
-                    <p>本地工作流</p>
-                </div>
+        <nav id="source-rail" aria-label="全局导航">
+            <div class="rail-brand" title="CodePanion">CP</div>
+            <button class="rail-button active" type="button" data-view="active" title="控制台" aria-label="控制台">⌂</button>
+            <button class="rail-button" type="button" data-view="waiting" title="等待输入" aria-label="等待输入">!</button>
+            <button class="rail-button" type="button" data-view="running" title="运行中" aria-label="运行中">▶</button>
+            <button class="rail-button" type="button" data-view="error" title="失败" aria-label="失败">×</button>
+            <button class="rail-button" type="button" data-view="code" title="产物" aria-label="产物">{}</button>
+            <div class="rail-spacer"></div>
+            <div class="rail-status" title="本地 daemon 连接状态">
+                <span class="status-dot"></span>
             </div>
-            <div class="sidebar-tools">
-                <button class="tool-button active" type="button" data-view="active">当前</button>
-                <button class="tool-button" type="button" data-view="waiting">等待</button>
-                <button class="tool-button" type="button" data-view="code">产物</button>
-            </div>
-            <div id="conversation-list" class="conversation-list"></div>
-        </aside>
+        </nav>
 
-        <main id="conversation-main">
-            <header id="conversation-header">
+        <aside id="conversation-sidebar">
+            <header class="brand-row">
                 <div>
-                    <div class="crumb">当前工作流</div>
-                    <h2 id="conversation-title">当前任务</h2>
+                    <h1>CodePanion</h1>
+                    <p>本地 AI 开发工作流控制平面</p>
                 </div>
                 <div class="status-indicator">
                     <span class="status-dot"></span>
                     <span class="status-text">未连接</span>
                 </div>
             </header>
+
+            <section class="queue-overview" aria-label="任务队列概览">
+                <div class="metric">
+                    <span>全部</span>
+                    <strong id="queue-total">0</strong>
+                </div>
+                <div class="metric urgent">
+                    <span>待处理</span>
+                    <strong id="queue-waiting">0</strong>
+                </div>
+                <div class="metric">
+                    <span>运行中</span>
+                    <strong id="queue-running">0</strong>
+                </div>
+                <div class="metric danger">
+                    <span>失败</span>
+                    <strong id="queue-error">0</strong>
+                </div>
+            </section>
+
+            <div class="sidebar-tools">
+                <button class="tool-button active" type="button" data-view="active">当前</button>
+                <button class="tool-button" type="button" data-view="waiting">待处理</button>
+                <button class="tool-button" type="button" data-view="running">运行中</button>
+                <button class="tool-button" type="button" data-view="error">失败</button>
+                <button class="tool-button" type="button" data-view="code">产物</button>
+            </div>
+            <div id="conversation-list" class="conversation-list" aria-label="任务收件箱"></div>
+        </aside>
+
+        <main id="conversation-main">
+            <header id="conversation-header">
+                <div class="stage-title">
+                    <div class="crumb">Main Stage / 当前控制面</div>
+                    <h2 id="conversation-title">当前任务</h2>
+                    <div class="stage-meta">
+                        <span id="stage-source">来源未选择</span>
+                        <span id="stage-capability">L0</span>
+                        <span id="stage-status">等待事件</span>
+                    </div>
+                </div>
+                <div class="stage-actions">
+                    <button id="stage-focus-reply" class="action-button primary" type="button" disabled>回复/继续</button>
+                    <button id="stage-copy-context" class="action-button" type="button" disabled>复制上下文</button>
+                </div>
+            </header>
             <section id="chat-container" aria-live="polite"></section>
         </main>
 
         <aside id="code-browser">
-            <header class="code-header">
-                <div>
-                    <h2>产物预览</h2>
-                    <p id="code-count">0 段代码</p>
+            <section class="context-panel">
+                <header class="context-header">
+                    <div>
+                        <h2>上下文抽屉</h2>
+                        <p id="drawer-subtitle">来源、能力边界与下一步动作</p>
+                    </div>
+                </header>
+                <div class="context-section">
+                    <span class="context-label">来源</span>
+                    <strong id="drawer-source-name">未选择任务</strong>
+                    <p id="drawer-source-detail">选择一个任务后显示来源状态。</p>
                 </div>
-            </header>
-            <div id="code-list" class="code-list"></div>
-            <article id="code-preview" class="code-preview">
-                <div class="empty-code">
-                    <strong>暂无可预览产物</strong>
-                    <span>切换到“产物”后会显示真实代码块。</span>
+                <div class="context-grid">
+                    <div>
+                        <span class="context-label">能力层级</span>
+                        <strong id="drawer-capability">L0</strong>
+                    </div>
+                    <div>
+                        <span class="context-label">数据边界</span>
+                        <strong id="drawer-privacy">本地优先</strong>
+                    </div>
                 </div>
-            </article>
+                <div class="context-section">
+                    <span class="context-label">动作</span>
+                    <div class="drawer-actions">
+                        <button id="drawer-focus-reply" class="action-button primary" type="button" disabled>定位回复框</button>
+                        <button id="drawer-copy-workspace" class="action-button" type="button" disabled>复制工作区</button>
+                    </div>
+                    <p id="drawer-action-note">CodePanion 只展示真实可用动作；弱接入来源不会伪装成可接管。</p>
+                </div>
+            </section>
+
+            <section class="artifact-panel">
+                <header class="code-header">
+                    <div>
+                        <h2>产物检查器</h2>
+                        <p id="code-count">0 段代码</p>
+                    </div>
+                </header>
+                <div id="code-list" class="code-list"></div>
+                <article id="code-preview" class="code-preview">
+                    <div class="empty-code">
+                        <strong>暂无可预览产物</strong>
+                        <span>只展示真实代码块，不显示普通文本片段。</span>
+                    </div>
+                </article>
+            </section>
         </aside>
+
+        <footer id="omnibar">
+            <div class="omnibar-label">Command</div>
+            <input id="omnibar-input" type="text" autocomplete="off" placeholder="输入回复；或选择任务后用右侧动作处理" disabled>
+            <button id="omnibar-submit" class="action-button primary" type="button" disabled>发送</button>
+        </footer>
     </div>
-    <script src="https://remindai.local/chat.js"></script>
+    <script src="https://codepanion.local/chat.js"></script>
 </body>
 </html>

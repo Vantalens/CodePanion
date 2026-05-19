@@ -8,10 +8,10 @@ using System.Windows.Media.Imaging;
 using Microsoft.Web.WebView2.Core;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
-using RemindAI.Gui.Models;
-using RemindAI.Gui.Services;
+using CodePanion.Gui.Models;
+using CodePanion.Gui.Services;
 
-namespace RemindAI.Gui
+namespace CodePanion.Gui
 {
     public partial class MainWindow : Window
     {
@@ -75,7 +75,7 @@ namespace RemindAI.Gui
         private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
             await InitializeWebView();
-            AddLog("正在连接到 RemindAI daemon...");
+            AddLog("正在连接到 CodePanion daemon...");
             await ConnectToDaemon();
         }
 
@@ -91,11 +91,11 @@ namespace RemindAI.Gui
 
                 var wwwrootPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "wwwroot");
                 ChatWebView.CoreWebView2.SetVirtualHostNameToFolderMapping(
-                    "remindai.local",
+                    "codepanion.local",
                     wwwrootPath,
                     CoreWebView2HostResourceAccessKind.Allow
                 );
-                ChatWebView.CoreWebView2.Navigate("https://remindai.local/chat.html");
+                ChatWebView.CoreWebView2.Navigate("https://codepanion.local/chat.html");
             }
             catch (Exception ex)
             {
@@ -429,7 +429,7 @@ namespace RemindAI.Gui
 
             try
             {
-                var logDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".remindai");
+                var logDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codepanion");
                 Directory.CreateDirectory(logDir);
                 File.AppendAllText(Path.Combine(logDir, "gui.log"), logMessage + Environment.NewLine, System.Text.Encoding.UTF8);
             }

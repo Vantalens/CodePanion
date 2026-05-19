@@ -1,6 +1,6 @@
-# RemindAI 安装指南
+# CodePanion 安装指南
 
-本指南将帮助你在 Windows 系统上安装和配置 RemindAI。
+本指南将帮助你在 Windows 系统上安装和配置 CodePanion。
 
 ---
 
@@ -62,15 +62,15 @@ Get-ItemProperty -Path "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\
 
 ---
 
-## 📦 安装 RemindAI
+## 📦 安装 CodePanion
 
 ### 方法 1: 从源码安装（推荐）
 
 #### 1. 克隆项目
 
 ```bash
-git clone https://github.com/Vantalens/RemindAI.git
-cd RemindAI
+git clone https://github.com/Vantalens/CodePanion.git
+cd CodePanion
 ```
 
 #### 2. 安装依赖
@@ -101,7 +101,7 @@ cd ../..
 
 验证安装：
 ```bash
-remindai --version
+codepanion --version
 # 应输出: 0.1.0
 ```
 
@@ -114,17 +114,17 @@ npm run gui:build
 验证构建：
 ```bash
 ls packages/gui/bin/Debug/net8.0-windows/
-# 应看到: RemindAI.Gui.exe, wwwroot/, Assets/ 等
+# 应看到: CodePanion.Gui.exe, wwwroot/, Assets/ 等
 ```
 
 #### 6. 配置（可选）
 
 创建配置文件：
 ```bash
-mkdir -p ~/.remindai
+mkdir -p ~/.codepanion
 ```
 
-编辑 `~/.remindai/config.json`：
+编辑 `~/.codepanion/config.json`：
 ```json
 {
   "port": 7777,
@@ -172,26 +172,26 @@ mkdir -p ~/.remindai
 
 ```bash
 # 查看版本
-remindai --version
+codepanion --version
 # 应输出: 0.1.0
 
 # 查看帮助
-remindai --help
+codepanion --help
 ```
 
 ### 2. 测试 Daemon
 
 ```bash
 # 启动 daemon
-remindai start
-# 应输出: [remindai] daemon ready (pid=XXXXX)
+codepanion start
+# 应输出: [codepanion] daemon ready (pid=XXXXX)
 
 # 检查状态
-remindai status
-# 应输出: [remindai] daemon running (pid=XXXXX, port=7777)
+codepanion status
+# 应输出: [codepanion] daemon running (pid=XXXXX, port=7777)
 
 # 停止 daemon（稍后测试）
-# remindai stop
+# codepanion stop
 ```
 
 ### 3. 测试 GUI
@@ -212,7 +212,7 @@ npm run gui:run
 
 ```bash
 # 发送测试通知
-remindai notify "测试通知" -m "RemindAI 安装成功！"
+codepanion notify "测试通知" -m "CodePanion 安装成功！"
 ```
 
 **预期结果**:
@@ -225,13 +225,13 @@ remindai notify "测试通知" -m "RemindAI 安装成功！"
 
 1. 在 VS Code 中打开 `packages/vscode-extension/`。
 2. 使用开发模式加载扩展。
-3. 扩展会读取 `~/.remindai/config.json` 中的 `port` 和 `token`，每个 VS Code 窗口都会注册为独立监控源。
+3. 扩展会读取 `~/.codepanion/config.json` 中的 `port` 和 `token`，每个 VS Code 窗口都会注册为独立监控源。
 
 ### 6. 测试交互式命令
 
 ```bash
 # 运行一个需要输入的命令
-remindai run -- bash -c 'read -p "请输入你的名字: " name && echo "你好, $name!"'
+codepanion run -- bash -c 'read -p "请输入你的名字: " name && echo "你好, $name!"'
 ```
 
 **预期结果**:
@@ -246,7 +246,7 @@ remindai run -- bash -c 'read -p "请输入你的名字: " name && echo "你好,
 
 ### Daemon 配置
 
-编辑 `~/.remindai/config.json`：
+编辑 `~/.codepanion/config.json`：
 
 | 选项 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
@@ -260,7 +260,7 @@ remindai run -- bash -c 'read -p "请输入你的名字: " name && echo "你好,
 
 ### GUI 配置
 
-GUI 配置存储在 `~/.remindai/gui-settings.json`（自动生成）。
+GUI 配置存储在 `~/.codepanion/gui-settings.json`（自动生成）。
 
 ---
 
@@ -270,7 +270,7 @@ GUI 配置存储在 `~/.remindai/gui-settings.json`（自动生成）。
 
 1. 创建或下载 `icon.ico` 文件
 2. 放置到 `packages/gui/` 目录
-3. 取消注释 `RemindAI.Gui.csproj` 中的：
+3. 取消注释 `CodePanion.Gui.csproj` 中的：
    ```xml
    <ApplicationIcon>icon.ico</ApplicationIcon>
    ```
@@ -292,7 +292,7 @@ GUI 配置存储在 `~/.remindai/gui-settings.json`（自动生成）。
 
 ---
 
-## 🚀 启动 RemindAI
+## 🚀 启动 CodePanion
 
 ### 方法 1: 双击便携版 EXE（普通用户推荐）
 
@@ -305,22 +305,22 @@ npm run package:windows
 打开发布目录：
 
 ```text
-dist/RemindAI-win-x64/
+dist/CodePanion-win-x64/
 ```
 
 双击：
 
 ```text
-RemindAI.Gui.exe
+CodePanion.Gui.exe
 ```
 
-GUI 会自动启动本地 daemon。普通使用不需要手动输入 `remindai start`、`npm run gui:run` 或 `dotnet run`。
+GUI 会自动启动本地 daemon。普通使用不需要手动输入 `codepanion start`、`npm run gui:run` 或 `dotnet run`。
 
 ### 方法 2: 使用 CLI 命令（开发者）
 
 ```bash
 # 启动 daemon
-remindai start
+codepanion start
 
 # 启动 GUI
 npm run gui:run
@@ -333,7 +333,7 @@ npm run gui:run
 node packages/daemon/dist/index.js start
 
 # 终端 2: 启动 GUI
-packages/gui/bin/Debug/net8.0-windows/RemindAI.Gui.exe
+packages/gui/bin/Debug/net8.0-windows/CodePanion.Gui.exe
 ```
 
 ### 方法 4: 使用脚本
@@ -367,9 +367,9 @@ node packages/daemon/dist/index.js run -- node -e "const readline=require('readl
 
 ## 🐛 故障排查
 
-### 问题 1: `remindai` 命令未找到
+### 问题 1: `codepanion` 命令未找到
 
-**症状**: `'remindai' 不是内部或外部命令`
+**症状**: `'codepanion' 不是内部或外部命令`
 
 **解决方案**:
 ```bash
@@ -380,7 +380,7 @@ cd packages/daemon
 npm link
 
 # 验证安装
-remindai --version
+codepanion --version
 ```
 
 ### 问题 2: Daemon 启动失败
@@ -405,9 +405,9 @@ remindai --version
 **解决方案**:
 1. 确认 daemon 正在运行：
    ```bash
-   remindai status
+   codepanion status
    ```
-2. 检查配置文件 `~/.remindai/config.json` 中的端口和 token
+2. 检查配置文件 `~/.codepanion/config.json` 中的端口和 token
 3. 检查防火墙设置（允许 127.0.0.1:7777）
 
 ### 问题 4: WebView2 加载失败
@@ -432,7 +432,7 @@ remindai --version
 **症状**: 运行命令后没有提示显示
 
 **解决方案**:
-1. 增加 `promptIdleMs` 值（编辑 `~/.remindai/config.json`）：
+1. 增加 `promptIdleMs` 值（编辑 `~/.codepanion/config.json`）：
    ```json
    {
      "promptIdleMs": 1500
@@ -440,7 +440,7 @@ remindai --version
    ```
 2. 重启 daemon：
    ```bash
-   remindai restart
+   codepanion restart
    ```
 3. 查看 daemon 日志（检查是否检测到提示）
 
@@ -487,7 +487,7 @@ remindai --version
 
 如遇到问题：
 1. 查看 [故障排查](#-故障排查) 部分
-2. 搜索 [Issues](https://github.com/Vantalens/RemindAI/issues)
+2. 搜索 [Issues](https://github.com/Vantalens/CodePanion/issues)
 3. 提交新 Issue
 4. 加入社区讨论
 

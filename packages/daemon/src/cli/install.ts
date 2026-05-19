@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { loadConfig } from '../config.js';
 
-const HOOK_TAG = 'remindai-managed';
+const HOOK_TAG = 'codepanion-managed';
 
 interface ClaudeHookEntry {
   matcher?: string;
@@ -36,7 +36,7 @@ export async function installCommand(args: { target: string }) {
     try {
       settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
     } catch (err) {
-      console.error(`[remindai] failed to parse ${settingsPath}: ${(err as Error).message}`);
+      console.error(`[codepanion] failed to parse ${settingsPath}: ${(err as Error).message}`);
       process.exit(1);
     }
   }
@@ -69,5 +69,5 @@ export async function installCommand(args: { target: string }) {
   }
 
   writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
-  console.log(`[remindai] installed Claude Code hooks into ${settingsPath}`);
+  console.log(`[codepanion] installed Claude Code hooks into ${settingsPath}`);
 }

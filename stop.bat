@@ -1,8 +1,8 @@
 @echo off
-REM RemindAI 停止脚本
+REM CodePanion 停止脚本
 
 echo ========================================
-echo RemindAI v0.2.0 停止脚本
+echo CodePanion v0.2.0 停止脚本
 echo ========================================
 echo.
 
@@ -14,7 +14,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\stop-gui.ps1
 
 echo.
 echo ========================================
-echo RemindAI 已停止
+echo CodePanion 已停止
 echo ========================================
 echo.
 pause

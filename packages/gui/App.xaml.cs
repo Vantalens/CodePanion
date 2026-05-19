@@ -1,6 +1,6 @@
 using System.Windows;
 
-namespace RemindAI.Gui
+namespace CodePanion.Gui
 {
     public partial class App : Application
     {
@@ -13,7 +13,7 @@ namespace RemindAI.Gui
             {
                 MessageBox.Show(
                     $"发生错误：{args.Exception.Message}",
-                    "RemindAI 错误",
+                    "CodePanion 错误",
                     MessageBoxButton.OK,
                     MessageBoxImage.Error
                 );

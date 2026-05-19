@@ -9,7 +9,7 @@ import { installCommand } from './install.js';
 
 export async function runCli(argv: string[]): Promise<void> {
   await yargs(hideBin(argv))
-    .scriptName('remindai')
+    .scriptName('codepanion')
     .usage('$0 <command> [options]')
     .command('start', '启动后台 daemon', {}, async () => {
       await startCommand();
@@ -54,17 +54,17 @@ export async function runCli(argv: string[]): Promise<void> {
     )
     .command(
       'run',
-      'PTY 包装方式启动一个命令（用法：remindai run -- <cmd> [args...]）。注意：实际由 src/index.ts 短路处理，这里只是为了帮助文本',
+      'PTY 包装方式启动一个命令（用法：codepanion run -- <cmd> [args...]）。注意：实际由 src/index.ts 短路处理，这里只是为了帮助文本',
       (y) => y,
       async () => {
         // No-op; handled in src/index.ts before yargs parsing.
-        console.error('usage: remindai run -- <command> [args...]');
+        console.error('usage: codepanion run -- <command> [args...]');
         process.exit(2);
       },
     )
     .command(
       'install <target>',
-      '把 RemindAI 集成到指定工具（target=claude-code）',
+      '把 CodePanion 集成到指定工具（target=claude-code）',
       (y) => y.positional('target', { type: 'string', demandOption: true }),
       async (a) => {
         await installCommand({ target: a.target as string });

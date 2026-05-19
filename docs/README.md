@@ -1,8 +1,8 @@
-# RemindAI 文档中心
+# CodePanion 文档中心
 
-欢迎来到 RemindAI 文档中心！这里包含了围绕“本地优先、供应商中立、单入口多出口的 AI 开发工作流控制台 / 控制平面”所需的文档资源。
+欢迎来到 CodePanion 文档中心！这里包含了围绕“本地优先、供应商中立、单入口多出口的 AI 开发工作流控制台 / 控制平面”所需的文档资源。
 
-当前战略采用《AI IDE 个人本地工作流控制台市场分析与 RemindAI 策略报告》的核心判断：保留现有 Windows Alpha 产品和本地 daemon 架构，不推倒重做；把现有提醒、多源监控和 workflow 模型收束为本地控制平面。旧路线报告已从仓库中清理，当前路线以 [产品路线](PRODUCT_ROADMAP.md)、[架构设计](ARCHITECTURE.md)、[监控源说明](MONITORING_SOURCES.md) 和根目录 [开发任务清单](../DEVELOPMENT_TASKS.md) 为准。
+当前战略采用《AI IDE 个人本地工作流控制台市场分析与 CodePanion 策略报告》的核心判断：保留现有 Windows Alpha 产品和本地 daemon 架构，不推倒重做；把现有提醒、多源监控和 workflow 模型收束为本地控制平面。旧路线报告已从仓库中清理，当前路线以 [产品路线](PRODUCT_ROADMAP.md)、[架构设计](ARCHITECTURE.md)、[监控源说明](MONITORING_SOURCES.md) 和根目录 [开发任务清单](../DEVELOPMENT_TASKS.md) 为准。
 
 ## 📚 文档导航
 
@@ -23,8 +23,8 @@
 
 ### 📋 战略依据
 
-- **外部研究报告** - `D:\Owen\Documents\OneDrive\桌面\RemindAI_report.md`，作为当前定位、工具优先级、商业化和风险策略的主要依据
-- **研究报告 PDF** - `D:\Owen\Documents\OneDrive\桌面\AI IDE 个人本地工作流控制台市场分析与 RemindAI 策略报告.pdf`
+- **外部研究报告** - `D:\Owen\Documents\OneDrive\桌面\CodePanion_report.md`，作为当前定位、工具优先级、商业化和风险策略的主要依据
+- **研究报告 PDF** - `D:\Owen\Documents\OneDrive\桌面\AI IDE 个人本地工作流控制台市场分析与 CodePanion 策略报告.pdf`
 
 ### 📦 发布文档
 
@@ -43,7 +43,7 @@
 ### 👤 我是新用户
 
 1. 从 [README.md](../README.md) 开始了解项目
-2. 按照 [INSTALL.md](../INSTALL.md) 安装 RemindAI
+2. 按照 [INSTALL.md](../INSTALL.md) 安装 CodePanion
 3. 阅读 [用户指南](USER_GUIDE.md) 学习使用方法
 
 ### 👨‍💻 我是开发者
@@ -64,7 +64,7 @@
 
 1. 先看 [产品路线](PRODUCT_ROADMAP.md) 了解当前定位、产品保留决策和方向
 2. 再看 [架构设计](ARCHITECTURE.md) 与 [开发指南](DEVELOPMENT.md) 了解当前实现边界
-3. 如需了解战略依据，再查看桌面上的 RemindAI 研究报告
+3. 如需了解战略依据，再查看桌面上的 CodePanion 研究报告
 4. 阅读 [更新日志](../CHANGELOG.md) 了解版本历史
 
 ---
@@ -100,14 +100,14 @@
 
 ### 常见问题
 
-- [如何安装 RemindAI？](../INSTALL.md)
+- [如何安装 CodePanion？](../INSTALL.md)
 - [命令未找到怎么办？](../README.md#常见问题)
 - [GUI 无法连接？](../INSTALL.md#问题-3-gui-无法连接)
 - [提示检测不工作？](../INSTALL.md#问题-5-提示检测不工作)
 
 ### 核心概念
 
-- [什么是 RemindAI？](USER_GUIDE.md#什么是-remindai)
+- [什么是 CodePanion？](USER_GUIDE.md#什么是-codepanion)
 - [产品路线](PRODUCT_ROADMAP.md)
 - [工作原理](ARCHITECTURE.md#核心组件)
 - [控制平面语义](API.md#控制平面语义)
@@ -127,7 +127,7 @@
 
 发现文档问题或想要改进？
 
-1. 在 [GitHub Issues](https://github.com/Vantalens/RemindAI/issues) 提交反馈
+1. 在 [GitHub Issues](https://github.com/Vantalens/CodePanion/issues) 提交反馈
 2. 提交 Pull Request 改进文档
 3. 所有文档使用 Markdown 格式
 4. 遵循现有的文档结构和风格
@@ -136,7 +136,7 @@
 
 ## 📞 获取帮助
 
-- **GitHub Issues**: https://github.com/Vantalens/RemindAI/issues
+- **GitHub Issues**: https://github.com/Vantalens/CodePanion/issues
 - **文档问题**: 在相关文档页面提交 Issue
 - **功能建议**: 在 Issues 中标记为 `enhancement`
 
@@ -146,7 +146,7 @@
 
 - **最后更新**: 2026-05-19
 - **版本**: v0.2.0
-- **维护者**: RemindAI Team
+- **维护者**: CodePanion Team
 
 ---
 

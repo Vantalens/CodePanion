@@ -1,7 +1,7 @@
 using System;
 using System.ComponentModel;
 
-namespace RemindAI.Gui.Models
+namespace CodePanion.Gui.Models
 {
     public class SessionViewModel : INotifyPropertyChanged
     {

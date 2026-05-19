@@ -4,7 +4,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Navigation;
 
-namespace RemindAI.Gui
+namespace CodePanion.Gui
 {
     public partial class SettingsWindow : Window
     {
@@ -20,7 +20,7 @@ namespace RemindAI.Gui
             {
                 var configPath = Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                    ".remindai",
+                    ".codepanion",
                     "config.json"
                 );
 

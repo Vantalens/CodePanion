@@ -1,6 +1,6 @@
-# RemindAI GUI
+# CodePanion GUI
 
-RemindAI 的图形用户界面，基于 C# WPF 开发。
+CodePanion 的图形用户界面，基于 C# WPF 开发。
 
 ## 功能特性
 
@@ -56,16 +56,16 @@ npm run gui:run     # 运行
 # 发布为单文件可执行程序
 dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
 
-# 输出位置：bin/Release/net8.0-windows/win-x64/publish/RemindAI.Gui.exe
+# 输出位置：bin/Release/net8.0-windows/win-x64/publish/CodePanion.Gui.exe
 ```
 
 ## 使用说明
 
 ### 启动
 
-1. 确保 RemindAI daemon 正在运行：
+1. 确保 CodePanion daemon 正在运行：
    ```bash
-   remindai start
+   codepanion start
    ```
 
 2. 启动 GUI：
@@ -126,7 +126,7 @@ packages/gui/
 ├── Services/
 │   └── DaemonClient.cs         # Daemon 客户端服务
 ├── icon.ico                    # 应用程序图标
-└── RemindAI.Gui.csproj         # 项目文件
+└── CodePanion.Gui.csproj         # 项目文件
 ```
 
 ## 开发
@@ -144,7 +144,7 @@ packages/gui/
 
 ```bash
 # 使用 Visual Studio
-start RemindAI.Gui.csproj
+start CodePanion.Gui.csproj
 
 # 使用 VS Code
 code .

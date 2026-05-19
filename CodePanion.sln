@@ -6,7 +6,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "packages", "packages", "{80
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "gui", "gui", "{6057E8E7-6C12-0800-448C-405378CFC160}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RemindAI.Gui", "packages\gui\RemindAI.Gui.csproj", "{A08D4D0A-7B6A-A2B2-B6C8-C77BC9677D83}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CodePanion.Gui", "packages\gui\CodePanion.Gui.csproj", "{A08D4D0A-7B6A-A2B2-B6C8-C77BC9677D83}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

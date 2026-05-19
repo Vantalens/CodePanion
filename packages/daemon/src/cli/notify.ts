@@ -7,5 +7,5 @@ export async function notifyCommand(args: { title: string; message?: string; sou
     source: args.source ?? 'cli',
     level: 'info',
   });
-  console.log('[remindai] notified');
+  console.log('[codepanion] notified');
 }

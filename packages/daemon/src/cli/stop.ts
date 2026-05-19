@@ -6,7 +6,7 @@ export async function stopCommand() {
   if (!pid) {
     const r = await checkHealth();
     if (!r.ok) {
-      console.log('[remindai] daemon not running');
+      console.log('[codepanion] daemon not running');
       return;
     }
   }
@@ -14,7 +14,7 @@ export async function stopCommand() {
     try {
       process.kill(pid, 'SIGTERM');
     } catch (err) {
-      console.error(`[remindai] kill failed: ${(err as Error).message}`);
+      console.error(`[codepanion] kill failed: ${(err as Error).message}`);
       process.exit(1);
     }
   }
@@ -28,5 +28,5 @@ export async function stopCommand() {
     } catch {}
   }
   clearPid();
-  console.log('[remindai] daemon stopped');
+  console.log('[codepanion] daemon stopped');
 }

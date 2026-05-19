@@ -1,6 +1,6 @@
-# RemindAI 开发指南
+# CodePanion 开发指南
 
-本文档面向希望参与 RemindAI 开发或基于 RemindAI 进行二次开发的开发者。RemindAI 当前定位为个人本地 AI 工作流中控台，开发优先级应先服务“统一接入、状态总览、提醒、上下文查看和接管”，再逐步扩展到本地工作流编排。
+本文档面向希望参与 CodePanion 开发或基于 CodePanion 进行二次开发的开发者。CodePanion 当前定位为个人本地 AI 工作流中控台，开发优先级应先服务“统一接入、状态总览、提醒、上下文查看和接管”，再逐步扩展到本地工作流编排。
 
 ## 目录
 
@@ -27,8 +27,8 @@
 ### 克隆项目
 
 ```bash
-git clone https://github.com/Vantalens/RemindAI.git
-cd RemindAI
+git clone https://github.com/Vantalens/CodePanion.git
+cd CodePanion
 ```
 
 ### 安装依赖
@@ -109,7 +109,7 @@ npm run gui:run
 ## 项目结构
 
 ```
-RemindAI/
+CodePanion/
 ├── packages/
 │   ├── daemon/                 # Node.js 守护进程和 CLI
 │   │   ├── src/
@@ -149,7 +149,7 @@ RemindAI/
 │       ├── MainWindow.xaml    # 主窗口
 │       ├── Models/            # 视图模型
 │       ├── Services/          # 服务层
-│       └── RemindAI.Gui.csproj
+│       └── CodePanion.Gui.csproj
 │   └── vscode-extension/      # VS Code 监控源扩展
 ├── docs/                      # 文档
 │   ├── ARCHITECTURE.md
@@ -172,7 +172,7 @@ RemindAI/
 ```bash
 npm run build
 npm run validate:extensions
-dotnet build packages/gui/RemindAI.Gui.csproj -c Release
+dotnet build packages/gui/CodePanion.Gui.csproj -c Release
 git diff --check
 ```
 
@@ -181,7 +181,7 @@ git diff --check
 - 中文通知标题和正文在 daemon 日志、GUI 日志、WebView 中不乱码。
 - GUI 在线时同时收到系统通知和 GUI 时间线消息。
 - GUI 离线时系统通知仍可触发，失败时日志有明确 warning。
-- WebView 断网后仍能加载本地 `chat.html`、`chat.css`、`chat.js` 和 `vendor/remindai-markdown.js`。
+- WebView 断网后仍能加载本地 `chat.html`、`chat.css`、`chat.js` 和 `vendor/codepanion-markdown.js`。
 - Markdown 内容必须经过安全渲染，不能执行 `<script>`、`onerror=` 等 HTML。
 
 ### 多源监控开发边界
@@ -298,7 +298,7 @@ try {
   await riskyOperation();
 } catch (error) {
   logger.error('Operation failed', { error });
-  throw new RemindAIError('Failed to ...', ErrorCode.OPERATION_FAILED);
+  throw new CodePanionError('Failed to ...', ErrorCode.OPERATION_FAILED);
 }
 ```
 
@@ -317,19 +317,19 @@ import type { Config } from './config.js';  // 类型导入
 
 ```typescript
 // 自定义错误类
-export class RemindAIError extends Error {
+export class CodePanionError extends Error {
   constructor(
     message: string,
     public code: ErrorCode,
     public details?: unknown
   ) {
     super(message);
-    this.name = 'RemindAIError';
+    this.name = 'CodePanionError';
   }
 }
 
 // 使用
-throw new RemindAIError(
+throw new CodePanionError(
   'Session not found',
   ErrorCode.SESSION_NOT_FOUND,
   { sessionId }
@@ -542,10 +542,10 @@ test('should send notification', async () => {
 
 ```bash
 # 启用 debug 日志
-remindai start --log-level debug
+codepanion start --log-level debug
 
 # 查看日志文件
-tail -f ~/.remindai/logs/daemon.log
+tail -f ~/.codepanion/logs/daemon.log
 ```
 
 ### 网络调试
@@ -602,7 +602,7 @@ node --prof-process isolate-*.log > profile.txt
 1. **环境信息**：
    - 操作系统和版本
    - Node.js 版本
-   - RemindAI 版本
+   - CodePanion 版本
 
 2. **复现步骤**：
    - 详细的操作步骤
@@ -630,7 +630,7 @@ node --prof-process isolate-*.log > profile.txt
    ```bash
    npm run build
    npm run validate:extensions
-   dotnet build packages/gui/RemindAI.Gui.csproj -c Release
+   dotnet build packages/gui/CodePanion.Gui.csproj -c Release
    git diff --check
    ```
 
@@ -699,7 +699,7 @@ node --prof-process isolate-*.log > profile.txt
    ```bash
    npm run build
    npm run validate:extensions
-   dotnet build packages/gui/RemindAI.Gui.csproj -c Release
+   dotnet build packages/gui/CodePanion.Gui.csproj -c Release
    git diff --check
    ```
 
@@ -833,8 +833,8 @@ app.post('/api/myendpoint', async (req, res) => {
 
 ## 许可证
 
-RemindAI 使用 MIT 许可证。贡献代码即表示同意以相同许可证发布。
+CodePanion 使用 MIT 许可证。贡献代码即表示同意以相同许可证发布。
 
 ---
 
-感谢你对 RemindAI 的贡献！🎉
+感谢你对 CodePanion 的贡献！🎉

@@ -19,11 +19,12 @@ const ARCHIVE_CONVERSATION_WINDOW_MS = 1000 * 60 * 60 * 24 * 14;
 
 function updateConnectionStatus(connected) {
     state.connected = Boolean(connected);
-    const statusDot = document.querySelector('.status-dot');
+    const statusDots = document.querySelectorAll('.status-dot');
     const statusText = document.querySelector('.status-text');
-    if (!statusDot || !statusText) return;
-    statusDot.dataset.state = state.connected ? 'online' : 'offline';
-    statusText.textContent = state.connected ? '已连接' : '未连接';
+    statusDots.forEach(dot => {
+        dot.dataset.state = state.connected ? 'online' : 'offline';
+    });
+    if (statusText) statusText.textContent = state.connected ? '已连接' : '未连接';
 }
 
 function normalizeMessage(message) {
@@ -85,7 +86,7 @@ function sourceLabel(message) {
     if (message.source === 'comate') return '百度 Comate';
     if (message.source === 'qwen-code') return 'Qwen Code';
     if (message.source === 'ai-ide') return 'AI IDE';
-    return message.source || 'RemindAI';
+    return message.source || 'CodePanion';
 }
 
 function upsertConversation(message) {
@@ -122,6 +123,7 @@ function addMessage(message, render = true) {
     renderConversationList();
     appendMessageIfVisible(normalized, wasEmpty);
     renderCodeBrowser();
+    renderContextDrawer();
 }
 
 function appendMessageIfVisible(message, wasEmpty) {
@@ -151,6 +153,7 @@ function renderAll() {
     renderConversationList();
     renderChat();
     renderCodeBrowser();
+    renderContextDrawer();
 }
 
 function renderConversationList() {
@@ -159,16 +162,17 @@ function renderConversationList() {
 
     const allConversations = Array.from(state.conversations.values())
         .filter(item => item.id !== 'all')
-        .filter(item => state.activeView !== 'waiting' || item.status === 'prompt')
-        .filter(item => state.activeView !== 'code' || state.codeBlocks.some(block => block.conversationId === item.id))
         .sort((a, b) => b.lastAt - a.lastAt);
 
-    let conversations = allConversations;
-    if (state.activeView === 'active') {
+    updateQueueMetrics(allConversations);
+
+    const activeView = normalizeView(state.activeView);
+    let conversations = allConversations.filter(item => matchesActiveView(item, activeView));
+    if (activeView === 'active') {
         conversations = allConversations.filter(isCurrentConversation);
         if (conversations.length === 0) conversations = allConversations.filter(isRecentConversation).slice(0, 12);
     }
-    conversations = conversations.slice(0, state.activeView === 'active' ? 24 : 60);
+    conversations = conversations.slice(0, activeView === 'active' ? 24 : 60);
 
     if (!state.activeConversation || !conversations.some(item => item.id === state.activeConversation)) {
         state.activeConversation = conversations[0]?.id || '';
@@ -178,12 +182,36 @@ function renderConversationList() {
         const empty = document.createElement('div');
         empty.className = 'conversation-preview';
         empty.style.padding = '12px';
-        empty.textContent = state.activeView === 'waiting' ? '当前没有等待处理的任务' : '当前没有可显示的任务';
+        empty.textContent = activeView === 'waiting' ? '当前没有等待处理的任务' : '当前没有可显示的任务';
         list.appendChild(empty);
         return;
     }
 
     conversations.forEach(item => list.appendChild(makeConversationButton(item)));
+}
+
+function normalizeView(view) {
+    if (view === 'overview' || view === 'inbox') return 'active';
+    return view || 'active';
+}
+
+function matchesActiveView(item, activeView) {
+    if (activeView === 'waiting') return item.status === 'prompt';
+    if (activeView === 'running') return item.status !== 'prompt' && item.status !== 'done' && item.status !== 'error';
+    if (activeView === 'error') return item.status === 'error';
+    if (activeView === 'code') return state.codeBlocks.some(block => block.conversationId === item.id);
+    return true;
+}
+
+function updateQueueMetrics(conversations) {
+    const setText = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = String(value);
+    };
+    setText('queue-total', conversations.length);
+    setText('queue-waiting', conversations.filter(item => item.status === 'prompt').length);
+    setText('queue-running', conversations.filter(item => item.status !== 'prompt' && item.status !== 'done' && item.status !== 'error').length);
+    setText('queue-error', conversations.filter(item => item.status === 'error').length);
 }
 
 function isCurrentConversation(item) {
@@ -220,9 +248,15 @@ function makeConversationButton(item) {
             <span class="conversation-dot ${dotClass}"></span>
             <span></span>
         </div>
+        <div class="conversation-meta">
+            <span class="conversation-chip source-chip"></span>
+            <span class="conversation-chip capability-chip"></span>
+        </div>
         <div class="conversation-preview"></div>
     `;
     button.querySelector('.conversation-name span:last-child').textContent = item.title;
+    button.querySelector('.source-chip').textContent = sourceLabel({ source: item.source });
+    button.querySelector('.capability-chip').textContent = capabilityForSource(item.source).level;
     button.querySelector('.conversation-preview').textContent = item.lastContent || item.source || '';
     return button;
 }
@@ -231,10 +265,12 @@ function renderChat() {
     const container = document.getElementById('chat-container');
     const title = document.getElementById('conversation-title');
     const messages = getVisibleMessages();
+    const conversation = state.conversations.get(state.activeConversation);
 
     title.textContent = state.activeConversation
-        ? state.conversations.get(state.activeConversation)?.title || '任务'
+        ? conversation?.title || '任务'
         : '当前任务';
+    updateStageMeta(conversation, messages);
 
     if (messages.length === 0) {
         container.innerHTML = `
@@ -253,12 +289,101 @@ function renderChat() {
     requestAnimationFrame(() => container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' }));
 }
 
+function updateStageMeta(conversation, messages) {
+    const latest = messages[messages.length - 1];
+    const source = latest?.source || conversation?.source || '';
+    const capability = capabilityForSource(source);
+    const setText = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = value;
+    };
+    setText('stage-source', source ? sourceLabel({ source }) : '来源未选择');
+    setText('stage-capability', capability.level);
+    setText('stage-status', statusLabel(conversation?.status || latest?.type || 'idle'));
+}
+
 function getVisibleMessages() {
     if (state.activeConversation.startsWith('workflow:')) {
         return buildIntegratedWorkflowMessages(state.activeConversation.slice('workflow:'.length));
     }
     if (!state.activeConversation) return [];
     return state.messages.filter(message => message.conversationId === state.activeConversation);
+}
+
+function statusLabel(status) {
+    if (status === 'prompt') return '等待输入';
+    if (status === 'error') return '失败';
+    if (status === 'done') return '已完成';
+    if (status === 'idle') return '等待事件';
+    return '运行中';
+}
+
+function capabilityForSource(source) {
+    const normalized = String(source || '').toLowerCase();
+    if (normalized === 'cli' || normalized === 'codex' || normalized === 'claude-code') {
+        return {
+            level: 'L3 回复/继续',
+            detail: '可从终端/PTTY 会话识别等待输入并回写回复。'
+        };
+    }
+    if (normalized === 'codex-desktop') {
+        return {
+            level: 'L2 状态事件',
+            detail: '可同步本地线程与工作流状态；回复能力取决于事件目标。'
+        };
+    }
+    if (normalized === 'vscode') {
+        return {
+            level: 'L2 状态事件',
+            detail: '通过显式来源注册接收轻量事件，不读取编辑器私有状态。'
+        };
+    }
+    if (['qwen-code', 'codebuddy', 'lingma', 'trae', 'comate', 'codegeex', 'marscode', 'ai-ide'].includes(normalized)) {
+        return {
+            level: 'L1/L2 接入',
+            detail: '当前以存在识别和轻量状态为主，不把弱接入展示为可接管。'
+        };
+    }
+    if (normalized === 'user') {
+        return {
+            level: '本地输入',
+            detail: '用户在 CodePanion 中发出的回复或记录。'
+        };
+    }
+    return {
+        level: 'L1 来源识别',
+        detail: '已进入统一任务模型，深度能力以来源适配器为准。'
+    };
+}
+
+function privacyBoundaryText(source) {
+    const normalized = String(source || '').toLowerCase();
+    if (normalized === 'cli' || normalized === 'codex' || normalized === 'claude-code') {
+        return '显式会话';
+    }
+    if (normalized === 'vscode' || normalized === 'codex-desktop') {
+        return '显式接入';
+    }
+    return '最小采集';
+}
+
+function latestActionablePrompt(messages) {
+    return messages.slice().reverse().find(message => message.type === 'prompt' && (message.sessionId || message.eventId));
+}
+
+function focusActiveReply() {
+    const input = document.querySelector('.message-prompt .custom-input:not(:disabled)');
+    if (!input) return false;
+    input.focus();
+    input.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    return true;
+}
+
+function copyText(text) {
+    if (!text) return;
+    if (navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(text).catch(() => undefined);
+    }
 }
 
 function renderMessage(message) {
@@ -487,6 +612,68 @@ function renderCodeBrowser() {
     pre.appendChild(code);
     preview.appendChild(header);
     preview.appendChild(pre);
+}
+
+function renderContextDrawer() {
+    const conversation = state.conversations.get(state.activeConversation);
+    const messages = getVisibleMessages();
+    const latest = messages[messages.length - 1];
+    const source = latest?.source || conversation?.source || '';
+    const capability = capabilityForSource(source);
+    const prompt = latestActionablePrompt(messages);
+    const workspace = latest?.workspace || messages.find(message => message.workspace)?.workspace || '';
+    updateStageMeta(conversation, messages);
+
+    const setText = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = value;
+    };
+
+    setText('drawer-source-name', source ? sourceLabel({ source }) : '未选择任务');
+    setText('drawer-source-detail', conversation ? `${statusLabel(conversation.status)} · ${conversation.title || '未命名任务'}` : '选择一个任务后显示来源状态。');
+    setText('drawer-capability', capability.level);
+    setText('drawer-privacy', privacyBoundaryText(source));
+    setText('drawer-action-note', capability.detail);
+
+    const canReply = Boolean(prompt);
+    const contextText = messages.map(message => `[${sourceLabel(message)}] ${compactText(message.content)}`).join('\n');
+    wireActionButton('stage-focus-reply', canReply, () => focusActiveReply());
+    wireActionButton('drawer-focus-reply', canReply, () => focusActiveReply());
+    wireActionButton('stage-copy-context', messages.length > 0, () => copyText(contextText));
+    wireActionButton('drawer-copy-workspace', Boolean(workspace), () => copyText(workspace));
+    wireOmnibar(prompt);
+}
+
+function wireActionButton(id, enabled, handler) {
+    const button = document.getElementById(id);
+    if (!button) return;
+    button.disabled = !enabled;
+    button.onclick = enabled ? handler : null;
+}
+
+function wireOmnibar(prompt) {
+    const input = document.getElementById('omnibar-input');
+    const submit = document.getElementById('omnibar-submit');
+    if (!input || !submit) return;
+
+    const enabled = Boolean(prompt);
+    input.disabled = !enabled;
+    submit.disabled = !enabled;
+    input.placeholder = enabled ? '输入回复，按 Enter 发送到当前等待任务' : '选择可回复的等待任务后启用';
+
+    submit.onclick = enabled ? () => {
+        const value = input.value.trim();
+        if (!value) return;
+        selectOption(prompt.sessionId, prompt.eventId, value, prompt.id);
+        input.value = '';
+    } : null;
+
+    input.onkeydown = enabled ? (event) => {
+        if (event.key === 'Enter' && input.value.trim()) {
+            selectOption(prompt.sessionId, prompt.eventId, input.value.trim(), prompt.id);
+            input.value = '';
+        }
+    } : null;
 }
 
 function handleMessage(message) {
@@ -1110,11 +1297,13 @@ function workflowContent(kind, title, content, language) {
 }
 
 function bindViewButtons() {
-    document.querySelectorAll('.tool-button').forEach(button => {
+    document.querySelectorAll('.tool-button, .rail-button').forEach(button => {
         button.addEventListener('click', () => {
-            document.querySelectorAll('.tool-button').forEach(item => item.classList.remove('active'));
-            button.classList.add('active');
-            state.activeView = button.dataset.view || 'all';
+            const nextView = button.dataset.view || 'active';
+            document.querySelectorAll('.tool-button, .rail-button').forEach(item => {
+                item.classList.toggle('active', item.dataset.view === nextView);
+            });
+            state.activeView = nextView;
             if (state.activeView === 'code' && state.codeBlocks.length > 0) {
                 state.activeConversation = state.codeBlocks[state.codeBlocks.length - 1].conversationId;
             }
@@ -1149,4 +1338,4 @@ if (document.readyState === 'loading') {
     initApp();
 }
 
-window.RemindAI = { addMessage, clearMessages, updateConnectionStatus };
+window.CodePanion = { addMessage, clearMessages, updateConnectionStatus };

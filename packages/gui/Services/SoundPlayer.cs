@@ -4,7 +4,7 @@ using System.Media;
 using System.Runtime.InteropServices;
 using System.Windows;
 
-namespace RemindAI.Gui.Services
+namespace CodePanion.Gui.Services
 {
     public class SoundPlayer
     {

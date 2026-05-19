@@ -7,9 +7,9 @@ using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Websocket.Client;
-using RemindAI.Gui.Models;
+using CodePanion.Gui.Models;
 
-namespace RemindAI.Gui.Services
+namespace CodePanion.Gui.Services
 {
     public class DaemonClient : IDisposable
     {
@@ -47,7 +47,7 @@ namespace RemindAI.Gui.Services
             {
                 var configPath = Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                    ".remindai",
+                    ".codepanion",
                     "config.json"
                 );
 
@@ -410,7 +410,7 @@ namespace RemindAI.Gui.Services
             {
                 var logPath = Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                    ".remindai",
+                    ".codepanion",
                     "gui.log"
                 );
                 File.AppendAllText(logPath, logMessage + Environment.NewLine, Encoding.UTF8);

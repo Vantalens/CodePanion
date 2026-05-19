@@ -154,7 +154,7 @@ export class AiToolProcessAdapter {
       sourceId: source.id,
       source: profile.kind,
       title: `${profile.name} 已识别`,
-      content: `${profile.name} 正在运行，RemindAI 已将其纳入本地 AI 工具来源监控。当前能力：${profile.capabilities.join(', ')}。`,
+      content: `${profile.name} 正在运行，CodePanion 已将其纳入本地 AI 工具来源监控。当前能力：${profile.capabilities.join(', ')}。`,
       windowTitle: process.windowTitle || profile.group,
       workspace: inferWorkspace(process),
     });

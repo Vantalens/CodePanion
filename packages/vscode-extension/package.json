@@ -1,9 +1,9 @@
 {
-  "name": "remindai-vscode-extension",
-  "displayName": "RemindAI Monitor",
-  "description": "Reports VS Code window, task, and terminal activity to RemindAI daemon.",
+  "name": "codepanion-vscode-extension",
+  "displayName": "CodePanion Monitor",
+  "description": "Reports VS Code window, task, and terminal activity to CodePanion daemon.",
   "version": "0.1.0",
-  "publisher": "remindai",
+  "publisher": "codepanion",
   "engines": {
     "vscode": "^1.90.0"
   },
@@ -12,19 +12,19 @@
   "main": "./extension.js",
   "contributes": {
     "configuration": {
-      "title": "RemindAI",
+      "title": "CodePanion",
       "properties": {
-        "remindai.port": {
+        "codepanion.port": {
           "type": "number",
           "default": 7777,
-          "description": "RemindAI daemon port."
+          "description": "CodePanion daemon port."
         },
-        "remindai.token": {
+        "codepanion.token": {
           "type": "string",
           "default": "",
-          "description": "RemindAI daemon token. Leave empty to read ~/.remindai/config.json."
+          "description": "CodePanion daemon token. Leave empty to read ~/.codepanion/config.json."
         },
-        "remindai.enabled": {
+        "codepanion.enabled": {
           "type": "boolean",
           "default": true,
           "description": "Enable VS Code window monitoring."

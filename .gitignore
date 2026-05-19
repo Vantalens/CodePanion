@@ -33,9 +33,9 @@ Thumbs.db
 .DS_Store
 Desktop.ini
 
-# RemindAI specific
-.remindai/
-.remindai-test/
+# CodePanion specific
+.codepanion/
+.codepanion-test/
 *.pid
 
 # Test outputs

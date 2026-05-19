@@ -46,7 +46,7 @@ export async function runWithPty(input: RunArgs): Promise<number> {
   const cfg = loadConfig();
   const health = await checkHealth();
   if (!health.ok) {
-    console.error('[remindai] daemon is not running. Run `remindai start` first.');
+    console.error('[codepanion] daemon is not running. Run `codepanion start` first.');
     process.exit(2);
   }
 
@@ -63,7 +63,7 @@ export async function runWithPty(input: RunArgs): Promise<number> {
 
   let term: pty.IPty;
   try {
-    console.error('[remindai-debug] pty.spawn shell=', shell, 'args=', input.args);
+    console.error('[codepanion-debug] pty.spawn shell=', shell, 'args=', input.args);
     term = pty.spawn(shell, input.args, {
       name: 'xterm-256color',
       cols,
@@ -71,17 +71,17 @@ export async function runWithPty(input: RunArgs): Promise<number> {
       cwd: input.cwd ?? process.cwd(),
       env: { ...process.env } as Record<string, string>,
     });
-    console.error('[remindai-debug] pty spawned pid=', term.pid);
+    console.error('[codepanion-debug] pty spawned pid=', term.pid);
   } catch (err) {
-    console.error(`[remindai] failed to spawn pty for ${shell}: ${(err as Error).message}`);
+    console.error(`[codepanion] failed to spawn pty for ${shell}: ${(err as Error).message}`);
     process.exit(2);
   }
 
-  console.error('[remindai-debug] connecting ws...');
+  console.error('[codepanion-debug] connecting ws...');
   const ws = new WebSocket(wsUrl('cli', session.id));
   await new Promise<void>((resolve, reject) => {
     ws.once('open', () => {
-      console.error('[remindai-debug] ws open');
+      console.error('[codepanion-debug] ws open');
       resolve();
     });
     ws.once('error', reject);

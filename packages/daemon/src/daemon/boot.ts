@@ -5,7 +5,7 @@ import { createServer } from './server.js';
 
 export async function bootDaemon(): Promise<void> {
   if (!acquireLock()) {
-    console.error('[remindai] daemon already running');
+    console.error('[codepanion] daemon already running');
     process.exit(1);
   }
   const cfg = loadConfig();

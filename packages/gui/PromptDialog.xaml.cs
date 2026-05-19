@@ -3,7 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 
-namespace RemindAI.Gui
+namespace CodePanion.Gui
 {
     public partial class PromptDialog : Window
     {

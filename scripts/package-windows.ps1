@@ -7,11 +7,11 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $publishDir = Join-Path $root "packages\gui\bin\Release\net8.0-windows\$RuntimeIdentifier\publish"
 $distRoot = Join-Path $root "dist"
-$distDir = Join-Path $distRoot "RemindAI-$RuntimeIdentifier"
-$project = Join-Path $root "packages\gui\RemindAI.Gui.csproj"
+$distDir = Join-Path $distRoot "CodePanion-$RuntimeIdentifier"
+$project = Join-Path $root "packages\gui\CodePanion.Gui.csproj"
 
 function Resolve-NodePath {
-    $configured = $env:REMINDAI_NODE_PATH
+    $configured = $env:CODEPANION_NODE_PATH
     if ($configured -and (Test-Path $configured)) {
         return (Resolve-Path $configured).Path
     }
@@ -26,7 +26,7 @@ function Resolve-NodePath {
         return (Resolve-Path $where).Path
     }
 
-    throw "node.exe not found. Install Node.js or set REMINDAI_NODE_PATH."
+    throw "node.exe not found. Install Node.js or set CODEPANION_NODE_PATH."
 }
 
 function Stop-RunningPortableGui {
@@ -34,7 +34,7 @@ function Stop-RunningPortableGui {
 
     $resolvedPackageDir = [System.IO.Path]::GetFullPath($PackageDir)
     $escapedPackageDir = $resolvedPackageDir.Replace("\", "\\")
-    $running = Get-Process -Name "RemindAI.Gui" -ErrorAction SilentlyContinue |
+    $running = Get-Process -Name "CodePanion.Gui" -ErrorAction SilentlyContinue |
         Where-Object {
             $_.Path -and [System.IO.Path]::GetFullPath($_.Path).StartsWith($resolvedPackageDir, [System.StringComparison]::OrdinalIgnoreCase)
         }
@@ -105,13 +105,13 @@ Copy-Item -LiteralPath $nodePath -Destination (Join-Path $runtimeDir "node.exe")
 
 $readmePath = Join-Path $distDir "README_START.txt"
 @(
-    "RemindAI portable package",
+    "CodePanion portable package",
     "",
-    "Start: double-click RemindAI.Gui.exe",
+    "Start: double-click CodePanion.Gui.exe",
     "The GUI will start the local daemon automatically.",
     "Do not move files out of this folder individually."
 ) | Set-Content -LiteralPath $readmePath -Encoding UTF8
 
 Write-Host "[4/4] Done."
 Write-Host "Portable package: $distDir"
-Write-Host "Entry: $(Join-Path $distDir 'RemindAI.Gui.exe')"
+Write-Host "Entry: $(Join-Path $distDir 'CodePanion.Gui.exe')"

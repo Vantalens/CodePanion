@@ -7,13 +7,13 @@ const vscode = require('vscode');
 let sourceId = '';
 
 function loadDaemonConfig() {
-  const cfg = vscode.workspace.getConfiguration('remindai');
+  const cfg = vscode.workspace.getConfiguration('codepanion');
   let port = cfg.get('port') || 7777;
   let token = cfg.get('token') || '';
 
   if (!token) {
     try {
-      const raw = fs.readFileSync(path.join(os.homedir(), '.remindai', 'config.json'), 'utf8');
+      const raw = fs.readFileSync(path.join(os.homedir(), '.codepanion', 'config.json'), 'utf8');
       const parsed = JSON.parse(raw);
       port = parsed.port || port;
       token = parsed.token || token;
@@ -61,7 +61,7 @@ function workspaceName() {
 }
 
 async function registerSource() {
-  const enabled = vscode.workspace.getConfiguration('remindai').get('enabled');
+  const enabled = vscode.workspace.getConfiguration('codepanion').get('enabled');
   if (enabled === false) return;
 
   const source = await request('POST', '/sources/register', {
@@ -92,9 +92,9 @@ function postEvent(type, title, content) {
 async function activate(context) {
   try {
     await registerSource();
-    postEvent('activity', 'VS Code 已连接', 'VS Code 窗口监控已连接到 RemindAI。');
+    postEvent('activity', 'VS Code 已连接', 'VS Code 窗口监控已连接到 CodePanion。');
   } catch (err) {
-    console.warn('[RemindAI] failed to register source:', err.message);
+    console.warn('[CodePanion] failed to register source:', err.message);
   }
 
   context.subscriptions.push(vscode.tasks.onDidEndTaskProcess(event => {

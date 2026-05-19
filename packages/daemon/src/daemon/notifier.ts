@@ -21,8 +21,8 @@ export class Notifier {
       const script = [
         'Add-Type -AssemblyName System.Windows.Forms',
         'Add-Type -AssemblyName System.Drawing',
-        '$title = [Environment]::GetEnvironmentVariable("REMINDAI_NOTIFY_TITLE")',
-        '$message = [Environment]::GetEnvironmentVariable("REMINDAI_NOTIFY_MESSAGE")',
+        '$title = [Environment]::GetEnvironmentVariable("CODEPANION_NOTIFY_TITLE")',
+        '$message = [Environment]::GetEnvironmentVariable("CODEPANION_NOTIFY_MESSAGE")',
         '$n = New-Object System.Windows.Forms.NotifyIcon',
         '$n.Icon = [System.Drawing.SystemIcons]::Information',
         '$n.BalloonTipTitle = $title',
@@ -42,8 +42,8 @@ export class Notifier {
       ], {
         env: {
           ...process.env,
-          REMINDAI_NOTIFY_TITLE: title,
-          REMINDAI_NOTIFY_MESSAGE: message,
+          CODEPANION_NOTIFY_TITLE: title,
+          CODEPANION_NOTIFY_MESSAGE: message,
         },
       });
       return;

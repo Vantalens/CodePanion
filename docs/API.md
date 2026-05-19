@@ -1,19 +1,19 @@
-# RemindAI API 文档
+# CodePanion API 文档
 
-RemindAI daemon 是本地 AI 开发工作流控制台 / 控制平面的数据与事件中枢。它默认监听 `http://127.0.0.1:7777`，WebSocket 默认路径为 `ws://127.0.0.1:7777/ws`。
+CodePanion daemon 是本地 AI 开发工作流控制台 / 控制平面的数据与事件中枢。它默认监听 `http://127.0.0.1:7777`，WebSocket 默认路径为 `ws://127.0.0.1:7777/ws`。
 
-除 `GET /health` 外，所有 HTTP API 都需要 `Authorization: Bearer <token>`。token 位于 `~/.remindai/config.json`。
+除 `GET /health` 外，所有 HTTP API 都需要 `Authorization: Bearer <token>`。token 位于 `~/.codepanion/config.json`。
 
 ## 控制平面语义
 
-本轮策略修订保留现有 API，不引入破坏性接口。`source`、`session`、`workflow`、`event` 是 RemindAI 后续适配器 SDK、审计快照和 provider adapter 的稳定语义基础：
+本轮策略修订保留现有 API，不引入破坏性接口。`source`、`session`、`workflow`、`event` 是 CodePanion 后续适配器 SDK、审计快照和 provider adapter 的稳定语义基础：
 
 - `source`：一个本地工具、窗口、插件、CLI 或外部适配器来源。
-- `session`：由 RemindAI 可接管的 CLI/PTTY 会话。
+- `session`：由 CodePanion 可接管的 CLI/PTTY 会话。
 - `event`：来源上报的状态、提醒、完成、失败或等待输入。
 - `workflow`：面向 GUI 的统一线程和条目视图，用于汇总跨来源上下文。
 
-API 只描述本地控制台能力，不代表 RemindAI 会读取上游工具的私有状态。接入方必须通过公开 API、CLI/PTTY、扩展或显式适配器上报数据。
+API 只描述本地控制台能力，不代表 CodePanion 会读取上游工具的私有状态。接入方必须通过公开 API、CLI/PTTY、扩展或显式适配器上报数据。
 
 ## HTTP API
 
@@ -124,8 +124,8 @@ API 只描述本地控制台能力，不代表 RemindAI 会读取上游工具的
 {
   "kind": "vscode",
   "name": "VS Code",
-  "windowTitle": "RemindAI",
-  "workspace": "D:\\RemindAI",
+  "windowTitle": "CodePanion",
+  "workspace": "D:\\CodePanion",
   "pid": 12345,
   "capabilities": ["window", "tasks", "terminals"]
 }
@@ -151,7 +151,7 @@ API 只描述本地控制台能力，不代表 RemindAI 会读取上游工具的
   "title": "任务已结束",
   "content": "Codex 会话已完成",
   "windowTitle": "Codex",
-  "workspace": "D:\\RemindAI"
+  "workspace": "D:\\CodePanion"
 }
 ```
 
@@ -211,7 +211,7 @@ CLI 会话事件：
 
 - **适配器 SDK**：围绕 `/sources/register`、`/events`、事件回复和 workflow snapshot 提供更稳定的外部接入规范。
 - **审计快照**：基于 `workflow` 与来源事件生成本地导出，不读取上游私有数据库。
-- **Provider adapter**：为 Qwen、DeepSeek、GLM、腾讯混元等模型或网关预留路由语义，但 RemindAI 当前不做模型平台或 token 二次分销。
+- **Provider adapter**：为 Qwen、DeepSeek、GLM、腾讯混元等模型或网关预留路由语义，但 CodePanion 当前不做模型平台或 token 二次分销。
 - **跨平台通道**：在 Beta 前评估 Tauri/Avalonia 和 Named Pipe / Unix Domain Socket 等本地通道增强。
 
 ## 数据边界

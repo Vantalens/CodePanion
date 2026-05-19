@@ -1,6 +1,6 @@
 # 图标文件说明
 
-本目录应包含 RemindAI 的图标文件。
+本目录应包含 CodePanion 的图标文件。
 
 ## 所需文件
 
@@ -39,7 +39,7 @@ convert icon.png -define icon:auto-resize=256,128,64,48,32,16 icon.ico
 
 ## 设计建议
 
-RemindAI 的图标应该：
+CodePanion 的图标应该：
 - 简洁明了，易于识别
 - 在小尺寸下清晰可见
 - 使用品牌色彩（蓝色 #0066cc）
@@ -58,6 +58,6 @@ RemindAI 的图标应该：
 ## 文件位置
 
 将 `icon.ico` 放在此目录后：
-1. 取消注释 `RemindAI.Gui.csproj` 中的 `<ApplicationIcon>` 配置
+1. 取消注释 `CodePanion.Gui.csproj` 中的 `<ApplicationIcon>` 配置
 2. 取消注释 `MainWindow.xaml` 中的 `IconSource` 属性
 3. 重新构建项目
