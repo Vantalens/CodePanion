@@ -17,8 +17,10 @@ import {
   ReplyRequestSchema,
   SessionExitRequestSchema,
   SessionOutputRequestSchema,
+  SessionPromptRequestSchema,
 } from '../shared/protocol.js';
-import { logger } from '../logger.js';
+import { logger, maskString } from '../logger.js';
+import { VERSION } from '../shared/version.js';
 
 type CreateServerOptions = {
   workflowSnapshotPath?: string | null;
@@ -28,6 +30,7 @@ export function createServer(cfg: Config): {
   start: () => Promise<Server>;
   notifier: Notifier;
   sessions: SessionManager;
+  workflows: WorkflowManager;
 };
 export function createServer(
   cfg: Config,
@@ -36,16 +39,24 @@ export function createServer(
   start: () => Promise<Server>;
   notifier: Notifier;
   sessions: SessionManager;
+  workflows: WorkflowManager;
 } {
   const app = express();
   const notifier = new Notifier(cfg);
-  const sessions = new SessionManager();
-  const sources = new SourceManager();
+  const sessions = new SessionManager({ retention: cfg.retention.session });
+  const sources = new SourceManager({ retention: cfg.retention.source });
   const workflows = new WorkflowManager({
     snapshotPath: options.workflowSnapshotPath === null ? undefined : (options.workflowSnapshotPath ?? WORKFLOW_SNAPSHOT_PATH),
+    retention: cfg.retention.workflow,
   });
   const codexAdapter = new CodexDesktopAdapter(workflows);
   const aiToolAdapter = new AiToolProcessAdapter(sources);
+  const sessionWorkflowItemCounters = new Map<string, number>();
+  const nextSessionWorkflowItemId = (sessionId: string, kind: string, timestamp: number) => {
+    const next = (sessionWorkflowItemCounters.get(sessionId) ?? 0) + 1;
+    sessionWorkflowItemCounters.set(sessionId, next);
+    return `session:${sessionId}:${kind}:${timestamp}:${next}`;
+  };
 
   sessions.onEvent((event) => {
     const now = Date.now();
@@ -71,7 +82,7 @@ export function createServer(
       });
     } else if (event.type === 'session-output') {
       workflows.appendItem({
-        id: `session:${event.sessionId}:output:${now}:${Buffer.byteLength(event.chunk, 'utf8')}`,
+        id: nextSessionWorkflowItemId(event.sessionId, 'output', now),
         threadId: `session:${event.sessionId}`,
         source: 'cli',
         kind: 'command',
@@ -81,7 +92,7 @@ export function createServer(
       });
     } else if (event.type === 'session-prompt') {
       workflows.appendItem({
-        id: `session:${event.sessionId}:prompt:${now}`,
+        id: nextSessionWorkflowItemId(event.sessionId, 'prompt', now),
         threadId: `session:${event.sessionId}`,
         source: 'cli',
         kind: 'prompt',
@@ -92,7 +103,7 @@ export function createServer(
       });
     } else if (event.type === 'session-exited') {
       workflows.appendItem({
-        id: `session:${event.sessionId}:exit:${now}`,
+        id: nextSessionWorkflowItemId(event.sessionId, 'exit', now),
         threadId: `session:${event.sessionId}`,
         source: 'cli',
         kind: 'status',
@@ -101,6 +112,7 @@ export function createServer(
         status: event.exitCode === 0 ? 'done' : 'error',
         timestamp: now,
       });
+      sessionWorkflowItemCounters.delete(event.sessionId);
     }
   });
 
@@ -152,7 +164,7 @@ export function createServer(
   });
 
   app.get('/health', (_req, res) => {
-    res.json({ ok: true, pid: process.pid, version: '0.1.0' });
+    res.json({ ok: true, pid: process.pid, version: VERSION });
   });
 
   app.post('/notify', (req, res) => {
@@ -192,6 +204,15 @@ export function createServer(
 
   app.get('/sources', (_req, res) => {
     res.json(sources.list());
+  });
+
+  app.post('/sources/:id/disconnect', (req, res) => {
+    const ok = sources.disconnect(req.params.id);
+    if (!ok) {
+      res.status(404).json({ error: 'source not found' });
+      return;
+    }
+    res.json({ ok: true });
   });
 
   app.get('/workflow/threads', (_req, res) => {
@@ -315,15 +336,17 @@ export function createServer(
   });
 
   app.post('/sessions/:id/prompt', (req, res) => {
-    const lastLines = String(req.body?.lastLines ?? '');
-    const options: string[] | undefined = Array.isArray(req.body?.options)
-      ? req.body.options
-      : undefined;
+    const parsed = SessionPromptRequestSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.message });
+      return;
+    }
     const rec = sessions.get(req.params.id);
     if (!rec) {
       res.status(404).json({ error: 'no such session' });
       return;
     }
+    const { lastLines, options } = parsed.data;
     sessions.markPrompt(req.params.id, lastLines, options);
     const title = `${rec.command} 等待输入`;
     const message = lastLines.split('\n').slice(-2).join('\n').trim() || '请回复';
@@ -364,7 +387,8 @@ export function createServer(
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     logger.error({ err }, 'request error');
-    res.status(500).json({ error: String(err?.message ?? err) });
+    const safeMessage = maskString(String(err?.message ?? err));
+    res.status(500).json({ error: safeMessage });
   });
 
   const start = (): Promise<Server> =>
@@ -376,8 +400,30 @@ export function createServer(
         resolve(httpServer);
       });
 
-      const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
-      wss.on('connection', (ws, req) => handleWs(ws, req, cfg, sessions, sources, workflows, observerSockets));
+      const expectedTokenProtocol = `codepanion.token.${cfg.token}`;
+      const wss = new WebSocketServer({
+        server: httpServer,
+        path: '/ws',
+        verifyClient(info, done) {
+          if (!isOriginAllowed(info.origin)) {
+            logger.warn({ origin: info.origin }, 'ws rejected: forbidden origin');
+            done(false, 403, 'forbidden origin');
+            return;
+          }
+          const protoHeader = info.req.headers['sec-websocket-protocol'];
+          const offered = parseProtocolHeader(protoHeader);
+          if (!offered.includes(expectedTokenProtocol)) {
+            logger.warn({ hadSubprotocol: offered.length > 0 }, 'ws rejected: missing or invalid token subprotocol');
+            done(false, 401, 'unauthorized');
+            return;
+          }
+          done(true);
+        },
+        handleProtocols(protocols) {
+          return protocols.has(expectedTokenProtocol) ? expectedTokenProtocol : false;
+        },
+      });
+      wss.on('connection', (ws, req) => handleWs(ws, req, sessions, sources, workflows, observerSockets));
       httpServer.on('close', () => {
         for (const client of wss.clients) {
           client.terminate();
@@ -386,7 +432,7 @@ export function createServer(
       });
     });
 
-  return { start, notifier, sessions };
+  return { start, notifier, sessions, workflows };
 }
 
 function broadcastNotification(
@@ -409,25 +455,39 @@ function broadcastNotification(
   });
 }
 
+const ALLOWED_ORIGINS = new Set(['null', 'https://codepanion.local']);
+
+function isOriginAllowed(origin: string | undefined | null): boolean {
+  if (!origin) return true;
+  return ALLOWED_ORIGINS.has(origin);
+}
+
+function parseProtocolHeader(value: string | string[] | undefined): string[] {
+  if (!value) return [];
+  const raw = Array.isArray(value) ? value.join(',') : value;
+  return raw
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean);
+}
+
 function handleWs(
   ws: WebSocket,
   req: { url?: string; headers: Record<string, string | string[] | undefined> },
-  cfg: Config,
   sessions: SessionManager,
   sources: SourceManager,
   workflows: WorkflowManager,
   observerSockets: Set<WebSocket>,
 ): void {
   const url = new URL(req.url ?? '/ws', 'http://localhost');
-  const token = url.searchParams.get('token');
-  if (token !== cfg.token) {
-    ws.close(4401, 'unauthorized');
-    return;
-  }
   const role = url.searchParams.get('role') ?? 'observer';
   const sessionId = url.searchParams.get('sessionId');
 
-  if (role === 'cli' && sessionId) {
+  if (role === 'cli') {
+    if (!sessionId) {
+      ws.close(4400, 'missing sessionId');
+      return;
+    }
     if (!sessions.attachCliSocket(sessionId, ws)) {
       ws.close(4404, 'no such session');
       return;
@@ -456,7 +516,7 @@ function handleWs(
       observerSockets.delete(ws);
     });
 
-    ws.send(JSON.stringify({ type: 'hello', pid: process.pid, version: '0.1.0' }));
+    ws.send(JSON.stringify({ type: 'hello', pid: process.pid, version: VERSION }));
     ws.send(JSON.stringify({ type: 'workflow-snapshot', snapshot: workflows.snapshot() }));
   }
 

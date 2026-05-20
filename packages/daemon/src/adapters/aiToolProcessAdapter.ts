@@ -7,7 +7,7 @@ import { SourceManager } from '../daemon/sourceManager.js';
 
 const execFileAsync = promisify(execFile);
 
-type ProcessInfo = {
+export type ProcessInfo = {
   processId: number;
   name: string;
   path?: string;
@@ -15,20 +15,47 @@ type ProcessInfo = {
   windowTitle?: string;
 };
 
-type ToolProfile = {
+/**
+ * tier 收敛策略（与 docs/MONITORING_SOURCES.md 同步）：
+ *   first    — 首批投入：广覆盖 + 显式验收，作为 Windows Alpha 国产工具样本。
+ *   second   — 下一梯队观察：仍做进程级识别，但不作为 Alpha 验收必备项。
+ *   switcher — 账号 / provider 切换器，不参与 AI 任务排序。
+ */
+export type ToolTier = 'first' | 'second' | 'switcher';
+
+export type ToolProfile = {
   kind: RegisterSourceRequest['kind'];
   name: string;
   group: string;
+  tier: ToolTier;
   processPatterns: RegExp[];
   commandPatterns?: RegExp[];
   capabilities: string[];
 };
 
-const TOOL_PROFILES: ToolProfile[] = [
+export const TOOL_PROFILES: ToolProfile[] = [
+  {
+    kind: 'cc-switch',
+    name: 'CC Switch',
+    group: 'AI 账号 / Provider 切换器',
+    tier: 'switcher',
+    processPatterns: [/^(cc-switch|ccs|ccswitch)(\.exe)?$/i, /claude[-\s]?code[-\s]?switch/i],
+    commandPatterns: [
+      /(^|[\s"'])cc-switch(\.exe)?([\s"']|$)/i,
+      /(^|[\s"'])ccs(\.exe)?([\s"']|$)/i,
+      /(^|[\s"'])ccswitch(\.exe)?([\s"']|$)/i,
+      /@[^\\/ ]+[\\/]cc-switch/i,
+      /@[^\\/ ]+[\\/]claude-code-switch/i,
+      /claude-code-switch/i,
+      /cc switch/i,
+    ],
+    capabilities: ['process-detected', 'account-switcher', 'provider-switcher', 'claude-code-config', 'codex-config'],
+  },
   {
     kind: 'trae',
     name: 'Trae',
     group: 'Code OSS / VS Code 系',
+    tier: 'first',
     processPatterns: [/^trae/i],
     commandPatterns: [/\\Trae(\\|$)/i, /trae/i],
     capabilities: ['process-detected', 'window', 'code-oss-family', 'ai-ide'],
@@ -37,6 +64,7 @@ const TOOL_PROFILES: ToolProfile[] = [
     kind: 'codebuddy',
     name: 'CodeBuddy',
     group: 'CodeBuddy IDE / CLI',
+    tier: 'first',
     processPatterns: [/codebuddy/i],
     commandPatterns: [/codebuddy/i, /@tencent-ai[\\/]codebuddy-code/i],
     capabilities: ['process-detected', 'window', 'cli-detected', 'ai-ide'],
@@ -45,22 +73,16 @@ const TOOL_PROFILES: ToolProfile[] = [
     kind: 'lingma',
     name: '通义灵码',
     group: '插件型 IDE 助手',
+    tier: 'first',
     processPatterns: [/lingma/i, /tongyi/i],
     commandPatterns: [/lingma/i, /tongyi/i, /通义灵码/i],
     capabilities: ['process-detected', 'plugin-family'],
   },
   {
-    kind: 'marscode',
-    name: '豆包 / MarsCode',
-    group: 'Code OSS / VS Code 系',
-    processPatterns: [/marscode/i, /doubao/i],
-    commandPatterns: [/marscode/i, /doubao/i],
-    capabilities: ['process-detected', 'window', 'code-oss-family', 'ai-ide'],
-  },
-  {
     kind: 'codegeex',
     name: 'CodeGeeX',
     group: '插件型 IDE 助手',
+    tier: 'first',
     processPatterns: [/codegeex/i],
     commandPatterns: [/codegeex/i],
     capabilities: ['process-detected', 'plugin-family'],
@@ -69,14 +91,25 @@ const TOOL_PROFILES: ToolProfile[] = [
     kind: 'comate',
     name: '百度 Comate',
     group: '插件型 IDE 助手',
+    tier: 'first',
     processPatterns: [/comate/i],
     commandPatterns: [/comate/i, /baidu/i],
     capabilities: ['process-detected', 'plugin-family'],
   },
   {
+    kind: 'marscode',
+    name: '豆包 / MarsCode',
+    group: 'Code OSS / VS Code 系',
+    tier: 'second',
+    processPatterns: [/marscode/i, /doubao/i],
+    commandPatterns: [/marscode/i, /doubao/i],
+    capabilities: ['process-detected', 'window', 'code-oss-family', 'ai-ide'],
+  },
+  {
     kind: 'qwen-code',
     name: 'Qwen Code',
     group: 'CLI 型工具',
+    tier: 'second',
     processPatterns: [/^qwen/i],
     commandPatterns: [/qwen-code/i, /@qwen/i],
     capabilities: ['process-detected', 'cli-detected'],
@@ -118,7 +151,7 @@ export class AiToolProcessAdapter {
         const profile = matchToolProfile(process);
         if (!profile) continue;
 
-        const key = `${profile.kind}:${process.processId}`;
+        const key = sourceKeyForProcess(profile, process);
         seen.add(key);
         const sourceId = this.sourceIdsByKey.get(key);
         if (sourceId) {
@@ -161,13 +194,26 @@ export class AiToolProcessAdapter {
   }
 }
 
-function matchToolProfile(process: ProcessInfo): ToolProfile | undefined {
+export function matchToolProfile(process: ProcessInfo): ToolProfile | undefined {
   const name = process.name || '';
   const text = `${process.path ?? ''}\n${process.commandLine ?? ''}\n${process.windowTitle ?? ''}`;
   return TOOL_PROFILES.find((profile) => {
     if (profile.processPatterns.some((pattern) => pattern.test(name))) return true;
     return profile.commandPatterns?.some((pattern) => pattern.test(text)) ?? false;
   });
+}
+
+export function sourceKeyForProcess(profile: ToolProfile, process: ProcessInfo): string {
+  if (profile.kind === 'cc-switch') {
+    const identity = normalizeProcessIdentity(process.path) || normalizeProcessIdentity(process.name);
+    return `${profile.kind}:${identity || 'cc-switch'}`;
+  }
+  return `${profile.kind}:${process.processId}`;
+}
+
+function normalizeProcessIdentity(value?: string): string {
+  if (!value) return '';
+  return value.trim().replace(/\//g, '\\').toLowerCase();
 }
 
 function inferWorkspace(process: ProcessInfo): string | undefined {

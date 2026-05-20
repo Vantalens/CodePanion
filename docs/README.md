@@ -18,6 +18,9 @@
 - **[开发指南](DEVELOPMENT.md)** - 开发环境设置和贡献指南
 - **[API 文档](API.md)** - HTTP/WebSocket API 参考
 - **[监控源说明](MONITORING_SOURCES.md)** - CLI、VS Code 和外部适配器的能力边界
+- **[Claude Code 接入指南](INTEGRATIONS_CLAUDE_CODE.md)** - 固化 CLI/PTY、hooks、VS Code 三条接入路径
+- **[Codex 接入指南](INTEGRATIONS_CODEX.md)** - 固化 CLI/PTY、Codex Desktop 同步、VS Code 终端三条接入路径
+- **[能力证据矩阵](CAPABILITY_EVIDENCE.md)** - 每条入口的 L1/L2/L3 能力都对应代码引用与自动化测试
 - **[产品路线](PRODUCT_ROADMAP.md)** - 报告策略、现有产品保留决策、Alpha/Beta/GA 演进路线
 - **[重新设计文档](REDESIGN.md)** - 架构重构和改进计划
 

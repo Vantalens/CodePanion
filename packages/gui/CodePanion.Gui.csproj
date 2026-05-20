@@ -8,7 +8,24 @@
     <AssemblyName>CodePanion.Gui</AssemblyName>
     <RootNamespace>CodePanion.Gui</RootNamespace>
     <ApplicationIcon>Assets\app-icon.ico</ApplicationIcon>
-    <NuGetAudit>false</NuGetAudit>
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>direct</NuGetAuditMode>
+    <NoWarn>$(NoWarn);NU1900</NoWarn>
+  </PropertyGroup>
+
+  <!-- A-2: keep GUI version in lockstep with root package.json so daemon and GUI never drift. -->
+  <PropertyGroup>
+    <_RootPackageJson>$(MSBuildThisFileDirectory)..\..\package.json</_RootPackageJson>
+  </PropertyGroup>
+  <PropertyGroup Condition="Exists('$(_RootPackageJson)')">
+    <_RootPackageJsonText>$([System.IO.File]::ReadAllText('$(_RootPackageJson)'))</_RootPackageJsonText>
+    <_RootPackageJsonVersion>$([System.Text.RegularExpressions.Regex]::Match($(_RootPackageJsonText), '&quot;version&quot;\s*:\s*&quot;([^&quot;]+)&quot;').Groups[1].Value)</_RootPackageJsonVersion>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(_RootPackageJsonVersion)' != ''">
+    <Version>$(_RootPackageJsonVersion)</Version>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Version)' == ''">
+    <Version>0.0.0</Version>
   </PropertyGroup>
 
   <ItemGroup>

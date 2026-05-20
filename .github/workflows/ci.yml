@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+      - develop
+      - "codex/**"
+
+jobs:
+  windows:
+    name: Windows build and tests
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.14.1"
+          cache: npm
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check whitespace
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_EVENT_NAME -eq "pull_request") {
+            git diff --check "origin/$env:GITHUB_BASE_REF...HEAD"
+          } elseif ((git rev-list --count HEAD) -gt 1) {
+            git diff --check "HEAD~1..HEAD"
+          } else {
+            git diff --check
+          }
+
+      - name: Run daemon tests + DTO drift check
+        run: npm test
+
+      - name: Validate extension manifests + activation contract
+        run: npm run validate:extensions
+
+      - name: Build GUI
+        run: dotnet build packages/gui/CodePanion.Gui.csproj -c Release
+
+      - name: Package Windows portable build
+        shell: pwsh
+        run: |
+          $env:CODEPANION_NODE_PATH = (Get-Command node).Source
+          npm run package:windows
+

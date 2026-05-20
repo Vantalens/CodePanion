@@ -16,8 +16,13 @@ const state = {
 
 const MAX_MESSAGES = 5000;
 const MAX_CODE_BLOCKS = 300;
+const MAX_WORKFLOW_THREADS = 30;
+const MAX_WORKFLOW_ITEMS_PER_THREAD = 120;
+const MAX_WORKFLOW_ITEM_IDS = 4000;
 const ACTIVE_CONVERSATION_WINDOW_MS = 1000 * 60 * 60 * 24 * 3;
 const ARCHIVE_CONVERSATION_WINDOW_MS = 1000 * 60 * 60 * 24 * 14;
+let renderScheduled = false;
+let renderSmoothScroll = false;
 
 function updateConnectionStatus(connected) {
     state.connected = Boolean(connected);
@@ -47,6 +52,9 @@ function normalizeMessage(message) {
         content,
         options: Array.isArray(message.options) ? message.options : Array.isArray(message.Options) ? message.Options : undefined,
         level: message.level || message.Level || '',
+        capabilityLevel: message.capabilityLevel || message.CapabilityLevel || '',
+        integrationKind: message.integrationKind || message.IntegrationKind || '',
+        privacyBoundary: message.privacyBoundary || message.PrivacyBoundary || '',
         workflowSummary: message.workflowSummary || message.WorkflowSummary,
         rawItems: Array.isArray(message.rawItems) ? message.rawItems : Array.isArray(message.RawItems) ? message.RawItems : undefined
     };
@@ -87,6 +95,7 @@ function sourceLabel(message) {
     if (message.source === 'codegeex') return 'CodeGeeX';
     if (message.source === 'comate') return '百度 Comate';
     if (message.source === 'qwen-code') return 'Qwen Code';
+    if (message.source === 'cc-switch') return 'CC Switch';
     if (message.source === 'ai-ide') return 'AI IDE';
     return message.source || 'CodePanion';
 }
@@ -100,10 +109,16 @@ function upsertConversation(message) {
         lastContent: '',
         lastAt: 0,
         count: 0,
-        status: 'activity'
+        status: 'activity',
+        capabilityLevel: message.capabilityLevel,
+        integrationKind: message.integrationKind,
+        privacyBoundary: message.privacyBoundary
     };
     current.title = current.title || message.conversationTitle;
     current.source = message.source || current.source;
+    current.capabilityLevel = message.capabilityLevel || current.capabilityLevel;
+    current.integrationKind = message.integrationKind || current.integrationKind;
+    current.privacyBoundary = message.privacyBoundary || current.privacyBoundary;
     current.lastContent = compactText(message.content);
     current.lastAt = message.timestamp;
     current.count += 1;
@@ -174,7 +189,7 @@ function appendMessageIfVisible(message, wasEmpty) {
         container.innerHTML = '';
     }
     container.appendChild(renderMessage(message));
-    requestAnimationFrame(() => container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' }));
+    requestAnimationFrame(() => container.scrollTo({ top: container.scrollHeight, behavior: 'auto' }));
 }
 
 function clearMessages() {
@@ -195,12 +210,24 @@ function renderAll() {
     renderContextDrawer();
 }
 
+function scheduleRenderAll({ smoothScroll = false } = {}) {
+    renderSmoothScroll = renderSmoothScroll || smoothScroll;
+    if (renderScheduled) return;
+    renderScheduled = true;
+    requestAnimationFrame(() => {
+        renderScheduled = false;
+        renderAll();
+        renderSmoothScroll = false;
+    });
+}
+
 function renderConversationList() {
     const list = document.getElementById('conversation-list');
     list.innerHTML = '';
 
     const allConversations = Array.from(state.conversations.values())
         .filter(item => item.id !== 'all')
+        .filter(isUserFacingConversation)
         .sort((a, b) => b.lastAt - a.lastAt);
 
     updateQueueMetrics(allConversations);
@@ -209,7 +236,7 @@ function renderConversationList() {
     let conversations = allConversations.filter(item => matchesActiveView(item, activeView));
     if (activeView === 'active') {
         conversations = allConversations.filter(isCurrentConversation);
-        if (conversations.length === 0) conversations = allConversations.filter(isRecentConversation).slice(0, 12);
+        if (conversations.length === 0) conversations = allConversations.filter(item => isRecentConversation(item) && isUserFacingConversation(item)).slice(0, 12);
     }
     conversations = conversations.slice(0, activeView === 'active' ? 24 : 60);
 
@@ -235,6 +262,7 @@ function normalizeView(view) {
 }
 
 function matchesActiveView(item, activeView) {
+    if (!isUserFacingConversation(item)) return false;
     if (activeView === 'waiting') return item.status === 'prompt';
     if (activeView === 'running') return item.status !== 'prompt' && item.status !== 'done' && item.status !== 'error';
     if (activeView === 'error') return item.status === 'error';
@@ -243,21 +271,54 @@ function matchesActiveView(item, activeView) {
 }
 
 function updateQueueMetrics(conversations) {
+    const visible = conversations.filter(isUserFacingConversation);
     const setText = (id, value) => {
         const el = document.getElementById(id);
         if (el) el.textContent = String(value);
     };
-    setText('queue-total', conversations.length);
-    setText('queue-waiting', conversations.filter(item => item.status === 'prompt').length);
-    setText('queue-running', conversations.filter(item => item.status !== 'prompt' && item.status !== 'done' && item.status !== 'error').length);
-    setText('queue-error', conversations.filter(item => item.status === 'error').length);
+    setText('queue-total', visible.length);
+    setText('queue-waiting', visible.filter(item => item.status === 'prompt').length);
+    setText('queue-running', visible.filter(item => item.status !== 'prompt' && item.status !== 'done' && item.status !== 'error').length);
+    setText('queue-error', visible.filter(item => item.status === 'error').length);
 }
 
 function isCurrentConversation(item) {
+    if (!isUserFacingConversation(item)) return false;
     if (item.status === 'done') return false;
     if (!isRecentConversation(item)) return false;
     if (isArchivedConversation(item)) return false;
     return true;
+}
+
+function isUserFacingConversation(item) {
+    if (!item) return false;
+    if (isPassiveSourceKind(item.source) && !isActionableStatus(item.status)) return false;
+    return true;
+}
+
+function isActionableStatus(status) {
+    return status === 'prompt' || status === 'error';
+}
+
+function isPassiveSourceKind(source) {
+    return [
+        'cc-switch',
+        'qwen-code',
+        'trae',
+        'codebuddy',
+        'lingma',
+        'marscode',
+        'codegeex',
+        'comate',
+        'ai-ide'
+    ].includes(String(source || '').toLowerCase());
+}
+
+function shouldDisplayMonitorEvent(event) {
+    const type = event.type || event.Type || 'activity';
+    const source = event.source || event.Source || metadataFromSourceId(event.sourceId || event.SourceId, 'kind');
+    if (!isPassiveSourceKind(source)) return true;
+    return type === 'prompt' || type === 'error';
 }
 
 function isRecentConversation(item) {
@@ -295,7 +356,7 @@ function makeConversationButton(item) {
     `;
     button.querySelector('.conversation-name span:last-child').textContent = item.title;
     button.querySelector('.source-chip').textContent = sourceLabel({ source: item.source });
-    button.querySelector('.capability-chip').textContent = capabilityForSource(item.source).level;
+    button.querySelector('.capability-chip').textContent = capabilityForMessage(item).level;
     button.querySelector('.conversation-preview').textContent = item.lastContent || item.source || '';
     return button;
 }
@@ -325,13 +386,14 @@ function renderChat() {
 
     container.innerHTML = '';
     messages.forEach(message => container.appendChild(renderMessage(message)));
-    requestAnimationFrame(() => container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' }));
+    const behavior = renderSmoothScroll ? 'smooth' : 'auto';
+    requestAnimationFrame(() => container.scrollTo({ top: container.scrollHeight, behavior }));
 }
 
 function updateStageMeta(conversation, messages) {
     const latest = messages[messages.length - 1];
     const source = latest?.source || conversation?.source || '';
-    const capability = capabilityForSource(source);
+    const capability = capabilityForMessage(latest || { source });
     const setText = (id, value) => {
         const el = document.getElementById(id);
         if (el) el.textContent = value;
@@ -357,6 +419,50 @@ function statusLabel(status) {
     return '运行中';
 }
 
+function capabilityForMessage(messageOrSource) {
+    if (messageOrSource && typeof messageOrSource === 'object') {
+        const level = messageOrSource.capabilityLevel || metadataFromSourceId(messageOrSource.sourceId, 'capabilityLevel');
+        const detail = integrationDetail(
+            messageOrSource.integrationKind || metadataFromSourceId(messageOrSource.sourceId, 'integrationKind'),
+            messageOrSource.privacyBoundary || metadataFromSourceId(messageOrSource.sourceId, 'privacyBoundary')
+        );
+        if (level) return { level: capabilityLevelLabel(level), detail };
+        return capabilityForSource(messageOrSource.source);
+    }
+    return capabilityForSource(messageOrSource);
+}
+
+function metadataFromSourceId(sourceId, key) {
+    if (!sourceId) return '';
+    const source = state.sources.get(sourceId);
+    if (!source) return '';
+    return source[key] || source[key[0].toUpperCase() + key.slice(1)] || '';
+}
+
+function capabilityLevelLabel(level) {
+    if (level === 'L1') return 'L1 来源识别';
+    if (level === 'L1-L2') return 'L1/L2 接入';
+    if (level === 'L2') return 'L2 状态事件';
+    if (level === 'L2-L3') return 'L2/L3 事件回复';
+    if (level === 'L3') return 'L3 回复/继续';
+    if (level === 'L4') return 'L4 工作流编排';
+    return level;
+}
+
+function integrationDetail(integrationKind, privacyBoundary) {
+    const integration = {
+        'cli-pty': '终端/PTTY 会话',
+        'local-file-sync': '本地文件同步',
+        extension: '公开扩展 API',
+        'process-scan': '进程级识别',
+        'config-switcher': '配置切换器',
+        adapter: '显式适配器',
+        manual: '手动来源'
+    }[integrationKind] || '来源适配器';
+    const privacy = privacyBoundaryText(privacyBoundary);
+    return `${integration}；隐私边界：${privacy}。`;
+}
+
 function capabilityForSource(source) {
     const normalized = String(source || '').toLowerCase();
     if (normalized === 'cli' || normalized === 'codex' || normalized === 'claude-code') {
@@ -375,6 +481,12 @@ function capabilityForSource(source) {
         return {
             level: 'L2 状态事件',
             detail: '通过显式来源注册接收轻量事件，不读取编辑器私有状态。'
+        };
+    }
+    if (normalized === 'cc-switch') {
+        return {
+            level: 'L1/L2 配置切换',
+            detail: '可识别账号或 provider 切换器状态；真实切换仍由 CC Switch 执行，CodePanion 不读取账号凭据。'
         };
     }
     if (['qwen-code', 'codebuddy', 'lingma', 'trae', 'comate', 'codegeex', 'marscode', 'ai-ide'].includes(normalized)) {
@@ -397,11 +509,20 @@ function capabilityForSource(source) {
 
 function privacyBoundaryText(source) {
     const normalized = String(source || '').toLowerCase();
+    if (normalized === 'explicit-session') return '显式会话';
+    if (normalized === 'local-history') return '本地历史';
+    if (normalized === 'explicit-extension') return '显式扩展';
+    if (normalized === 'minimal-process') return '最小进程识别';
+    if (normalized === 'config-switcher') return '配置切换器';
+    if (normalized === 'explicit-adapter') return '显式适配器';
     if (normalized === 'cli' || normalized === 'codex' || normalized === 'claude-code') {
         return '显式会话';
     }
     if (normalized === 'vscode' || normalized === 'codex-desktop') {
         return '显式接入';
+    }
+    if (normalized === 'cc-switch') {
+        return '配置切换器';
     }
     return '最小采集';
 }
@@ -661,7 +782,7 @@ function renderContextDrawer() {
     const messages = getVisibleMessages();
     const latest = messages[messages.length - 1];
     const source = latest?.source || conversation?.source || '';
-    const capability = capabilityForSource(source);
+    const capability = capabilityForMessage(latest || { source });
     const prompt = latestActionablePrompt(messages);
     const workspace = latest?.workspace || messages.find(message => message.workspace)?.workspace || '';
     updateStageMeta(conversation, messages);
@@ -674,31 +795,37 @@ function renderContextDrawer() {
     setText('drawer-source-name', source ? sourceLabel({ source }) : '未选择任务');
     setText('drawer-source-detail', conversation ? `${statusLabel(conversation.status)} · ${conversation.title || '未命名任务'}` : '选择一个任务后显示来源状态。');
     setText('drawer-capability', capability.level);
-    setText('drawer-privacy', privacyBoundaryText(source));
+    setText('drawer-privacy', privacyBoundaryText(latest?.privacyBoundary || metadataFromSourceId(latest?.sourceId, 'privacyBoundary') || source));
     setText('drawer-action-note', capability.detail);
 
     const canReply = Boolean(prompt);
     const contextText = messages.map(message => `[${sourceLabel(message)}] ${compactText(message.content)}`).join('\n');
-    wireActionButton('stage-focus-reply', canReply, () => focusActiveReply());
-    wireActionButton('drawer-focus-reply', canReply, () => focusActiveReply());
+    wireActionButton('stage-focus-reply', canReply, () => focusActiveReply(), { hideWhenDisabled: true });
+    wireActionButton('drawer-focus-reply', canReply, () => focusActiveReply(), { hideWhenDisabled: true });
     wireActionButton('stage-copy-context', messages.length > 0, () => copyText(contextText));
     wireActionButton('drawer-copy-workspace', Boolean(workspace), () => copyText(workspace));
     wireOmnibar(prompt);
 }
 
-function wireActionButton(id, enabled, handler) {
+function wireActionButton(id, enabled, handler, options = {}) {
     const button = document.getElementById(id);
     if (!button) return;
+    if (options.hideWhenDisabled) button.hidden = !enabled;
     button.disabled = !enabled;
     button.onclick = enabled ? handler : null;
 }
 
 function wireOmnibar(prompt) {
+    const omnibar = document.getElementById('omnibar');
     const input = document.getElementById('omnibar-input');
     const submit = document.getElementById('omnibar-submit');
     if (!input || !submit) return;
 
     const enabled = Boolean(prompt);
+    if (omnibar) {
+        omnibar.hidden = !enabled;
+        document.getElementById('app-shell')?.classList.toggle('omnibar-hidden', !enabled);
+    }
     input.disabled = !enabled;
     submit.disabled = !enabled;
     input.placeholder = enabled ? '输入回复，按 Enter 发送到当前等待任务' : '选择可回复的等待任务后启用';
@@ -727,12 +854,14 @@ function handleMessage(message) {
             if (message.data) addMessage(message.data);
             break;
         case 'monitor-event':
-            if (message.data) addMessage({
-                ...message.data,
-                eventId: message.data.id || message.data.Id,
-                type: message.data.type || message.data.Type || 'activity',
-                content: message.data.content || message.data.Content || message.data.title || message.data.Title || ''
-            });
+            if (message.data && shouldDisplayMonitorEvent(message.data)) {
+                addMessage({
+                    ...message.data,
+                    eventId: message.data.id || message.data.Id,
+                    type: message.data.type || message.data.Type || 'activity',
+                    content: message.data.content || message.data.Content || message.data.title || message.data.Title || ''
+                });
+            }
             break;
         case 'workflow-snapshot':
             if (message.snapshot) applyWorkflowSnapshot(message.snapshot);
@@ -744,15 +873,7 @@ function handleMessage(message) {
             if (message.source) {
                 const sourceId = message.source.id || message.source.Id || generateId();
                 state.sources.set(sourceId, message.source);
-                addMessage({
-                    type: 'activity',
-                    source: message.source.kind || message.source.Kind,
-                    sourceId,
-                    windowTitle: message.source.windowTitle || message.source.WindowTitle,
-                    workspace: message.source.workspace || message.source.Workspace,
-                    timestamp: message.source.lastSeenAt || message.source.LastSeenAt || Date.now(),
-                    content: `监控源已连接：**${message.source.name || message.source.Name || '未命名来源'}**`
-                });
+                renderContextDrawer();
             }
             break;
         case 'source-disconnected': {
@@ -761,15 +882,7 @@ function handleMessage(message) {
             if (source) {
                 source.status = 'offline';
                 source.Status = 'offline';
-                addMessage({
-                    type: 'done',
-                    source: source.kind || source.Kind,
-                    sourceId,
-                    windowTitle: source.windowTitle || source.WindowTitle,
-                    workspace: source.workspace || source.Workspace,
-                    timestamp: Date.now(),
-                    content: `监控源已离线：**${source.name || source.Name || '未命名来源'}**`
-                });
+                renderContextDrawer();
             }
             break;
         }
@@ -797,6 +910,7 @@ function applyWorkflowSnapshot(snapshot) {
     const threads = Array.isArray(snapshot.threads) ? snapshot.threads : Array.isArray(snapshot.Threads) ? snapshot.Threads : [];
     const items = Array.isArray(snapshot.items) ? snapshot.items : Array.isArray(snapshot.Items) ? snapshot.Items : [];
 
+    resetWorkflowState();
     threads.forEach(thread => storeWorkflowThread(thread));
     items
         .slice()
@@ -804,7 +918,20 @@ function applyWorkflowSnapshot(snapshot) {
         .forEach(item => storeWorkflowItem(item));
     refreshAllWorkflowConversations();
     chooseInitialConversation();
-    renderAll();
+    scheduleRenderAll();
+}
+
+function resetWorkflowState() {
+    state.workflowItemIds.clear();
+    state.workflowItemsByThread.clear();
+    state.workflowThreads.clear();
+    state.codeBlocks = state.codeBlocks.filter(block => !String(block.conversationId || '').startsWith('workflow:'));
+    for (const id of Array.from(state.conversations.keys())) {
+        if (String(id).startsWith('workflow:')) state.conversations.delete(id);
+    }
+    if (String(state.activeConversation || '').startsWith('workflow:')) {
+        state.activeConversation = '';
+    }
 }
 
 function applyWorkflowEvent(event) {
@@ -819,7 +946,7 @@ function applyWorkflowEvent(event) {
     if (action === 'item-append' && item) {
         const stored = storeWorkflowItem(item);
         if (stored) refreshWorkflowConversation(getWorkflowThreadId(item));
-        renderAll();
+        scheduleRenderAll();
     } else {
         if (thread) refreshWorkflowConversation(thread.id || thread.Id);
         renderConversationList();
@@ -840,23 +967,26 @@ function storeWorkflowThread(thread) {
         updatedAt: Number(thread.updatedAt || thread.UpdatedAt || existing.updatedAt || Date.now()),
         itemCount: Number(thread.itemCount || thread.ItemCount || existing.itemCount || 0)
     });
+    pruneWorkflowThreads();
 }
 
 function storeWorkflowItem(item) {
     const id = item.id || item.Id || generateId();
-    if (state.workflowItemIds.has(id)) return false;
-    state.workflowItemIds.add(id);
     const threadId = getWorkflowThreadId(item);
     if (!threadId) return false;
 
     const normalizedItem = normalizeWorkflowItem(item, id);
     if (shouldIgnoreWorkflowItem(normalizedItem)) return false;
     if (isLowValueStatus(normalizedItem)) return false;
+    if (state.workflowItemIds.has(id)) return false;
+    state.workflowItemIds.add(id);
 
     if (!state.workflowItemsByThread.has(threadId)) {
         state.workflowItemsByThread.set(threadId, []);
     }
-    state.workflowItemsByThread.get(threadId).push(normalizedItem);
+    const items = state.workflowItemsByThread.get(threadId);
+    items.push(normalizedItem);
+    pruneWorkflowItems(threadId);
 
     if (!state.workflowThreads.has(threadId)) {
         state.workflowThreads.set(threadId, {
@@ -872,13 +1002,67 @@ function storeWorkflowItem(item) {
 
     const thread = state.workflowThreads.get(threadId);
     thread.updatedAt = Math.max(Number(thread.updatedAt || 0), normalizedItem.timestamp);
-    thread.itemCount = Math.max(Number(thread.itemCount || 0), state.workflowItemsByThread.get(threadId).length);
+    thread.itemCount = state.workflowItemsByThread.get(threadId).length;
     thread.title = deriveWorkflowTitle(threadId, thread.title);
     if (normalizedItem.status) thread.status = normalizedItem.status;
+    pruneWorkflowThreads();
     if (shouldExtractWorkflowCode(normalizedItem)) {
         extractCodeBlocks(normalizeMessage(workflowItemToMessage(normalizedItem, id)));
     }
     return true;
+}
+
+function pruneWorkflowItems(threadId) {
+    const items = state.workflowItemsByThread.get(threadId);
+    if (!items) return;
+
+    if (items.length > MAX_WORKFLOW_ITEMS_PER_THREAD) {
+        const removed = items.splice(0, items.length - MAX_WORKFLOW_ITEMS_PER_THREAD);
+        removed.forEach(item => state.workflowItemIds.delete(item.id));
+    }
+
+    if (state.workflowItemIds.size > MAX_WORKFLOW_ITEM_IDS) {
+        pruneWorkflowItemIdsGlobal();
+    }
+}
+
+function pruneWorkflowThreads() {
+    if (state.workflowThreads.size <= MAX_WORKFLOW_THREADS) return;
+    const ordered = Array.from(state.workflowThreads.values())
+        .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
+    const remove = ordered.slice(MAX_WORKFLOW_THREADS);
+    remove.forEach(thread => removeWorkflowThread(thread.id));
+}
+
+function removeWorkflowThread(threadId) {
+    const conversationId = `workflow:${threadId}`;
+    const items = state.workflowItemsByThread.get(threadId) || [];
+    items.forEach(item => state.workflowItemIds.delete(item.id));
+    state.workflowItemsByThread.delete(threadId);
+    state.workflowThreads.delete(threadId);
+    state.conversations.delete(conversationId);
+    state.codeBlocks = state.codeBlocks.filter(block => block.conversationId !== conversationId);
+    if (state.activeConversation === conversationId) {
+        state.activeConversation = '';
+    }
+}
+
+function pruneWorkflowItemIdsGlobal() {
+    const all = [];
+    state.workflowItemsByThread.forEach((items, threadId) => {
+        items.forEach(item => all.push({ threadId, item }));
+    });
+    all.sort((a, b) => Number(a.item.timestamp || 0) - Number(b.item.timestamp || 0));
+    const removeCount = Math.max(0, all.length - MAX_WORKFLOW_ITEM_IDS);
+    for (const entry of all.slice(0, removeCount)) {
+        const items = state.workflowItemsByThread.get(entry.threadId);
+        if (!items) continue;
+        const index = items.findIndex(item => item.id === entry.item.id);
+        if (index >= 0) items.splice(index, 1);
+        state.workflowItemIds.delete(entry.item.id);
+        const thread = state.workflowThreads.get(entry.threadId);
+        if (thread) thread.itemCount = items.length;
+    }
 }
 
 function workflowItemToMessage(item, id) {
@@ -925,6 +1109,7 @@ function shouldIgnoreWorkflowItem(item) {
     const content = item.content.trim();
     if (!content) return item.kind === 'message';
     if (isInternalWorkflowContent(content)) return true;
+    if (isApprovalTranscriptContent(content)) return true;
     return false;
 }
 
@@ -939,10 +1124,26 @@ function isInternalWorkflowContent(content) {
     return false;
 }
 
+function isApprovalTranscriptContent(content) {
+    const normalized = String(content || '').trim();
+    if (/^The following is the Codex agent history added since your last approval assessment\./i.test(normalized)) return true;
+    if (/^The following is the Codex agent history whose request action you are assessing\./i.test(normalized)) return true;
+    if (/^\{\s*"outcome"\s*:\s*"allow"\s*\}$/i.test(normalized)) return true;
+    if (/^\{\s*"outcome"\s*:\s*"deny"\s*\}/i.test(normalized)) return true;
+    if (/^\{\s*"risk_level"\s*:/i.test(normalized) && /"outcome"\s*:\s*"(allow|deny)"/i.test(normalized)) return true;
+    return false;
+}
+
 function isLowValueStatus(item) {
     if (item.kind !== 'status') return false;
     const title = String(item.title || '').toLowerCase();
-    return title === '任务开始' || title === '任务完成' || title === 'task_started' || title === 'task_complete';
+    if (title === '任务开始' || title === '任务完成' || title === 'task_started' || title === 'task_complete') return true;
+    if (title === '会话开始' || title === '会话结束' || title === 'token_count' || title === 'reasoning') return true;
+    const content = String(item.content || '').trim();
+    if (/^\{\s*"type"\s*:\s*"(token_count|reasoning)"\s*\}$/i.test(content)) return true;
+    if (/^cmd\.exe\s+\/c\s+exit\s+0$/i.test(content)) return true;
+    if (/^退出码：?0$/i.test(content)) return true;
+    return false;
 }
 
 function shouldExtractWorkflowCode(item) {
@@ -969,6 +1170,13 @@ function refreshWorkflowConversation(threadId) {
     const thread = state.workflowThreads.get(threadId);
     if (!thread) return;
     const summary = summarizeWorkflow(threadId);
+    if (!hasUserVisibleWorkflowContent(threadId, summary)) {
+        state.conversations.delete(`workflow:${threadId}`);
+        if (state.activeConversation === `workflow:${threadId}`) {
+            state.activeConversation = '';
+        }
+        return;
+    }
     const status = workflowStatusToMessageType(thread.status || summary.status);
     state.conversations.set(`workflow:${threadId}`, {
         id: `workflow:${threadId}`,
@@ -986,9 +1194,10 @@ function refreshWorkflowConversation(threadId) {
 function chooseInitialConversation() {
     if (state.activeConversation) return;
     const best = Array.from(state.conversations.values())
+        .filter(isUserFacingConversation)
         .filter(item => item.status !== 'done')
         .sort((a, b) => b.lastAt - a.lastAt)[0]
-        || Array.from(state.conversations.values()).sort((a, b) => b.lastAt - a.lastAt)[0];
+        || Array.from(state.conversations.values()).filter(isUserFacingConversation).sort((a, b) => b.lastAt - a.lastAt)[0];
     state.activeConversation = best?.id || '';
 }
 
@@ -1075,8 +1284,7 @@ function buildIntegratedWorkflowMessages(threadId) {
         const first = activityBuffer[0];
         const last = activityBuffer[activityBuffer.length - 1];
         const counts = countKinds(activityBuffer);
-        const visibleBuffer = summarizeActivityItems(activityBuffer);
-        if (visibleBuffer.length === 0) {
+        if (!shouldShowActivitySummary(activityBuffer, counts)) {
             activityBuffer.length = 0;
             return;
         }
@@ -1088,8 +1296,7 @@ function buildIntegratedWorkflowMessages(threadId) {
             windowTitle: meta.title || '',
             workspace: first.filePath || meta.workspace || '',
             timestamp: first.timestamp,
-            content: buildActivitySummary(counts, activityBuffer.length, first.timestamp, last.timestamp),
-            rawItems: visibleBuffer
+            content: buildActivitySummary(counts, activityBuffer.length, first.timestamp, last.timestamp)
         }));
         activityBuffer.length = 0;
     };
@@ -1160,10 +1367,12 @@ function isPrimaryWorkflowMessage(item) {
     if (isLowValueStatus(item)) return false;
     if (item.kind === 'prompt') return true;
     if (item.status === 'waiting' || item.status === 'error') return true;
+    if (item.status === 'done' && item.kind !== 'message' && item.kind !== 'artifact') return false;
     if (item.kind !== 'message' && item.kind !== 'artifact') return false;
     if (!item.content.trim()) return Boolean(item.title);
     if (item.kind === 'artifact') return /```|diff --git|^\s*(export|import|function|class|const|let|var)\b/m.test(item.content);
-    return item.content.trim().length >= 2;
+    const role = normalizeWorkflowRole(item);
+    return (role === 'assistant' || role === 'user') && item.content.trim().length >= 2;
 }
 
 function formatWorkflowPrimaryMessage(item) {
@@ -1208,6 +1417,14 @@ function summarizeWorkflow(threadId) {
     return summary;
 }
 
+function hasUserVisibleWorkflowContent(threadId, summary) {
+    const items = state.workflowItemsByThread.get(threadId) || [];
+    if (items.length === 0) return false;
+    if (summary.promptCount > 0 || summary.errorCount > 0 || summary.fileChangeCount > 0) return true;
+    if (items.some(item => item.kind === 'artifact')) return true;
+    return items.some(isPrimaryWorkflowMessage);
+}
+
 function countKinds(items) {
     return items.reduce((counts, item) => {
         counts[item.kind] = (counts[item.kind] || 0) + 1;
@@ -1231,11 +1448,10 @@ function buildActivitySummary(counts, total, startAt, endAt) {
     return `已处理${duration}  ${parts.join('，')}`;
 }
 
-function summarizeActivityItems(items) {
-    return items
-        .filter(item => !isLowValueStatus(item))
-        .filter(item => item.kind === 'tool_call' || item.kind === 'command' || item.kind === 'file_change' || item.status === 'error')
-        .slice(-6);
+function shouldShowActivitySummary(items, counts) {
+    if (hasError(items)) return true;
+    if (counts.file_change || counts.artifact) return true;
+    return false;
 }
 
 function formatDuration(seconds) {
@@ -1380,4 +1596,8 @@ if (document.readyState === 'loading') {
     initApp();
 }
 
-window.CodePanion = { addMessage, clearMessages, updateConnectionStatus };
+const api = { addMessage, clearMessages, updateConnectionStatus };
+if (window.CODEPANION_TEST === true) {
+    api.__test = { handleMessage, state };
+}
+window.CodePanion = api;

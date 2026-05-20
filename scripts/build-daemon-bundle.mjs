@@ -5,7 +5,7 @@ await esbuild.build({
   outfile: 'packages/daemon/bundle/daemon.cjs',
   bundle: true,
   platform: 'node',
-  target: 'node22',
+  target: 'node24',
   format: 'cjs',
   sourcemap: false,
   logLevel: 'info',

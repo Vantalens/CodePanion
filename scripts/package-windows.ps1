@@ -9,6 +9,8 @@ $publishDir = Join-Path $root "packages\gui\bin\Release\net8.0-windows\$RuntimeI
 $distRoot = Join-Path $root "dist"
 $distDir = Join-Path $distRoot "CodePanion-$RuntimeIdentifier"
 $project = Join-Path $root "packages\gui\CodePanion.Gui.csproj"
+$expectedNodeVersion = "v24.14.1"
+$expectedNodeSha256 = "58E74BF02FC5BBACC41DCB8BEF089961CD5BDDD37830B87784E4FC624D145D1F"
 
 function Resolve-NodePath {
     $configured = $env:CODEPANION_NODE_PATH
@@ -27,6 +29,42 @@ function Resolve-NodePath {
     }
 
     throw "node.exe not found. Install Node.js or set CODEPANION_NODE_PATH."
+}
+
+function Get-Sha256 {
+    param([string]$Path)
+
+    $stream = [System.IO.File]::OpenRead($Path)
+    try {
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            $bytes = $sha.ComputeHash($stream)
+            return ([System.BitConverter]::ToString($bytes)).Replace("-", "").ToUpperInvariant()
+        } finally {
+            $sha.Dispose()
+        }
+    } finally {
+        $stream.Dispose()
+    }
+}
+
+function Assert-NodeRuntime {
+    param([string]$NodePath)
+
+    $version = (& $NodePath --version).Trim()
+    if ($version -ne $expectedNodeVersion) {
+        throw "node.exe version mismatch. Expected $expectedNodeVersion, got $version at $NodePath."
+    }
+
+    $hash = Get-Sha256 -Path $NodePath
+    if ($hash -ne $expectedNodeSha256) {
+        throw "node.exe SHA256 mismatch. Expected $expectedNodeSha256, got $hash at $NodePath."
+    }
+
+    return @{
+        Version = $version
+        Sha256 = $hash
+    }
 }
 
 function Stop-RunningPortableGui {
@@ -101,7 +139,11 @@ Copy-Item -Path (Join-Path $publishDir "*") -Destination $distDir -Recurse -Forc
 $runtimeDir = Join-Path $distDir "runtime"
 New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
 $nodePath = Resolve-NodePath
-Copy-Item -LiteralPath $nodePath -Destination (Join-Path $runtimeDir "node.exe") -Force
+$nodeInfo = Assert-NodeRuntime -NodePath $nodePath
+$packagedNodePath = Join-Path $runtimeDir "node.exe"
+Copy-Item -LiteralPath $nodePath -Destination $packagedNodePath -Force
+Assert-NodeRuntime -NodePath $packagedNodePath | Out-Null
+Write-Host "[package] Node runtime: $($nodeInfo.Version), SHA256=$($nodeInfo.Sha256)"
 
 $readmePath = Join-Path $distDir "README_START.txt"
 @(

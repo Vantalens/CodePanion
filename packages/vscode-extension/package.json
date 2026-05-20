@@ -1,7 +1,7 @@
 {
   "name": "codepanion-vscode-extension",
   "displayName": "CodePanion Monitor",
-  "description": "Reports VS Code window, task, and terminal activity to CodePanion daemon.",
+  "description": "Reports VS Code window, task lifecycle, terminal, and debug session activity to CodePanion daemon.",
   "version": "0.1.0",
   "publisher": "codepanion",
   "engines": {

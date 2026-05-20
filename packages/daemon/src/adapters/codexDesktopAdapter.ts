@@ -15,15 +15,22 @@ type TrackedFile = {
   threadId: string;
 };
 
+export type CodexDesktopAdapterOptions = {
+  /** Override the Codex sessions root directory. Defaults to `~/.codex/sessions`. Tests use this. */
+  root?: string;
+};
+
 const RECENT_SESSION_LIMIT = 40;
 const ACTIVE_SESSION_WINDOW_MS = 1000 * 60 * 60 * 24 * 3;
 
 export class CodexDesktopAdapter {
-  private readonly root = join(homedir(), '.codex', 'sessions');
+  private readonly root: string;
   private readonly files = new Map<string, TrackedFile>();
   private timer: NodeJS.Timeout | null = null;
 
-  constructor(private workflows: WorkflowManager) {}
+  constructor(private workflows: WorkflowManager, options: CodexDesktopAdapterOptions = {}) {
+    this.root = options.root ?? join(homedir(), '.codex', 'sessions');
+  }
 
   start() {
     if (!existsSync(this.root)) {
@@ -42,10 +49,24 @@ export class CodexDesktopAdapter {
     this.timer = null;
   }
 
+  /** Run a single scan pass. Public so tests can drive the adapter without setInterval. */
+  async scanOnce(): Promise<void> {
+    return this.scan();
+  }
+
   private async scan() {
     const candidates = this.findRecentSessionFiles(RECENT_SESSION_LIMIT);
     for (const path of candidates) {
-      await this.consume(path);
+      try {
+        await this.consume(path);
+      } catch (err) {
+        // 单个会话文件失败不应让整个 scan pass 退出；带上 file/offset 上下文便于复现。
+        const tracked = this.files.get(path);
+        logger.warn(
+          { err, file: basename(path), offset: tracked?.offset ?? 0 },
+          'codex session file consume failed',
+        );
+      }
     }
   }
 
@@ -121,10 +142,20 @@ export class CodexDesktopAdapter {
 
     const thread = this.ensureThread(threadId, path, timestamp);
     const item = this.toWorkflowItem(raw, payload, thread, timestamp);
-    if (item) this.workflows.appendItem(item);
+    if (!item) return;
+    if (item.kind === 'message' && item.role === 'user' && item.content) {
+      this.maybeUpgradeTitle(thread, item.content);
+    }
+    this.workflows.appendItem(item);
   }
 
   private ensureThread(threadId: string, path: string, timestamp: number): WorkflowThread {
+    const existing = this.workflows.getThread(threadId);
+    if (existing) {
+      // Already known. Don't clobber terminal status (done/error) set by task_complete
+      // and don't reset a meaningful title back to the degraded path-derived form.
+      return existing;
+    }
     const thread: WorkflowThread = {
       id: threadId,
       source: 'codex-desktop',
@@ -134,6 +165,14 @@ export class CodexDesktopAdapter {
       itemCount: 0,
     };
     return this.workflows.upsertThread(thread);
+  }
+
+  private maybeUpgradeTitle(thread: WorkflowThread, candidate: string): void {
+    if (!candidate) return;
+    if (!isDegradedTitle(thread.title)) return;
+    const upgraded = summarizeUserMessage(candidate);
+    if (!upgraded || upgraded === thread.title) return;
+    this.workflows.upsertThread({ ...thread, title: upgraded });
   }
 
   private toWorkflowItem(raw: JsonObject, payload: JsonObject, thread: WorkflowThread, timestamp: number): WorkflowItem | null {
@@ -234,8 +273,36 @@ function titleFromMeta(payload: JsonObject, path: string): string {
   return titleFromPath(path);
 }
 
-function titleFromPath(path: string): string {
-  return basename(path, '.jsonl').replace(/^rollout-\d{4}-\d{2}-\d{2}T/, 'Codex ');
+export function titleFromPath(path: string): string {
+  const name = basename(path, '.jsonl');
+  const dateMatch = name.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (dateMatch) return `Codex ${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`;
+  return name;
+}
+
+const DEGRADED_TITLE_RE = /^Codex \d{4}-\d{2}-\d{2}$/;
+
+export function isDegradedTitle(title: string | undefined): boolean {
+  if (!title) return true;
+  const trimmed = title.trim();
+  if (!trimmed) return true;
+  if (DEGRADED_TITLE_RE.test(trimmed)) return true;
+  // Legacy form before this commit: "Codex 12-00-00-019abcd-..." or full rollout-... name.
+  if (/^Codex \d{2}-\d{2}-\d{2}/.test(trimmed)) return true;
+  if (/^rollout-\d{4}-\d{2}-\d{2}/.test(trimmed)) return true;
+  return false;
+}
+
+export function summarizeUserMessage(text: string, maxLen = 60): string {
+  // Strip code fences / common control sequences, then collapse whitespace.
+  const cleaned = text
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) return '';
+  if (cleaned.length <= maxLen) return cleaned;
+  return `${cleaned.slice(0, maxLen - 1)}…`;
 }
 
 function stableId(threadId: string, raw: JsonObject, timestamp: number): string {
@@ -243,7 +310,7 @@ function stableId(threadId: string, raw: JsonObject, timestamp: number): string 
   return `${threadId}:${timestamp}:${hash}`;
 }
 
-function toTimestamp(value: unknown): number | undefined {
+export function toTimestamp(value: unknown): number | undefined {
   if (typeof value === 'number') return value > 10_000_000_000 ? Math.trunc(value) : Math.trunc(value * 1000);
   if (typeof value === 'string') {
     const parsed = Date.parse(value);
@@ -256,7 +323,7 @@ function isFreshTimestamp(timestamp: number): boolean {
   return Date.now() - timestamp <= ACTIVE_SESSION_WINDOW_MS;
 }
 
-function statusFromEvent(eventType: string): WorkflowItem['status'] | undefined {
+export function statusFromEvent(eventType: string): WorkflowItem['status'] | undefined {
   if (/error|failed|fail/i.test(eventType)) return 'error';
   if (/complete|done|end/i.test(eventType)) return 'done';
   if (/wait|prompt/i.test(eventType)) return 'waiting';
@@ -267,7 +334,7 @@ function stringOrUndefined(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value : undefined;
 }
 
-function textFrom(value: unknown): string {
+export function textFrom(value: unknown): string {
   if (value == null) return '';
   if (typeof value === 'string') return value;
   if (Array.isArray(value)) return value.map(textFrom).filter(Boolean).join('\n\n');
@@ -281,13 +348,27 @@ function textFrom(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
-function shouldHideCodexContent(content: string): boolean {
+export function shouldHideCodexContent(content: string): boolean {
   const text = content.trim();
   if (!text) return false;
   return /^<environment_context>/i.test(text)
     || /^<turn_aborted>/i.test(text)
     || /^<permissions instructions>/i.test(text)
-    || /^# Context from my IDE setup:/i.test(text);
+    || /^# Context from my IDE setup:/i.test(text)
+    || isCodexApprovalDecision(text);
+}
+
+function isCodexApprovalDecision(text: string): boolean {
+  if (!text.startsWith('{') || !text.endsWith('}')) return false;
+  try {
+    const parsed = JSON.parse(text) as JsonObject;
+    const keys = Object.keys(parsed);
+    if (!keys.includes('risk_level') || !keys.includes('user_authorization')) return false;
+    const allowedKeys = new Set(['risk_level', 'user_authorization', 'outcome', 'rationale']);
+    return keys.every((key) => allowedKeys.has(key));
+  } catch {
+    return false;
+  }
 }
 
 function summarizePayload(payload: JsonObject): string {

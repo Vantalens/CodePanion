@@ -106,22 +106,6 @@ namespace CodePanion.Gui.Models
         }
     }
 
-    public class SessionInfo
-    {
-        public string Id { get; set; } = "";
-        public string Command { get; set; } = "";
-        public string[]? Args { get; set; }
-        public string? Cwd { get; set; }
-        public string? Source { get; set; }
-        public string? SourceId { get; set; }
-        public string? WindowTitle { get; set; }
-        public string? Workspace { get; set; }
-        public long StartedAt { get; set; }
-        public string Status { get; set; } = "running";
-        public int? ExitCode { get; set; }
-        public string? LastPrompt { get; set; }
-    }
-
     public class SessionPromptEventArgs : EventArgs
     {
         public string SessionId { get; set; } = "";

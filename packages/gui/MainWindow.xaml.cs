@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using Microsoft.Web.WebView2.Core;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -18,8 +19,11 @@ namespace CodePanion.Gui
         private readonly DaemonClient _daemonClient;
         private readonly ObservableCollection<SessionViewModel> _sessions;
         private readonly SoundPlayer _soundPlayer;
+        private readonly DispatcherTimer _reconnectTimer;
         private Hardcodet.Wpf.TaskbarNotification.TaskbarIcon? _trayIcon;
         private bool _isConnected;
+        private bool _isReconnectInProgress;
+        private int _reconnectAttempts;
 
         public MainWindow()
         {
@@ -30,6 +34,11 @@ namespace CodePanion.Gui
             _soundPlayer = new SoundPlayer();
             _sessions = new ObservableCollection<SessionViewModel>();
             SessionListView.ItemsSource = _sessions;
+            _reconnectTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromSeconds(2)
+            };
+            _reconnectTimer.Tick += AutoReconnectTimer_Tick;
 
             _daemonClient = new DaemonClient();
             _daemonClient.Connected += OnDaemonConnected;
@@ -40,6 +49,7 @@ namespace CodePanion.Gui
             _daemonClient.SessionExited += OnSessionExited;
             _daemonClient.NotificationReceived += OnNotificationReceived;
             _daemonClient.SourceRegistered += OnSourceRegistered;
+            _daemonClient.SourceDisconnected += OnSourceDisconnected;
             _daemonClient.MonitorEventReceived += OnMonitorEventReceived;
             _daemonClient.WorkflowSnapshotReceived += OnWorkflowSnapshotReceived;
             _daemonClient.WorkflowEventReceived += OnWorkflowEventReceived;
@@ -111,19 +121,31 @@ namespace CodePanion.Gui
 
         private async System.Threading.Tasks.Task ConnectToDaemon()
         {
-            var connected = await _daemonClient.ConnectAsync();
-            if (connected) return;
-
-            AddLog("未检测到 daemon，正在后台自动启动...");
-            var started = await DaemonProcessManager.EnsureStartedAsync(_daemonClient.DaemonUrl, AddLog);
-            if (!started)
+            if (_isReconnectInProgress) return;
+            _isReconnectInProgress = true;
+            _reconnectTimer.Stop();
+            try
             {
-                AddLog("daemon 自动启动失败，请检查 Node.js 或发布包完整性。");
-                return;
-            }
+                var connected = await _daemonClient.ConnectAsync();
+                if (connected) return;
 
-            _daemonClient.ReloadConfig();
-            await _daemonClient.ConnectAsync();
+                AddLog("未检测到 daemon，正在后台自动启动...");
+                var started = await DaemonProcessManager.EnsureStartedAsync(_daemonClient.DaemonUrl, AddLog);
+                if (!started)
+                {
+                    AddLog("daemon 自动启动失败，请检查 Node.js 或发布包完整性。");
+                    StartAutoReconnect();
+                    return;
+                }
+
+                _daemonClient.ReloadConfig();
+                _reconnectTimer.Stop();
+                await _daemonClient.ConnectAsync();
+            }
+            finally
+            {
+                _isReconnectInProgress = false;
+            }
         }
 
         private void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
@@ -171,15 +193,23 @@ namespace CodePanion.Gui
         private async void HandleUserReply(string sessionId, string value)
         {
             var reply = value.EndsWith("\n", StringComparison.Ordinal) ? value : value + "\n";
-            await _daemonClient.SendReplyAsync(sessionId, reply);
-            AddLog($"[回复] {sessionId}: {value}");
+            var ok = await _daemonClient.SendReplyAsync(sessionId, reply);
+            AddLog(ok ? $"[回复] {sessionId}: {value}" : $"[回复失败] {sessionId}: {value}");
+            if (!ok)
+            {
+                SendStatusMessage("error", "回复发送失败", $"目标会话不可用或 daemon 未连接：{sessionId}");
+            }
         }
 
         private async void HandleMonitorEventReply(string eventId, string value)
         {
             var reply = value.EndsWith("\n", StringComparison.Ordinal) ? value : value + "\n";
-            await _daemonClient.SendMonitorEventReplyAsync(eventId, reply);
-            AddLog($"[事件回复] {eventId}: {value}");
+            var ok = await _daemonClient.SendMonitorEventReplyAsync(eventId, reply);
+            AddLog(ok ? $"[事件回复] {eventId}: {value}" : $"[事件回复失败] {eventId}: {value}");
+            if (!ok)
+            {
+                SendStatusMessage("error", "事件回复失败", $"目标事件不可用或 daemon 未连接：{eventId}");
+            }
         }
 
         private void SendMessageToWeb(object message)
@@ -204,11 +234,15 @@ namespace CodePanion.Gui
             Dispatcher.Invoke(() =>
             {
                 _isConnected = true;
+                _reconnectAttempts = 0;
+                _isReconnectInProgress = false;
+                _reconnectTimer.Stop();
                 StatusIndicator.Fill = new SolidColorBrush(Colors.Green);
                 StatusText.Text = "已连接";
                 StatusBarText.Text = "已连接到 daemon";
                 ReconnectButton.Visibility = Visibility.Collapsed;
                 SendMessageToWeb(new { type = "connection-status", connected = true });
+                SendStatusMessage("done", "daemon 已连接", "连接恢复后会自动刷新 workflow snapshot。");
                 AddLog("已连接到 daemon");
             });
         }
@@ -217,14 +251,52 @@ namespace CodePanion.Gui
         {
             Dispatcher.Invoke(() =>
             {
+                var shouldAnnounce = _isConnected || _reconnectAttempts == 0;
                 _isConnected = false;
                 StatusIndicator.Fill = new SolidColorBrush(Colors.Gray);
                 StatusText.Text = "未连接";
-                StatusBarText.Text = "与 daemon 断开连接";
+                StatusBarText.Text = "与 daemon 断开连接，正在后台重试...";
                 ReconnectButton.Visibility = Visibility.Visible;
                 SendMessageToWeb(new { type = "connection-status", connected = false });
+                if (shouldAnnounce)
+                {
+                    SendStatusMessage("error", "daemon 已断开", "CodePanion 会每 2 秒自动尝试重连；你也可以手动点击重新连接。");
+                }
+                StartAutoReconnect();
                 AddLog("与 daemon 断开连接");
             });
+        }
+
+        private void StartAutoReconnect()
+        {
+            if (_reconnectTimer.IsEnabled) return;
+            _reconnectTimer.Start();
+        }
+
+        private async void AutoReconnectTimer_Tick(object? sender, EventArgs e)
+        {
+            if (_isConnected || _isReconnectInProgress) return;
+            _isReconnectInProgress = true;
+            _reconnectAttempts++;
+            StatusBarText.Text = $"正在自动重连 daemon... 第 {_reconnectAttempts} 次";
+            AddLog($"自动重连 daemon，第 {_reconnectAttempts} 次");
+            try
+            {
+                _daemonClient.ReloadConfig();
+                var connected = await _daemonClient.ConnectAsync();
+                if (!connected && _reconnectAttempts == 1)
+                {
+                    var started = await DaemonProcessManager.EnsureStartedAsync(_daemonClient.DaemonUrl, AddLog);
+                    if (started)
+                    {
+                        await _daemonClient.ConnectAsync();
+                    }
+                }
+            }
+            finally
+            {
+                _isReconnectInProgress = false;
+            }
         }
 
         private void OnSessionRegistered(object? sender, SessionInfo session)
@@ -362,6 +434,14 @@ namespace CodePanion.Gui
             });
         }
 
+        private void OnSourceDisconnected(object? sender, SourceDisconnectedEventArgs e)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                SendMessageToWeb(new { type = "source-disconnected", sourceId = e.SourceId });
+            });
+        }
+
         private void OnMonitorEventReceived(object? sender, MonitorEventArgs e)
         {
             Dispatcher.Invoke(() =>
@@ -395,6 +475,22 @@ namespace CodePanion.Gui
                     type = "workflow-event",
                     data = workflowEvent
                 });
+            });
+        }
+
+        private void SendStatusMessage(string type, string title, string content)
+        {
+            SendMessageToWeb(new
+            {
+                type = "add-message",
+                data = new
+                {
+                    id = Guid.NewGuid().ToString(),
+                    type,
+                    source = "daemon",
+                    timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds(),
+                    content = $"**{title}**\n\n{content}"
+                }
             });
         }
 
@@ -452,6 +548,7 @@ namespace CodePanion.Gui
             if (settingsWindow.ShowDialog() == true)
             {
                 AddLog("设置已更新，正在重新加载 daemon 连接配置...");
+                _reconnectTimer.Stop();
                 _daemonClient.ReloadConfig();
                 await _daemonClient.ReconnectAsync();
             }
@@ -463,7 +560,12 @@ namespace CodePanion.Gui
             StatusBarText.Text = "正在重新连接...";
             try
             {
-                await _daemonClient.ReconnectAsync();
+                _reconnectTimer.Stop();
+                var connected = await _daemonClient.ReconnectAsync();
+                if (!connected)
+                {
+                    StartAutoReconnect();
+                }
             }
             finally
             {

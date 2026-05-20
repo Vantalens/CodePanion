@@ -1,63 +1,35 @@
-# 图标文件说明
+# 应用图标
 
-本目录应包含 CodePanion 的图标文件。
+CodePanion 的窗口 / 任务栏 / 托盘图标都从一张源图生成，避免手动维护多套尺寸。
 
-## 所需文件
+## 文件
 
-- `icon.ico` - 应用程序图标（用于窗口和托盘）
+| 路径 | 用途 |
+| ---- | ---- |
+| `Assets/app-icon-source.png` | 图标真相来源，任意 PNG（推荐 ≥ 512×512） |
+| `Assets/app-icon.ico` | WPF 窗口 / 任务栏图标（`<ApplicationIcon>` 引用），含 16/24/32/48/64/128/256 |
+| `Assets/tray-icon.ico` | 系统托盘图标（`MainWindow.xaml.cs` 加载），仅含 16/24/32/48 |
+| `Assets/app-icon-64.png` | WPF 窗口 `Window.Icon` 运行时加载 |
+| `Assets/app-icon-256.png` | 安装包 / README / 关于对话框使用 |
 
-## 图标规格
+## 重新生成
 
-### icon.ico
-- **格式**: ICO (Windows Icon)
-- **尺寸**: 多尺寸（推荐包含 16x16, 32x32, 48x48, 256x256）
-- **颜色深度**: 32-bit (带透明通道)
-- **用途**: 
-  - 应用程序窗口图标
-  - 系统托盘图标
-  - 任务栏图标
+替换 `Assets/app-icon-source.png` 后运行：
 
-## 创建图标
-
-### 方法 1: 使用在线工具
-1. 访问 https://www.icoconverter.com/
-2. 上传 PNG 图片（推荐 256x256）
-3. 选择多尺寸输出
-4. 下载 ICO 文件
-
-### 方法 2: 使用 GIMP
-1. 打开 GIMP
-2. 创建或导入图片
-3. 文件 → 导出为 → 选择 .ico 格式
-4. 选择多个尺寸
-
-### 方法 3: 使用 ImageMagick
-```bash
-# 从 PNG 转换为 ICO
-convert icon.png -define icon:auto-resize=256,128,64,48,32,16 icon.ico
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-icon.ps1
 ```
 
-## 设计建议
+脚本会：
+1. 自动 trim 接近纯白的外边距（保留圆角矩形容器本体）
+2. 补 4% 内边距、扩成正方形
+3. 用 `HighQualityBicubic` 缩到全部目标尺寸
+4. 把多分辨率帧打成 ICO（每帧用 32-bit PNG 编码，Vista+ 支持）
 
-CodePanion 的图标应该：
-- 简洁明了，易于识别
-- 在小尺寸下清晰可见
-- 使用品牌色彩（蓝色 #0066cc）
-- 可能的设计元素：
-  - 对话气泡 💬
-  - 提醒铃铛 🔔
-  - AI 符号 🤖
-  - 组合设计
+生成后跑 `npm run gui:build` 验证图标已嵌入。
 
-## 临时方案
+## 设计约束
 
-如果图标文件不存在：
-- 托盘图标将不显示（但功能正常）
-- 窗口将使用默认图标
-
-## 文件位置
-
-将 `icon.ico` 放在此目录后：
-1. 取消注释 `CodePanion.Gui.csproj` 中的 `<ApplicationIcon>` 配置
-2. 取消注释 `MainWindow.xaml` 中的 `IconSource` 属性
-3. 重新构建项目
+- 在 Windows 11 任务栏 / 托盘的 16~32 px 尺寸下主体仍可辨认
+- 保留浅紫白色圆角矩形容器（与产品整体视觉风格一致）
+- 不做单色降级；32-bit RGBA 全保留

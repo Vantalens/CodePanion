@@ -1,9 +1,9 @@
-# CodePanion 重新设计方案
+# CodePanion 重新设计方案（历史草案）
 
 ## 文档版本
 - **版本**: v2.0
 - **日期**: 2026-05-12
-- **状态**: 设计阶段
+- **状态**: 历史草案 — 部分要点已落地（控制平面定位、能力分层、L1/L2/L3 来源边界），代码片段中的 Focus Assist 等示例**未实现**，仅作设计参考；当前可靠信息以 [PRODUCT_ROADMAP.md](PRODUCT_ROADMAP.md)、[ARCHITECTURE.md](ARCHITECTURE.md)、[MONITORING_SOURCES.md](MONITORING_SOURCES.md) 为准。
 
 ## 变更原因
 
@@ -93,11 +93,11 @@
 ### 技术栈
 
 **后端 (Daemon)**
-- Node.js 18+ / TypeScript 5.7
+- Node.js 24+ / TypeScript 5.7
 - Express 5.1 (HTTP API)
 - ws 8.20 (WebSocket)
 - node-pty 1.1 (PTY)
-- node-notifier 10.0 (通知)
+- 系统通知适配（Windows PowerShell Toast / macOS osascript / Linux notify-send）
 
 **前端 (GUI)**
 - .NET 8.0 / C# 12

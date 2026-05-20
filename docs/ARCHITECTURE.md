@@ -272,8 +272,8 @@ interface Session {
 - 支持 Windows、macOS、Linux
 
 **实现**：
-- 使用 `node-notifier` 库
-- 支持通知点击事件
+- Windows 使用 PowerShell Toast / BurntToast 可用路径，macOS 使用 `osascript`，Linux 使用 `notify-send`
+- 不再依赖 `node-notifier`
 - 可配置通知声音、图标
 
 **通知类型**：

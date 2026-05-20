@@ -8,7 +8,7 @@
 
 ### 必需
 - **操作系统**: Windows 10/11 (64-bit)
-- **Node.js**: >= 18.0.0
+- **Node.js**: >= 24.0.0（Windows 便携包当前固定 `node.exe` 为 v24.14.1，并校验 SHA256）
 - **.NET SDK**: >= 8.0
 - **WebView2 Runtime**: 最新版本
 
@@ -25,12 +25,12 @@
 
 #### 1.1 安装 Node.js
 
-访问 [Node.js 官网](https://nodejs.org/) 下载并安装 LTS 版本。
+访问 [Node.js 官网](https://nodejs.org/) 下载并安装 24.x 版本。Windows 便携包发布脚本会固定校验 v24.14.1 的 `node.exe` 版本与 SHA256。
 
 验证安装：
 ```bash
 node --version
-# 应输出: v18.x.x 或更高
+# 应输出: v24.x.x 或更高
 ```
 
 #### 1.2 安装 .NET SDK
@@ -156,13 +156,14 @@ mkdir -p ~/.codepanion
 
 ---
 
-### 方法 2: 使用预编译版本（即将推出）
+### 方法 2: 使用 Windows 便携版
 
-```bash
-# 下载发布包
-# 解压到目标目录
-# 运行安装脚本
-```
+执行 `npm run package:windows`（参见下方"启动 CodePanion / 方法 1"）后，
+`dist/CodePanion-win-x64/` 即是完整便携版：包含固定版本的 `node.exe`、
+daemon dist 产物与 GUI 可执行文件，直接拷走整个目录到目标机器即可。
+
+发布脚本会校验 `node.exe` 的 SHA256，hash 不匹配时直接打包失败，
+保证用户拿到的运行时与开发环境一致。
 
 ---
 
@@ -264,31 +265,18 @@ GUI 配置存储在 `~/.codepanion/gui-settings.json`（自动生成）。
 
 ---
 
-## 🎨 可选：添加资源文件
+## 🎨 资源文件
 
-### 添加应用图标
+应用图标已经内置于 `packages/gui/Assets/`，包括 `app-icon.ico`、`tray-icon.ico`
+和不同尺寸的 PNG。需要替换图标时：
 
-1. 创建或下载 `icon.ico` 文件
-2. 放置到 `packages/gui/` 目录
-3. 取消注释 `CodePanion.Gui.csproj` 中的：
-   ```xml
-   <ApplicationIcon>icon.ico</ApplicationIcon>
-   ```
-4. 取消注释 `MainWindow.xaml` 中的：
-   ```xml
-   IconSource="icon.ico"
-   ```
-5. 重新构建 GUI
+1. 将新设计的 1024×1024 PNG 放到 `packages/gui/Assets/app-icon-source.png`。
+2. 在 PowerShell 中执行 `powershell -ExecutionPolicy Bypass -File scripts\install-icon.ps1`
+   （PowerShell 7 用户可直接 `pwsh scripts/install-icon.ps1`），
+   脚本会自动裁剪空白、生成多分辨率 ICO 和导出 PNG。
+3. 重新构建 GUI。
 
-### 添加提示音
-
-1. 创建或下载 WAV 文件：
-   - `prompt.wav` - 提示音
-   - `done.wav` - 完成音
-2. 放置到 `packages/gui/Assets/` 目录
-3. 重新构建 GUI
-
-**提示**: 如果不添加，程序会使用系统默认 Beep 声音。
+详细规范见 [packages/gui/icon-README.md](packages/gui/icon-README.md)。
 
 ---
 
@@ -367,99 +355,18 @@ node packages/daemon/dist/index.js run -- node -e "const readline=require('readl
 
 ## 🐛 故障排查
 
-### 问题 1: `codepanion` 命令未找到
+安装阶段最常见的问题：
 
-**症状**: `'codepanion' 不是内部或外部命令`
+- **`codepanion` 命令未找到**：在 `packages/daemon/` 下执行 `npm link`，
+  然后用 `codepanion --version` 验证。
+- **`npm install` 失败**：先确认网络，再 `npm cache clean --force` 并删除
+  `node_modules` 后重试。国内可选择 `npm config set registry https://registry.npmmirror.com`。
+- **Node 版本不匹配**：发布脚本固定 `node.exe` v24.14.1。本地开发建议同版本，
+  否则可能因原生模块 `node-pty` ABI 不一致导致构建失败。
+- **WebView2 缺失**：安装 [Evergreen Standalone Installer](https://developer.microsoft.com/microsoft-edge/webview2/) 后重启 GUI。
 
-**解决方案**:
-```bash
-# 进入 daemon 目录
-cd packages/daemon
-
-# 全局链接 CLI 工具
-npm link
-
-# 验证安装
-codepanion --version
-```
-
-### 问题 2: Daemon 启动失败
-
-**症状**: `daemon not running`
-
-**解决方案**:
-1. 检查端口是否被占用：
-   ```bash
-   netstat -ano | findstr :7777
-   ```
-2. 修改配置文件中的端口
-3. 检查 Node.js 版本：
-   ```bash
-   node --version  # 应该 >= 18.0.0
-   ```
-
-### 问题 3: GUI 无法连接
-
-**症状**: 显示 "未连接" 或 "连接失败"
-
-**解决方案**:
-1. 确认 daemon 正在运行：
-   ```bash
-   codepanion status
-   ```
-2. 检查配置文件 `~/.codepanion/config.json` 中的端口和 token
-3. 检查防火墙设置（允许 127.0.0.1:7777）
-
-### 问题 4: WebView2 加载失败
-
-**症状**: GUI 显示空白或错误
-
-**解决方案**:
-1. 安装 WebView2 Runtime：
-   - 访问 https://developer.microsoft.com/microsoft-edge/webview2/
-   - 下载并安装 "Evergreen Standalone Installer"
-2. 检查 wwwroot 文件是否存在：
-   ```bash
-   ls packages/gui/bin/Debug/net8.0-windows/wwwroot/
-   ```
-3. 重新构建 GUI：
-   ```bash
-   npm run gui:build
-   ```
-
-### 问题 5: 提示检测不工作
-
-**症状**: 运行命令后没有提示显示
-
-**解决方案**:
-1. 增加 `promptIdleMs` 值（编辑 `~/.codepanion/config.json`）：
-   ```json
-   {
-     "promptIdleMs": 1500
-   }
-   ```
-2. 重启 daemon：
-   ```bash
-   codepanion restart
-   ```
-3. 查看 daemon 日志（检查是否检测到提示）
-
-### 问题 6: npm install 失败
-
-**症状**: Git 权限错误或依赖下载失败
-
-**解决方案**:
-1. 确保网络连接正常
-2. 清理缓存：
-   ```bash
-   npm cache clean --force
-   rm -rf node_modules
-   npm install
-   ```
-3. 使用国内镜像（可选）：
-   ```bash
-   npm config set registry https://registry.npmmirror.com
-   ```
+运行期问题（端口、token、WebSocket 鉴权、多源监控、通知等）见
+[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)。
 
 ---
 
@@ -476,10 +383,11 @@ codepanion --version
 
 ## 💡 提示
 
-- 首次运行可能需要下载依赖，请耐心等待
-- 建议使用管理员权限运行（避免权限问题）
-- 定期更新 WebView2 Runtime
-- 备份配置文件
+- 首次运行可能需要下载依赖，请耐心等待。
+- daemon 只绑定 `127.0.0.1`，**不需要**管理员权限。
+- `~/.codepanion/config.json` 由 daemon 在 owner-only 权限下写入，
+  替换前先备份。
+- 定期更新 WebView2 Runtime 以获得最新渲染修复。
 
 ---
 

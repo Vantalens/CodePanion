@@ -31,6 +31,24 @@ test('SessionManager caps retained output and chunks', () => {
   assert.ok(chunks[0].content.startsWith('200:'));
 });
 
+test('SessionManager respects custom retention caps', () => {
+  const manager = new SessionManager({
+    retention: { fullOutputChars: 1024, outputChunks: 5 },
+  });
+  const session = registerSession(manager);
+
+  for (let index = 0; index < 20; index += 1) {
+    manager.appendOutput(session.id, `${index}:` + 'y'.repeat(200));
+  }
+
+  const fullOutput = manager.getFullOutput(session.id);
+  const chunks = manager.getOutputChunks(session.id);
+  assert.ok(fullOutput.length <= 1024);
+  assert.ok(fullOutput.includes('19:'));
+  assert.equal(chunks.length, 5);
+  assert.ok(chunks[0].content.startsWith('15:'));
+});
+
 test('SessionManager includes retained output when prompt is raised', () => {
   const manager = new SessionManager();
   const session = registerSession(manager);

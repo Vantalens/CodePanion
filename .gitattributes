@@ -1,0 +1,2 @@
+# 自动生成的 C# DTO 强制 LF，与生成器输出保持一致，避免每次 gen:dtos 在 Windows 工作树产生 CRLF↔LF churn。
+*.g.cs text eol=lf

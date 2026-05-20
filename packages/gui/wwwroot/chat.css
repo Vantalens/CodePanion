@@ -21,6 +21,8 @@
 
 * { box-sizing: border-box; }
 
+[hidden] { display: none !important; }
+
 html,
 body {
     height: 100%;
@@ -53,6 +55,10 @@ button {
     grid-template-columns: 64px 318px minmax(420px, 1fr) 336px;
     grid-template-rows: minmax(0, 1fr) 58px;
     background: var(--bg);
+}
+
+#app-shell.omnibar-hidden {
+    grid-template-rows: minmax(0, 1fr) 0;
 }
 
 #source-rail {

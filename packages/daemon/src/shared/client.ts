@@ -13,6 +13,28 @@ function baseUrl() {
   return { url: `http://127.0.0.1:${cfg.port}`, token: cfg.token };
 }
 
+/**
+ * HTTP failure with enough structured context that callers logging `{ err }` via pino
+ * (or printing err.message) can pinpoint the call without re-parsing a free-form string.
+ * Fields are intentionally enumerable so they survive pino's stdSerializers.err / our maskValue serializer.
+ */
+export class DaemonHttpError extends Error {
+  readonly method: string;
+  readonly path: string;
+  readonly status: number;
+  readonly body: string;
+
+  constructor(method: string, path: string, status: number, body: string) {
+    const snippet = body.slice(0, 200);
+    super(`${method} ${path} failed: ${status}${snippet ? ` ${snippet}` : ''}`);
+    this.name = 'DaemonHttpError';
+    this.method = method;
+    this.path = path;
+    this.status = status;
+    this.body = body.slice(0, 4096);
+  }
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const { url, token } = baseUrl();
   const res = await fetch(`${url}${path}`, {
@@ -25,19 +47,21 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    throw new Error(`${method} ${path} failed: ${res.status} ${text}`);
+    throw new DaemonHttpError(method, path, res.status, text);
   }
   return (await res.json()) as T;
 }
 
-export async function checkHealth(): Promise<{ ok: boolean; pid?: number }> {
+export async function checkHealth(): Promise<{ ok: boolean; pid?: number; error?: string }> {
   try {
     const { url } = baseUrl();
-    const res = await fetch(`${url}/health`);
-    if (!res.ok) return { ok: false };
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 1500);
+    const res = await fetch(`${url}/health`, { signal: controller.signal }).finally(() => clearTimeout(timeout));
+    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
     return (await res.json()) as { ok: boolean; pid?: number };
-  } catch {
-    return { ok: false };
+  } catch (err) {
+    return { ok: false, error: (err as Error).message };
   }
 }
 
@@ -98,7 +122,12 @@ export function getSessionOutput(id: string): Promise<{ fullOutput: string; chun
 
 export function wsUrl(role: 'observer' | 'cli', sessionId?: string): string {
   const cfg = loadConfig();
-  const params = new URLSearchParams({ token: cfg.token, role });
+  const params = new URLSearchParams({ role });
   if (sessionId) params.set('sessionId', sessionId);
   return `ws://127.0.0.1:${cfg.port}/ws?${params.toString()}`;
+}
+
+export function wsProtocols(): string[] {
+  const cfg = loadConfig();
+  return [`codepanion.token.${cfg.token}`];
 }

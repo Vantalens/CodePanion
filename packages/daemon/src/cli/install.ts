@@ -1,7 +1,6 @@
-import { homedir } from 'node:os';
+import { homedir, platform } from 'node:os';
 import { join } from 'node:path';
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { loadConfig } from '../config.js';
+import { chmodSync, existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 
 const HOOK_TAG = 'codepanion-managed';
 
@@ -15,9 +14,26 @@ interface ClaudeSettings {
   [key: string]: unknown;
 }
 
-function buildCurlCommand(token: string, port: number, source: string, message: string, level: string): string {
-  const body = JSON.stringify({ title: source, message, source, level });
-  return `curl -s -X POST -H "Authorization: Bearer ${token}" -H "Content-Type: application/json" -d "${body.replace(/"/g, '\\"')}" http://127.0.0.1:${port}/notify`;
+function escapeForShell(value: string): string {
+  return `"${value.replace(/(["\\$`])/g, '\\$1')}"`;
+}
+
+function buildNotifyCommand(source: string, message: string, level: string): string {
+  // Delegates auth to `codepanion notify`, which reads the token from the
+  // owner-protected config.json. Avoids embedding bearer tokens into a
+  // world-readable shell command stored in ~/.claude/settings.json.
+  const parts = [
+    'codepanion',
+    'notify',
+    escapeForShell(source),
+    '--message',
+    escapeForShell(message),
+    '--source',
+    escapeForShell(source),
+    '--level',
+    escapeForShell(level),
+  ];
+  return parts.join(' ');
 }
 
 export async function installCommand(args: { target: string }) {
@@ -26,7 +42,6 @@ export async function installCommand(args: { target: string }) {
     console.error(`unsupported target: ${target}`);
     process.exit(2);
   }
-  const cfg = loadConfig();
   const claudeDir = join(homedir(), '.claude');
   const settingsPath = join(claudeDir, 'settings.json');
   if (!existsSync(claudeDir)) mkdirSync(claudeDir, { recursive: true });
@@ -60,7 +75,7 @@ export async function installCommand(args: { target: string }) {
       hooks: [
         {
           type: 'command',
-          command: buildCurlCommand(cfg.token, cfg.port, 'claude-code', ev.message, ev.level),
+          command: buildNotifyCommand('claude-code', ev.message, ev.level),
           tag: HOOK_TAG,
         },
       ],
@@ -68,6 +83,14 @@ export async function installCommand(args: { target: string }) {
     settings.hooks[ev.name] = filtered;
   }
 
-  writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
+  writeFileSync(settingsPath, JSON.stringify(settings, null, 2), { encoding: 'utf8', mode: 0o600 });
+  if (platform() !== 'win32') {
+    try {
+      chmodSync(settingsPath, 0o600);
+    } catch {
+      // best-effort
+    }
+  }
   console.log(`[codepanion] installed Claude Code hooks into ${settingsPath}`);
+  console.log(`[codepanion] hooks invoke 'codepanion notify' — ensure 'codepanion' is on PATH (npm link in packages/daemon).`);
 }

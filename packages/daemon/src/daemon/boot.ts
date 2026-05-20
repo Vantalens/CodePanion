@@ -9,16 +9,21 @@ export async function bootDaemon(): Promise<void> {
     process.exit(1);
   }
   const cfg = loadConfig();
-  const { start } = createServer(cfg);
+  const { start, workflows } = createServer(cfg);
   const httpServer = await start();
   logger.info({ pid: process.pid, port: cfg.port }, 'daemon started');
 
   const shutdown = (signal: string) => {
     logger.info({ signal }, 'shutting down');
-    httpServer.close(() => {
-      clearPid();
-      process.exit(0);
-    });
+    workflows
+      .flushSnapshot()
+      .catch((err) => logger.warn({ err }, 'snapshot flush failed during shutdown'))
+      .finally(() => {
+        httpServer.close(() => {
+          clearPid();
+          process.exit(0);
+        });
+      });
     setTimeout(() => {
       clearPid();
       process.exit(0);

@@ -3,9 +3,13 @@ import type {
   MonitorEvent,
   MonitorSource,
   RegisterSourceRequest,
+  SourceCapabilityLevel,
+  SourceIntegrationKind,
+  SourcePrivacyBoundary,
   WsServerEvent,
 } from '../shared/protocol.js';
 import { logger } from '../logger.js';
+import { RETENTION_DEFAULTS } from '../config.js';
 
 type Listener = (event: WsServerEvent) => void;
 type StoredMonitorEvent = MonitorEvent & { id: string; timestamp: number };
@@ -16,14 +20,26 @@ type MonitorEventReply = {
   timestamp: number;
 };
 
-const MAX_EVENTS = 1000;
-const MAX_REPLIES_PER_EVENT = 50;
+export type SourceRetentionOptions = {
+  events?: number;
+  repliesPerEvent?: number;
+  offlineSources?: number;
+};
 
 export class SourceManager {
   private sources = new Map<string, MonitorSource>();
   private events = new Map<string, StoredMonitorEvent>();
   private replies = new Map<string, MonitorEventReply[]>();
   private listeners = new Set<Listener>();
+  private readonly maxEvents: number;
+  private readonly maxRepliesPerEvent: number;
+  private readonly maxOfflineSources: number;
+
+  constructor(options: { retention?: SourceRetentionOptions } = {}) {
+    this.maxEvents = options.retention?.events ?? RETENTION_DEFAULTS.source.events;
+    this.maxRepliesPerEvent = options.retention?.repliesPerEvent ?? RETENTION_DEFAULTS.source.repliesPerEvent;
+    this.maxOfflineSources = options.retention?.offlineSources ?? RETENTION_DEFAULTS.source.offlineSources;
+  }
 
   register(input: RegisterSourceRequest): MonitorSource {
     const now = Date.now();
@@ -36,6 +52,7 @@ export class SourceManager {
       url: input.url,
       pid: input.pid,
       capabilities: input.capabilities ?? [],
+      ...deriveSourceMetadata(input),
       registeredAt: now,
       lastSeenAt: now,
       status: 'online',
@@ -65,6 +82,7 @@ export class SourceManager {
     source.lastSeenAt = Date.now();
     this.broadcast({ type: 'source-disconnected', sourceId });
     logger.info({ sourceId }, 'monitor source disconnected');
+    this.pruneOfflineSources();
     return true;
   }
 
@@ -94,8 +112,8 @@ export class SourceManager {
     };
     const replies = this.replies.get(eventId) ?? [];
     replies.push(reply);
-    if (replies.length > MAX_REPLIES_PER_EVENT) {
-      replies.splice(0, replies.length - MAX_REPLIES_PER_EVENT);
+    if (replies.length > this.maxRepliesPerEvent) {
+      replies.splice(0, replies.length - this.maxRepliesPerEvent);
     }
     this.replies.set(eventId, replies);
 
@@ -136,14 +154,86 @@ export class SourceManager {
   }
 
   private pruneEvents() {
-    if (this.events.size <= MAX_EVENTS) return;
+    if (this.events.size <= this.maxEvents) return;
 
     const events = Array.from(this.events.values()).sort((a, b) => b.timestamp - a.timestamp);
-    const keep = new Set(events.slice(0, MAX_EVENTS).map((event) => event.id));
+    const keep = new Set(events.slice(0, this.maxEvents).map((event) => event.id));
     for (const eventId of this.events.keys()) {
       if (keep.has(eventId)) continue;
       this.events.delete(eventId);
       this.replies.delete(eventId);
     }
   }
+
+  private pruneOfflineSources() {
+    const offline: MonitorSource[] = [];
+    for (const source of this.sources.values()) {
+      if (source.status === 'offline') offline.push(source);
+    }
+    if (offline.length <= this.maxOfflineSources) return;
+
+    offline.sort((a, b) => a.lastSeenAt - b.lastSeenAt);
+    const excess = offline.length - this.maxOfflineSources;
+    for (let i = 0; i < excess; i += 1) {
+      const stale = offline[i];
+      this.sources.delete(stale.id);
+      logger.info({ sourceId: stale.id, kind: stale.kind }, 'offline monitor source evicted');
+    }
+  }
+}
+
+function deriveSourceMetadata(input: RegisterSourceRequest): {
+  capabilityLevel: SourceCapabilityLevel;
+  integrationKind: SourceIntegrationKind;
+  privacyBoundary: SourcePrivacyBoundary;
+} {
+  if (input.capabilityLevel && input.integrationKind && input.privacyBoundary) {
+    return {
+      capabilityLevel: input.capabilityLevel,
+      integrationKind: input.integrationKind,
+      privacyBoundary: input.privacyBoundary,
+    };
+  }
+
+  const defaults = defaultSourceMetadata(input.kind, input.capabilities ?? []);
+  return {
+    capabilityLevel: input.capabilityLevel ?? defaults.capabilityLevel,
+    integrationKind: input.integrationKind ?? defaults.integrationKind,
+    privacyBoundary: input.privacyBoundary ?? defaults.privacyBoundary,
+  };
+}
+
+function defaultSourceMetadata(
+  kind: RegisterSourceRequest['kind'],
+  capabilities: string[],
+): {
+  capabilityLevel: SourceCapabilityLevel;
+  integrationKind: SourceIntegrationKind;
+  privacyBoundary: SourcePrivacyBoundary;
+} {
+  if (kind === 'cli' || kind === 'claude-code' || kind === 'codex') {
+    return { capabilityLevel: 'L3', integrationKind: 'cli-pty', privacyBoundary: 'explicit-session' };
+  }
+
+  if (kind === 'codex-desktop') {
+    return { capabilityLevel: 'L2', integrationKind: 'local-file-sync', privacyBoundary: 'local-history' };
+  }
+
+  if (kind === 'vscode') {
+    return { capabilityLevel: 'L2', integrationKind: 'extension', privacyBoundary: 'explicit-extension' };
+  }
+
+  if (kind === 'cc-switch') {
+    return { capabilityLevel: 'L1-L2', integrationKind: 'config-switcher', privacyBoundary: 'config-switcher' };
+  }
+
+  if (kind === 'external') {
+    return {
+      capabilityLevel: capabilities.includes('reply') ? 'L2-L3' : 'L2',
+      integrationKind: 'adapter',
+      privacyBoundary: 'explicit-adapter',
+    };
+  }
+
+  return { capabilityLevel: 'L1-L2', integrationKind: 'process-scan', privacyBoundary: 'minimal-process' };
 }

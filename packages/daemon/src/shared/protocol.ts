@@ -28,8 +28,33 @@ export const SourceKindSchema = z.enum([
   'codegeex',
   'comate',
   'qwen-code',
+  'cc-switch',
   'external',
 ]);
+
+export const SourceCapabilityLevelSchema = z.enum(['L1', 'L1-L2', 'L2', 'L2-L3', 'L3', 'L4']);
+export type SourceCapabilityLevel = z.infer<typeof SourceCapabilityLevelSchema>;
+
+export const SourceIntegrationKindSchema = z.enum([
+  'cli-pty',
+  'local-file-sync',
+  'extension',
+  'process-scan',
+  'config-switcher',
+  'adapter',
+  'manual',
+]);
+export type SourceIntegrationKind = z.infer<typeof SourceIntegrationKindSchema>;
+
+export const SourcePrivacyBoundarySchema = z.enum([
+  'explicit-session',
+  'local-history',
+  'explicit-extension',
+  'minimal-process',
+  'config-switcher',
+  'explicit-adapter',
+]);
+export type SourcePrivacyBoundary = z.infer<typeof SourcePrivacyBoundarySchema>;
 
 export const RegisterSourceRequestSchema = z.object({
   kind: SourceKindSchema,
@@ -39,6 +64,9 @@ export const RegisterSourceRequestSchema = z.object({
   url: z.string().max(1000).optional(),
   pid: z.number().int().positive().optional(),
   capabilities: z.array(z.string().min(1).max(80)).optional().default([]),
+  capabilityLevel: SourceCapabilityLevelSchema.optional(),
+  integrationKind: SourceIntegrationKindSchema.optional(),
+  privacyBoundary: SourcePrivacyBoundarySchema.optional(),
 });
 
 export type RegisterSourceRequest = z.infer<typeof RegisterSourceRequestSchema>;
@@ -60,19 +88,23 @@ export const MonitorEventSchema = z.object({
 
 export type MonitorEvent = z.infer<typeof MonitorEventSchema>;
 
-export interface MonitorSource {
-  id: string;
-  kind: z.infer<typeof SourceKindSchema>;
-  name: string;
-  windowTitle?: string;
-  workspace?: string;
-  url?: string;
-  pid?: number;
-  capabilities: string[];
-  registeredAt: number;
-  lastSeenAt: number;
-  status: 'online' | 'offline';
-}
+export const MonitorSourceSchema = z.object({
+  id: z.string(),
+  kind: SourceKindSchema,
+  name: z.string(),
+  windowTitle: z.string().optional(),
+  workspace: z.string().optional(),
+  url: z.string().optional(),
+  pid: z.number().int().positive().optional(),
+  capabilities: z.array(z.string()),
+  capabilityLevel: SourceCapabilityLevelSchema,
+  integrationKind: SourceIntegrationKindSchema,
+  privacyBoundary: SourcePrivacyBoundarySchema,
+  registeredAt: z.number().int(),
+  lastSeenAt: z.number().int(),
+  status: z.enum(['online', 'offline']),
+});
+export type MonitorSource = z.infer<typeof MonitorSourceSchema>;
 
 export const WorkflowItemKindSchema = z.enum([
   'message',
@@ -139,6 +171,12 @@ export const SessionOutputRequestSchema = z.object({
   chunk: z.string(),
 });
 
+export const SessionPromptRequestSchema = z.object({
+  lastLines: z.string().max(16384).default(''),
+  options: z.array(z.string().max(500)).max(32).optional(),
+});
+export type SessionPromptRequest = z.infer<typeof SessionPromptRequestSchema>;
+
 export const ReplyRequestSchema = z.object({
   text: z.string(),
 });
@@ -158,7 +196,7 @@ export const SessionInfoSchema = z.object({
   sourceId: z.string().optional(),
   windowTitle: z.string().optional(),
   workspace: z.string().optional(),
-  startedAt: z.number(),
+  startedAt: z.number().int(),
   status: z.enum(['running', 'waiting', 'exited']),
   exitCode: z.number().int().nullable().optional(),
   lastPrompt: z.string().optional(),

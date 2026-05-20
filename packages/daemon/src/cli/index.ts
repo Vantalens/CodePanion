@@ -6,6 +6,22 @@ import { statusCommand } from './status.js';
 import { notifyCommand } from './notify.js';
 import { replyCommand } from './reply.js';
 import { installCommand } from './install.js';
+import {
+  templateAddCommand,
+  templateListCommand,
+  templateRemoveCommand,
+  templateRunCommand,
+  templateShowCommand,
+} from './templates.js';
+import {
+  workflowAddCommand,
+  workflowHistoryCommand,
+  workflowListCommand,
+  workflowRemoveCommand,
+  workflowReplayCommand,
+  workflowRunCommand,
+  workflowShowCommand,
+} from './workflows.js';
 
 export async function runCli(argv: string[]): Promise<void> {
   await yargs(hideBin(argv))
@@ -27,12 +43,18 @@ export async function runCli(argv: string[]): Promise<void> {
         y
           .positional('title', { type: 'string', demandOption: true })
           .positional('message', { type: 'string' })
-          .option('source', { type: 'string', default: 'cli' }),
+          .option('source', { type: 'string', default: 'cli' })
+          .option('level', {
+            type: 'string',
+            default: 'info',
+            choices: ['info', 'prompt', 'done', 'error'],
+          }),
       async (a) => {
         await notifyCommand({
           title: a.title as string,
           message: a.message as string | undefined,
           source: a.source as string,
+          level: a.level as string,
         });
       },
     )
@@ -68,6 +90,108 @@ export async function runCli(argv: string[]): Promise<void> {
       (y) => y.positional('target', { type: 'string', demandOption: true }),
       async (a) => {
         await installCommand({ target: a.target as string });
+      },
+    )
+    .command(
+      'template <action> [name]',
+      '管理本地工作流模板（add/list/show/run/remove）',
+      (y) =>
+        y
+          .positional('action', {
+            type: 'string',
+            choices: ['add', 'list', 'show', 'run', 'remove'],
+            demandOption: true,
+          })
+          .positional('name', { type: 'string' })
+          .option('command', { type: 'string', describe: '模板启动命令，例如 codex 或 claude' })
+          .option('arg', { type: 'array', string: true, describe: '模板命令参数，可重复，支持 {param} 占位' })
+          .option('description', { type: 'string', describe: '模板说明' })
+          .option('param', { type: 'array', string: true, describe: '参数定义 name=default，可重复' })
+          .option('set', { type: 'array', string: true, describe: '运行时参数 name=value，可重复' })
+          .option('dry-run', { type: 'boolean', default: false, describe: '只打印解析后的命令，不执行' }),
+      async (a) => {
+        const action = a.action as string;
+        const name = a.name as string | undefined;
+        if (action !== 'list' && !name) {
+          console.error('usage: codepanion template <add|show|run|remove> <name>');
+          process.exit(2);
+        }
+        if (action === 'list') return templateListCommand();
+        if (action === 'show') return templateShowCommand({ name: name! });
+        if (action === 'remove') return templateRemoveCommand({ name: name! });
+        if (action === 'run') return templateRunCommand({ name: name!, set: a.set as string[] | undefined, dryRun: a.dryRun as boolean });
+        if (!a.command) {
+          console.error('usage: codepanion template add <name> --command <cmd> [--arg value] [--param name=default]');
+          process.exit(2);
+        }
+        return templateAddCommand({
+          name: name!,
+          command: a.command as string,
+          arg: a.arg as string[] | undefined,
+          description: a.description as string | undefined,
+          param: a.param as string[] | undefined,
+        });
+      },
+    )
+    .command(
+      'workflow <action> [name]',
+      '管理并运行本地多步骤工作流（add/list/show/run/remove/history/replay）',
+      (y) =>
+        y
+          .positional('action', {
+            type: 'string',
+            choices: ['add', 'list', 'show', 'run', 'remove', 'history', 'replay'],
+            demandOption: true,
+          })
+          .positional('name', { type: 'string' })
+          .option('description', { type: 'string', describe: '工作流说明' })
+          .option('param', { type: 'array', string: true, describe: '工作流参数 name=default，可重复' })
+          .option('step', {
+            type: 'array',
+            string: true,
+            describe: '步骤定义，例如 id=test;tool=npm;command=npm;args=test;after=build;checkpoint=true',
+          })
+          .option('set', { type: 'array', string: true, describe: '运行时参数 name=value，可重复' })
+          .option('query', { type: 'string', describe: 'history 搜索关键字' })
+          .option('dry-run', { type: 'boolean', default: false, describe: '只解析步骤，不实际执行' })
+          .option('yes', { type: 'boolean', default: false, describe: '跳过人工检查点' }),
+      async (a) => {
+        const action = a.action as string;
+        const name = a.name as string | undefined;
+        if (action === 'list') return workflowListCommand();
+        if (action === 'history') return workflowHistoryCommand({ query: a.query as string | undefined });
+        if (action === 'replay') {
+          if (!name) {
+            console.error('usage: codepanion workflow replay <runId>');
+            process.exit(2);
+          }
+          return workflowReplayCommand({
+            id: name,
+            set: a.set as string[] | undefined,
+            dryRun: a.dryRun as boolean,
+            yes: a.yes as boolean,
+          });
+        }
+        if (!name) {
+          console.error('usage: codepanion workflow <add|show|run|remove> <name>');
+          process.exit(2);
+        }
+        if (action === 'show') return workflowShowCommand({ name });
+        if (action === 'remove') return workflowRemoveCommand({ name });
+        if (action === 'run') {
+          return workflowRunCommand({
+            name,
+            set: a.set as string[] | undefined,
+            dryRun: a.dryRun as boolean,
+            yes: a.yes as boolean,
+          });
+        }
+        return workflowAddCommand({
+          name,
+          description: a.description as string | undefined,
+          param: a.param as string[] | undefined,
+          step: a.step as string[] | undefined,
+        });
       },
     )
     .demandCommand(1)

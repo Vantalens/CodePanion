@@ -95,7 +95,7 @@
                     </TextBlock>
 
                     <TextBlock HorizontalAlignment="Center" Margin="0,16,0,0">
-                        <Hyperlink NavigateUri="https://github.com/yourusername/codepanion"
+                        <Hyperlink NavigateUri="https://github.com/Vantalens/CodePanion"
                                    RequestNavigate="Hyperlink_RequestNavigate">
                             GitHub 项目主页
                         </Hyperlink>

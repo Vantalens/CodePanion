@@ -19,7 +19,7 @@
 
 ### 前置要求
 
-- **Node.js**: >= 18.0.0
+- **Node.js**: >= 24.0.0（Windows 便携包当前固定 `node.exe` 为 v24.14.1，并校验 SHA256）
 - **.NET SDK**: >= 8.0 (GUI 开发)
 - **Git**: 最新版本
 - **编辑器**: VS Code (推荐) 或其他
@@ -524,12 +524,7 @@ describe('API Integration', () => {
 ### Mock 和 Stub
 
 ```typescript
-// 使用 Jest mock
-jest.mock('node-notifier', () => ({
-  notify: jest.fn()
-}));
-
-import notifier from 'node-notifier';
+// 通知逻辑现在通过系统命令适配，测试时优先 mock Notifier 或命令执行边界。
 
 test('should send notification', async () => {
   await sendNotification('Test');
@@ -846,7 +841,6 @@ app.post('/api/myendpoint', async (req, res) => {
 ### 相关项目
 
 - [node-pty](https://github.com/microsoft/node-pty) - 伪终端库
-- [node-notifier](https://github.com/mikaelbr/node-notifier) - 跨平台通知
 - [ws](https://github.com/websockets/ws) - WebSocket 库
 
 ### 社区

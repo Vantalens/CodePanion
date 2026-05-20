@@ -26,6 +26,7 @@ namespace CodePanion.Gui.Services
         public event EventHandler<SessionExitedEventArgs>? SessionExited;
         public event EventHandler<NotificationEventArgs>? NotificationReceived;
         public event EventHandler<MonitorSourceEventArgs>? SourceRegistered;
+        public event EventHandler<SourceDisconnectedEventArgs>? SourceDisconnected;
         public event EventHandler<MonitorEventArgs>? MonitorEventReceived;
         public event EventHandler<JToken>? WorkflowSnapshotReceived;
         public event EventHandler<JToken>? WorkflowEventReceived;
@@ -84,6 +85,10 @@ namespace CodePanion.Gui.Services
         {
             try
             {
+                if (_wsClient != null)
+                {
+                    await DisconnectAsync();
+                }
                 Log($"尝试连接到 daemon: {_daemonUrl}");
 
                 // 检查 daemon 健康状态
@@ -116,15 +121,17 @@ namespace CodePanion.Gui.Services
                     return false;
                 }
 
-                // 连接 WebSocket
+                // 连接 WebSocket — token 通过 Sec-WebSocket-Protocol 携带，避免出现在 URL / 日志 / referer 中
                 var port = new Uri(_daemonUrl).Port;
-                var wsUrl = $"ws://127.0.0.1:{port}/ws?token={_token}&role=observer";
-                Log($"连接 WebSocket: ws://127.0.0.1:{port}/ws?token={MaskToken(_token)}&role=observer");
+                var wsUrl = $"ws://127.0.0.1:{port}/ws?role=observer";
+                Log($"连接 WebSocket: {wsUrl}（token via subprotocol={MaskToken(_token)}）");
 
+                var tokenSubProtocol = $"codepanion.token.{_token}";
                 var factory = new Func<ClientWebSocket>(() =>
                 {
                     var client = new ClientWebSocket();
                     client.Options.KeepAliveInterval = TimeSpan.FromSeconds(30);
+                    client.Options.AddSubProtocol(tokenSubProtocol);
                     return client;
                 });
 
@@ -168,6 +175,8 @@ namespace CodePanion.Gui.Services
             {
                 Log($"连接失败：{ex.GetType().Name} - {ex.Message}");
                 Log($"堆栈跟踪：{ex.StackTrace}");
+                _wsClient?.Dispose();
+                _wsClient = null;
                 Disconnected?.Invoke(this, EventArgs.Empty);
                 return false;
             }
@@ -247,6 +256,15 @@ namespace CodePanion.Gui.Services
                         }
                         break;
 
+                    case "source-disconnected":
+                        var sourceId = json["sourceId"]?.Value<string>() ?? "";
+                        if (!string.IsNullOrWhiteSpace(sourceId))
+                        {
+                            Log($"监控源离线：{sourceId}");
+                            SourceDisconnected?.Invoke(this, new SourceDisconnectedEventArgs { SourceId = sourceId });
+                        }
+                        break;
+
                     case "monitor-event":
                         var monitorEvent = json["event"]?.ToObject<MonitorEventInfo>();
                         if (monitorEvent != null)
@@ -293,7 +311,7 @@ namespace CodePanion.Gui.Services
             }
         }
 
-        public async Task SendReplyAsync(string sessionId, string text)
+        public async Task<bool> SendReplyAsync(string sessionId, string text)
         {
             try
             {
@@ -314,15 +332,18 @@ namespace CodePanion.Gui.Services
                 {
                     var error = await response.Content.ReadAsStringAsync();
                     Log($"发送回复失败：{error}");
+                    return false;
                 }
+                return true;
             }
             catch (Exception ex)
             {
                 Log($"发送回复异常：{ex.Message}");
+                return false;
             }
         }
 
-        public async Task SendMonitorEventReplyAsync(string eventId, string text)
+        public async Task<bool> SendMonitorEventReplyAsync(string eventId, string text)
         {
             try
             {
@@ -342,11 +363,14 @@ namespace CodePanion.Gui.Services
                 {
                     var error = await response.Content.ReadAsStringAsync();
                     Log($"发送监控事件回复失败：{error}");
+                    return false;
                 }
+                return true;
             }
             catch (Exception ex)
             {
                 Log($"发送监控事件回复异常：{ex.Message}");
+                return false;
             }
         }
 
@@ -392,12 +416,12 @@ namespace CodePanion.Gui.Services
             }
         }
 
-        public async Task ReconnectAsync()
+        public async Task<bool> ReconnectAsync()
         {
             Log("开始重新连接...");
             await DisconnectAsync();
             await Task.Delay(500); // 等待一下再重连
-            await ConnectAsync();
+            return await ConnectAsync();
         }
 
         private void Log(string message)
@@ -453,39 +477,13 @@ namespace CodePanion.Gui.Services
         public MonitorSourceInfo Source { get; set; } = new MonitorSourceInfo();
     }
 
+    public class SourceDisconnectedEventArgs : EventArgs
+    {
+        public string SourceId { get; set; } = "";
+    }
+
     public class MonitorEventArgs : EventArgs
     {
         public MonitorEventInfo Event { get; set; } = new MonitorEventInfo();
-    }
-
-    public class MonitorSourceInfo
-    {
-        public string Id { get; set; } = "";
-        public string Kind { get; set; } = "";
-        public string Name { get; set; } = "";
-        public string? WindowTitle { get; set; }
-        public string? Workspace { get; set; }
-        public string? Url { get; set; }
-        public string[] Capabilities { get; set; } = Array.Empty<string>();
-        public long RegisteredAt { get; set; }
-        public long LastSeenAt { get; set; }
-        public string Status { get; set; } = "online";
-    }
-
-    public class MonitorEventInfo
-    {
-        public string Id { get; set; } = "";
-        public string Type { get; set; } = "";
-        public string? Source { get; set; }
-        public string? SourceId { get; set; }
-        public string? SessionId { get; set; }
-        public string? Title { get; set; }
-        public string Content { get; set; } = "";
-        public string[]? Options { get; set; }
-        public string? Level { get; set; }
-        public string? WindowTitle { get; set; }
-        public string? Workspace { get; set; }
-        public string? Url { get; set; }
-        public long Timestamp { get; set; }
     }
 }

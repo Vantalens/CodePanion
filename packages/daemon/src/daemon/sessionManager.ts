@@ -2,9 +2,12 @@ import { randomUUID } from 'node:crypto';
 import type { WebSocket } from 'ws';
 import type { SessionInfo, WsServerEvent } from '../shared/protocol.js';
 import { logger } from '../logger.js';
+import { RETENTION_DEFAULTS } from '../config.js';
 
-const MAX_FULL_OUTPUT_CHARS = 256 * 1024;
-const MAX_OUTPUT_CHUNKS = 1000;
+export type SessionRetentionOptions = {
+  fullOutputChars?: number;
+  outputChunks?: number;
+};
 
 export interface OutputChunk {
   timestamp: number;
@@ -24,6 +27,13 @@ export interface SessionRecord extends SessionInfo {
 export class SessionManager {
   private sessions = new Map<string, SessionRecord>();
   private listeners = new Set<(event: WsServerEvent) => void>();
+  private readonly maxFullOutputChars: number;
+  private readonly maxOutputChunks: number;
+
+  constructor(options: { retention?: SessionRetentionOptions } = {}) {
+    this.maxFullOutputChars = options.retention?.fullOutputChars ?? RETENTION_DEFAULTS.session.fullOutputChars;
+    this.maxOutputChunks = options.retention?.outputChunks ?? RETENTION_DEFAULTS.session.outputChunks;
+  }
 
   register(input: {
     command: string;
@@ -176,21 +186,21 @@ export class SessionManager {
     rec.fullOutput.push(chunk);
     rec.fullOutputChars += chunk.length;
 
-    while (rec.fullOutputChars > MAX_FULL_OUTPUT_CHARS && rec.fullOutput.length > 1) {
+    while (rec.fullOutputChars > this.maxFullOutputChars && rec.fullOutput.length > 1) {
       const removed = rec.fullOutput.shift() ?? '';
       rec.fullOutputChars -= removed.length;
     }
 
-    if (rec.fullOutputChars > MAX_FULL_OUTPUT_CHARS && rec.fullOutput.length === 1) {
-      rec.fullOutput[0] = rec.fullOutput[0].slice(-MAX_FULL_OUTPUT_CHARS);
+    if (rec.fullOutputChars > this.maxFullOutputChars && rec.fullOutput.length === 1) {
+      rec.fullOutput[0] = rec.fullOutput[0].slice(-this.maxFullOutputChars);
       rec.fullOutputChars = rec.fullOutput[0].length;
     }
   }
 
   private appendOutputChunk(rec: SessionRecord, chunk: OutputChunk) {
     rec.outputChunks.push(chunk);
-    if (rec.outputChunks.length > MAX_OUTPUT_CHUNKS) {
-      rec.outputChunks.splice(0, rec.outputChunks.length - MAX_OUTPUT_CHUNKS);
+    if (rec.outputChunks.length > this.maxOutputChunks) {
+      rec.outputChunks.splice(0, rec.outputChunks.length - this.maxOutputChunks);
     }
   }
 }

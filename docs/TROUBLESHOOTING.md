@@ -1,176 +1,152 @@
 # CodePanion 故障排查指南
 
-## 文字乱码
+本指南覆盖 Windows Alpha 便携版的常见问题。所有命令默认在仓库根目录执行。
 
-CodePanion 的 HTTP、WebSocket、GUI 日志和 WebView 消息都应使用 UTF-8。若中文标题或正文显示乱码：
+---
 
-1. 确认调用方请求头包含 `Content-Type: application/json; charset=utf-8`。
-2. 使用 `codepanion notify "测试通知" -m "这是一条中文消息"` 验证 daemon 到 GUI 的链路。
-3. 检查 `~/.codepanion/gui.log` 和 daemon 日志是否已经乱码；如果日志正常但页面乱码，问题在 WebView 渲染层。
-4. 不要对中文内容做二次手动转义，直接发送 JSON 字符串。
+## 1. daemon / GUI 没连上
 
-## 收不到通知
+GUI 顶部显示「未连接」，或 `codepanion status` 报错。
 
-通知分为两个通道：
-
-- 系统通知：由 daemon 的 native notifier 发送，受 `toast.enabled` 控制。
-- GUI 通知：由 WebSocket observer 推送，只要求 GUI 已连接 daemon。
-
-排查顺序：
-
-1. `codepanion status` 确认 daemon 正在运行。
-2. 检查 `~/.codepanion/config.json` 中 GUI 和扩展使用的 `port`、`token` 是否一致。
-3. 发送 `codepanion notify "测试通知" -m "中文消息"`。
-4. GUI 未打开时，至少应看到系统通知或 daemon warning。
-5. GUI 打开时，时间线应出现 `notification` 消息。
-
-## 多源监控没有事件
-
-1. VS Code 扩展需要加载 `packages/vscode-extension/`，并能读取 `~/.codepanion/config.json` 或手动配置 token。
-2. 外部适配器应先调用 `POST /sources/register`，再调用 `POST /events`。
-4. GUI 中看不到来源时，调用 `GET /sources` 检查 daemon 是否收到注册。
-
-## 问题现象
-GUI 显示"未连接"状态，点击"重新连接"按钮无法连接到 daemon。
-
-## 排查步骤
-
-### 1. 确认 daemon 正在运行
+### 1.1 确认 daemon 是否在跑
 
 ```bash
 codepanion status
 ```
 
-应该显示类似：
+正常输出形如：
+
 ```
 [codepanion] daemon running (pid=27160, port=7777)
 ```
 
-如果未运行，启动 daemon：
+未运行就启动：
+
 ```bash
 codepanion start
 ```
 
-### 2. 检查配置文件
+### 1.2 校对配置文件
 
-查看配置文件：
+GUI、CLI、扩展共用同一份 `~/.codepanion/config.json`：
+
 ```bash
 cat ~/.codepanion/config.json
 ```
 
-确认 `port` 字段的值（通常是 7777）。
+`port` 与 `token` 必须与 GUI、扩展使用的值完全一致。
+token 不要写到日志或截图里，复制时注意脱敏。
 
-### 3. 测试连接
+> daemon 写盘时会把 `config.json` 设为 owner-only（Unix 600 / Windows ACL）。
+> 若手动改过权限被拒，删除文件后让 `codepanion start` 重新生成。
 
-运行测试脚本：
-```bash
-cd d:/CodePanion
-node test-connection.js
-```
+### 1.3 端口被占用
 
-如果测试成功，说明 daemon 工作正常，问题可能在 GUI 端。
-
-### 4. 查看 GUI 调试日志
-
-如果你在 Visual Studio 或 VS Code 中运行 GUI，可以在输出窗口看到详细的连接日志。
-
-或者使用 DebugView 工具查看 Windows 调试输出。
-
-## 常见解决方案
-
-### 方案 1：重启 daemon
-```bash
-codepanion restart
-```
-
-### 方案 2：清理并重启
-```bash
-# 停止 daemon
-codepanion stop
-
-# 关闭 GUI（如果正在运行）
-taskkill //F //IM CodePanion.Gui.exe
-
-# 重新启动 daemon
-codepanion start
-
-# 重新启动 GUI
-cd d:/CodePanion
-npm run gui:run
-```
-
-### 方案 3：检查防火墙
-确保 Windows 防火墙没有阻止本地连接（127.0.0.1:7777）。
-
-### 方案 4：检查端口冲突
 ```bash
 netstat -ano | findstr :7777
 ```
 
-如果端口被其他程序占用，修改配置文件中的端口号。
+若端口被其他进程占用，改 `config.json` 的 `port` 后 `codepanion restart`，
+GUI 在设置面板保存即可触发自动重连。
 
-## 已知问题
+### 1.4 Windows 防火墙
 
-### WebSocket 连接超时
-- **原因**：C# WebSocket 客户端库可能需要更长的连接时间
-- **解决**：点击"重新连接"按钮，通常第二次尝试会成功
+只走 `127.0.0.1`，正常情况下防火墙不会拦截。如果企业策略强制拦本地连接，
+在防火墙规则里放行 daemon 进程或修改使用的端口。
 
-### 首次连接失败
-- **原因**：GUI 启动时 daemon 可能还未完全就绪
-- **解决**：等待几秒后点击"重新连接"
+---
 
-## 调试技巧
+## 2. WebSocket 失败 / 重连不上
 
-### 1. 使用诊断脚本
-```bash
-cd d:/CodePanion
-diagnose.bat
-```
+GUI 一直停在「重连中」，或 daemon 日志里出现 `ws rejected: ...`。
 
-### 2. 手动测试 WebSocket
-使用 Node.js 测试脚本验证 WebSocket 连接：
-```bash
-node test-connection.js
-```
+### 2.1 鉴权方式
 
-### 3. 查看 daemon 日志
-daemon 的日志通常在：
-```
-~/.codepanion/daemon.log
-```
+daemon 不再接受 query string 形式的 token。WebSocket 握手必须：
 
-## 技术细节
+- URL：`ws://127.0.0.1:7777/ws?role=observer`（CLI 客户端用 `role=cli&sessionId=...`）
+- 头部：`Sec-WebSocket-Protocol: codepanion.token.<你的 token>`
+- Origin：来自 GUI WebView2（`http://codepanion.local`）或被显式允许的本地源
 
-### 连接流程
-1. GUI 启动时读取 `~/.codepanion/config.json`
-2. 发送 HTTP GET 请求到 `http://127.0.0.1:7777/health`
-3. 如果健康检查成功，建立 WebSocket 连接到 `ws://127.0.0.1:7777/ws?token=xxx&role=observer`
-4. 收到 `hello` 消息后，连接状态变为"已连接"
+日志里见到 `missing or invalid token subprotocol` 说明客户端发的还是老格式；
+更新到对应版本的 GUI / 扩展即可。
 
-### 超时设置
-- HTTP 健康检查超时：5 秒
-- WebSocket 重连间隔：10 秒
-- WebSocket 错误重连间隔：30 秒
+### 2.2 短暂中断
 
-## 获取帮助
+daemon 短暂离线后再上线，GUI 会自动重连并通过 `hello` 收到 `workflow-snapshot`，
+不需要手动操作。如果一直停在重连中：
 
-如果以上方法都无法解决问题，请提供以下信息：
+1. `codepanion status` 确认 daemon 已经在新端口监听。
+2. 关掉 GUI 重开，让它重新读取 `config.json`。
+3. 看 `~/.codepanion/daemon.log` 有没有 `ws rejected` 的具体原因。
 
-1. `codepanion status` 的输出
-2. `cat ~/.codepanion/config.json` 的内容
-3. `node test-connection.js` 的输出
-4. GUI 是否显示"重新连接"按钮
-5. 点击"重新连接"后的状态变化
+### 2.3 GUI 看不到任何事件
 
-## 改进建议
+WebSocket 接通但时间线空白：
 
-我们已经在最新版本中改进了连接稳定性：
+1. `codepanion notify "测试" -m "ping"` — 应在 GUI 立即出现一条通知。
+2. 没出现就说明 observer 没建立或被 Origin 拦了，看 daemon 日志确认。
+3. 出现了说明事件通道正常，问题在来源端（VS Code 扩展未注册、Codex Desktop 没有产生 rollout 等）。
 
-✅ 增强的错误处理和日志
-✅ 自动重连机制
-✅ 手动重连按钮
-✅ 详细的连接状态显示
-✅ 超时检测
+---
 
-如果你仍然遇到连接问题，这可能是 WebSocket 客户端库的兼容性问题。我们正在考虑切换到更稳定的 WebSocket 实现。
+## 3. 文字乱码
 
+CodePanion 全链路是 UTF-8。出现中文乱码：
+
+1. HTTP 调用方加 `Content-Type: application/json; charset=utf-8`。
+2. 用 `codepanion notify "测试通知" -m "这是一条中文消息"` 验证 daemon → GUI 链路。
+3. 看 `~/.codepanion/daemon.log` 和 GUI 日志：
+   - 日志里就是乱码 → 来源端编码不对
+   - 日志正常但页面乱码 → WebView 渲染层问题，提供 GUI 版本号反馈
+4. 不要在中文上做二次手动转义，直接发 JSON 字符串。
+
+---
+
+## 4. 多源监控没事件
+
+`GET /sources` 没有期待中的来源，或者来源在但没事件。
+
+1. **VS Code 扩展**：加载 `packages/vscode-extension/`，能读取 `~/.codepanion/config.json` 或在扩展设置里手动配 token。
+2. **Codex Desktop**：daemon 启动时会扫描 `~/.codex/sessions/`。没有 rollout 文件就不会出现来源。
+3. **外部适配器**：必须先 `POST /sources/register`，再 `POST /events`，否则事件会被丢弃。
+4. **CC Switch / 国产 AI 工具**：仅做 L1/L2 进程级识别，能看到来源连接但不会有事件流（设计如此）。
+
+---
+
+## 5. 通知收不到
+
+通知分两路：
+
+- **系统通知**：daemon 本机 toast，受 `toast.enabled` 控制。
+- **GUI 通知**：WebSocket 推送，只要 GUI 在跑就能收到。
+
+排查：
+
+1. `codepanion status` 确认 daemon 在跑。
+2. `~/.codepanion/config.json` 的 `port` / `token` 与 GUI、扩展一致。
+3. `codepanion notify "测试通知" -m "中文消息"`。
+4. GUI 关着的情况下，至少应看到系统通知；都没看到就是 toast 通道有问题，查 daemon 日志。
+5. GUI 开着，时间线应该出现 `notification` 消息。
+
+---
+
+## 6. 收集反馈所需信息
+
+提交问题时请附上以下内容（注意 token 脱敏）：
+
+1. `codepanion status` 输出
+2. `~/.codepanion/config.json` 内容（**抹掉 token**）
+3. `~/.codepanion/daemon.log` 末尾 ~50 行
+4. GUI 版本号与操作系统版本
+5. 复现步骤
+
+---
+
+## 7. 已知限制
+
+- 当前只支持 Windows x64 便携版。其他平台靠源码自行构建，未列入 Alpha 支持范围。
+- WebSocket 鉴权使用 subprotocol token，不支持 URL query token。老客户端必须升级。
+- 国产 AI 工具仅做进程级识别，不会读取它们的私有数据库 / 账号 / cookie。
+
+更多产品边界见 [DEVELOPMENT_TASKS.md](../DEVELOPMENT_TASKS.md) 的「产品边界」与「方向校准」章节。

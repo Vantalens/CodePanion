@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { checkHealth } from '../shared/client.js';
+import { clearPid, isProcessAlive, readPid } from '../daemon/pidfile.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -21,6 +22,12 @@ export async function startCommand() {
   if (existing.ok) {
     console.log(`[codepanion] daemon already running (pid=${existing.pid})`);
     return;
+  }
+  const stalePid = readPid();
+  if (stalePid) {
+    const state = isProcessAlive(stalePid) ? 'unhealthy or reused' : 'dead';
+    clearPid();
+    console.warn(`[codepanion] cleared stale daemon pid ${stalePid} (${state})`);
   }
   const entry = resolve(__dirname, '..', 'index.js');
   const child = spawn(process.execPath, [entry, '--daemon'], {

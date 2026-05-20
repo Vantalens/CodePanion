@@ -8,6 +8,7 @@ import {
   postPrompt,
   postExit,
   wsUrl,
+  wsProtocols,
   checkHealth,
 } from '../shared/client.js';
 import { PromptDetector } from './promptDetector.js';
@@ -17,6 +18,12 @@ export interface RunArgs {
   command: string;
   args: string[];
   cwd?: string;
+}
+
+function debug(...args: unknown[]) {
+  if (process.env.CODEPANION_DEBUG === '1' || process.env.LOG_LEVEL === 'debug') {
+    console.error('[codepanion-debug]', ...args);
+  }
 }
 
 function resolveExecutable(name: string): string {
@@ -46,7 +53,8 @@ export async function runWithPty(input: RunArgs): Promise<number> {
   const cfg = loadConfig();
   const health = await checkHealth();
   if (!health.ok) {
-    console.error('[codepanion] daemon is not running. Run `codepanion start` first.');
+    const reason = health.error ? ` (${health.error})` : '';
+    console.error(`[codepanion] daemon is not running${reason}. Run \`codepanion start\` first.`);
     process.exit(2);
   }
 
@@ -63,7 +71,7 @@ export async function runWithPty(input: RunArgs): Promise<number> {
 
   let term: pty.IPty;
   try {
-    console.error('[codepanion-debug] pty.spawn shell=', shell, 'args=', input.args);
+    debug('pty.spawn shell=', shell, 'args=', input.args);
     term = pty.spawn(shell, input.args, {
       name: 'xterm-256color',
       cols,
@@ -71,20 +79,24 @@ export async function runWithPty(input: RunArgs): Promise<number> {
       cwd: input.cwd ?? process.cwd(),
       env: { ...process.env } as Record<string, string>,
     });
-    console.error('[codepanion-debug] pty spawned pid=', term.pid);
+    debug('pty spawned pid=', term.pid);
   } catch (err) {
     console.error(`[codepanion] failed to spawn pty for ${shell}: ${(err as Error).message}`);
     process.exit(2);
   }
 
-  console.error('[codepanion-debug] connecting ws...');
-  const ws = new WebSocket(wsUrl('cli', session.id));
+  debug('connecting ws...');
+  const ws = new WebSocket(wsUrl('cli', session.id), wsProtocols());
   await new Promise<void>((resolve, reject) => {
     ws.once('open', () => {
-      console.error('[codepanion-debug] ws open');
+      debug('ws open');
       resolve();
     });
-    ws.once('error', reject);
+    ws.once('error', (err) => {
+      // Surface url-stripped reason so the user can tell daemon-down from auth failure.
+      debug('ws connect failed', (err as Error).message);
+      reject(err);
+    });
   });
 
   ws.on('message', (raw) => {
@@ -93,13 +105,28 @@ export async function runWithPty(input: RunArgs): Promise<number> {
       if (event.type === 'inject-input' && event.sessionId === session.id) {
         term.write(event.text);
       }
-    } catch {}
+    } catch (err) {
+      debug('ws message parse failed', (err as Error).message);
+    }
   });
+
+  // `.catch(() => {})` previously swallowed daemon-side failures whole, so a half-broken daemon
+  // would silently drop prompts/output/exit without the user ever noticing. Now we route each
+  // failure through `debug()` — silent in normal runs, but `CODEPANION_DEBUG=1` / `LOG_LEVEL=debug`
+  // surfaces method/path/status from DaemonHttpError. PTY stdout stays clean.
+  const reportClientFailure = (label: string) => (err: Error) => {
+    const httpErr = err as Partial<{ method: string; path: string; status: number }> & Error;
+    if (httpErr.method && httpErr.path) {
+      debug(`${label} failed`, `${httpErr.method} ${httpErr.path}`, `status=${httpErr.status ?? '?'}`, httpErr.message);
+    } else {
+      debug(`${label} failed`, err.message);
+    }
+  };
 
   const detector = new PromptDetector({
     idleMs: cfg.promptIdleMs,
     onPrompt: (lastLines, options) => {
-      postPrompt(session.id, lastLines, options).catch(() => {});
+      postPrompt(session.id, lastLines, options).catch(reportClientFailure('postPrompt'));
     },
   });
 
@@ -110,7 +137,7 @@ export async function runWithPty(input: RunArgs): Promise<number> {
     const chunk = outputQueue.join('');
     outputQueue = [];
     flushTimer = null;
-    postOutput(session.id, chunk).catch(() => {});
+    postOutput(session.id, chunk).catch(reportClientFailure('postOutput'));
   };
   const scheduleFlush = () => {
     if (flushTimer) return;
@@ -127,7 +154,8 @@ export async function runWithPty(input: RunArgs): Promise<number> {
 
   if (process.stdin.isTTY) process.stdin.setRawMode(true);
   process.stdin.resume();
-  process.stdin.on('data', (d) => term.write(d.toString('utf8')));
+  const onStdinData = (d: Buffer) => term.write(d.toString('utf8'));
+  process.stdin.on('data', onStdinData);
 
   const onResize = () => {
     const c = process.stdout.columns ?? 120;
@@ -142,12 +170,16 @@ export async function runWithPty(input: RunArgs): Promise<number> {
     term.onExit(({ exitCode }) => {
       detector.stop();
       flush();
-      postExit(session.id, exitCode).catch(() => {});
+      postExit(session.id, exitCode).catch(reportClientFailure('postExit'));
       try {
         if (process.stdin.isTTY) process.stdin.setRawMode(false);
       } catch {}
+      process.stdin.off('data', onStdinData);
+      process.stdin.pause();
+      process.stdout.off('resize', onResize);
       try {
         ws.close();
+        ws.terminate();
       } catch {}
       resolve(exitCode);
     });
