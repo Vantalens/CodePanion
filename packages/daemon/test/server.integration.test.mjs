@@ -818,6 +818,148 @@ test('VS Code 来源的 done / error 事件映射为 workflow status item', asyn
   });
 });
 
+// P2.1：CLI/PTTY 非零退出必须映射成 workflow item status='error'，
+// GUI 才能把这条任务挂到失败队列；之前所有用例都走 exitCode=0，error 分支零覆盖。
+test('CLI 会话以非零退出码结束时 workflow 写入 status=error 的退出 item', async () => {
+  await withServer(async ({ port, token }) => {
+    const observer = await openWs(`ws://127.0.0.1:${port}/ws?role=observer`, {
+      protocols: tokenSubprotocol(token),
+    });
+    try {
+      const registered = await request(port, token, 'POST', '/sessions', {
+        command: 'npm',
+        args: ['test'],
+        cliPid: 50001,
+      });
+      assert.equal(registered.status, 200);
+      const sessionId = registered.body.id;
+
+      const errorExitPromise = waitForMessage(
+        observer,
+        (m) =>
+          m.type === 'workflow-event' &&
+          m.event?.action === 'item-append' &&
+          m.event?.item?.threadId === `session:${sessionId}` &&
+          m.event?.item?.status === 'error',
+      );
+
+      assert.equal((await request(port, token, 'POST', `/sessions/${sessionId}/exit`, { exitCode: 1 })).status, 200);
+
+      const exitEvt = await errorExitPromise;
+      assert.equal(exitEvt.event.item.status, 'error');
+      assert.match(exitEvt.event.item.content || '', /退出码：1/);
+
+      const sessions = await request(port, token, 'GET', '/sessions');
+      const info = sessions.body.find((s) => s.id === sessionId);
+      assert.equal(info.status, 'exited');
+      assert.equal(info.exitCode, 1);
+
+      // 再确认 snapshot 里能找到 error 退出 item，GUI 重连重建时也能命中失败。
+      const snapshot = await request(
+        port,
+        token,
+        'GET',
+        `/workflow/threads/${encodeURIComponent(`session:${sessionId}`)}`,
+      );
+      assert.equal(snapshot.status, 200);
+      const errorItem = snapshot.body.items.find((it) => it.status === 'error');
+      assert.ok(errorItem, 'snapshot 应保留非零退出的 error item');
+      assert.match(errorItem.content || '', /退出码：1/);
+    } finally {
+      await closeWs(observer);
+    }
+  });
+});
+
+// P2.1：VS Code 来源在真实使用中会成对发"terminal 打开/关闭"和"调试开始/结束"事件，
+// 这条用例覆盖了 extension.js 第 170-199 行的事件 → daemon 的端到端链路。
+test('VS Code 来源的 terminal / debug 生命周期事件能被 daemon 接收并广播', async () => {
+  await withServer(async ({ port, token }) => {
+    const observer = await openWs(`ws://127.0.0.1:${port}/ws?role=observer`, {
+      protocols: tokenSubprotocol(token),
+    });
+    try {
+      const registered = await request(port, token, 'POST', '/sources/register', {
+        kind: 'vscode',
+        name: 'VS Code',
+        windowTitle: 'sample - VS Code',
+        workspace: 'sample',
+        capabilities: ['window', 'tasks', 'terminals', 'debug'],
+        pid: 5101,
+      });
+      assert.equal(registered.status, 200);
+      const sourceId = registered.body.id;
+
+      // 终端打开 → activity。
+      const termOpenPromise = waitForMessage(
+        observer,
+        (m) =>
+          m.type === 'workflow-event' &&
+          m.event?.action === 'item-append' &&
+          /^终端打开/.test(m.event?.item?.title || ''),
+      );
+      assert.equal((await request(port, token, 'POST', '/events', {
+        type: 'activity',
+        source: 'vscode',
+        sourceId,
+        title: '终端打开：pwsh',
+        content: 'shellPath=pwsh',
+        workspace: 'sample',
+      })).status, 200);
+      const termOpenEvt = await termOpenPromise;
+      assert.equal(termOpenEvt.event.item.source, 'vscode');
+
+      // 终端关闭 → activity。
+      const termCloseResp = await request(port, token, 'POST', '/events', {
+        type: 'activity',
+        source: 'vscode',
+        sourceId,
+        title: '终端关闭：pwsh',
+        content: 'shellPath=pwsh',
+        workspace: 'sample',
+      });
+      assert.equal(termCloseResp.status, 200);
+
+      // 调试开始 → activity；调试结束 → done。
+      const debugDonePromise = waitForMessage(
+        observer,
+        (m) =>
+          m.type === 'workflow-event' &&
+          m.event?.action === 'item-append' &&
+          m.event?.item?.kind === 'status' &&
+          m.event?.item?.status === 'done' &&
+          /调试结束/.test(m.event?.item?.title || ''),
+      );
+      assert.equal((await request(port, token, 'POST', '/events', {
+        type: 'activity',
+        source: 'vscode',
+        sourceId,
+        title: '调试开始：jest',
+        content: 'sessionId=dbg-1',
+        workspace: 'sample',
+      })).status, 200);
+      assert.equal((await request(port, token, 'POST', '/events', {
+        type: 'done',
+        source: 'vscode',
+        sourceId,
+        title: '调试结束：jest',
+        content: 'sessionId=dbg-1',
+        level: 'done',
+        workspace: 'sample',
+      })).status, 200);
+      const debugDoneEvt = await debugDonePromise;
+      assert.equal(debugDoneEvt.event.item.status, 'done');
+
+      const threads = await request(port, token, 'GET', '/workflow/threads');
+      const vscodeThread = threads.body.find((t) => t.source === 'vscode');
+      assert.ok(vscodeThread, 'workflow 应有一个 vscode thread 承载所有生命周期事件');
+      assert.ok((vscodeThread.itemCount || 0) >= 4, '终端开/关 + 调试开/关共 4 条事件至少都要落到 vscode thread');
+    } finally {
+      await closeWs(observer);
+    }
+  });
+});
+
 test('中文文本在 HTTP 与 WebSocket 链路上全程不乱码', async () => {
   await withServer(async ({ port, token }) => {
     const observer = await openWs(`ws://127.0.0.1:${port}/ws?role=observer`, {

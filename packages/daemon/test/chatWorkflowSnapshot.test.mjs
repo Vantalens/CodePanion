@@ -692,6 +692,55 @@ test('passive source workflow with a real prompt enters the main queue as 等待
   assert.equal(items[0].dataset.displayStatus, 'waiting-me');
 });
 
+test('VS Code 来源仅 activity 事件不会在主任务队列中制造假任务', async () => {
+  // P2.1：VS Code 扩展会把终端开/关、调试开始、激活心跳之类的事件发成 activity；
+  // 这些仅是"来源视图"信息，不能在主队列里冒出一个假的 VS Code 任务来抢用户注意力。
+  const win = loadChat();
+  const { handleMessage, state } = win.CodePanion.__test;
+  const now = Date.now();
+
+  handleMessage({
+    type: 'workflow-snapshot',
+    snapshot: {
+      threads: [{ id: 'vscode-thread', source: 'vscode', title: 'sample - VS Code', status: 'running', updatedAt: now, itemCount: 2 }],
+      items: [
+        { id: 'term-open', threadId: 'vscode-thread', source: 'vscode', kind: 'message', title: '终端打开：pwsh', content: 'shellPath=pwsh', timestamp: now - 1000 },
+        { id: 'debug-start', threadId: 'vscode-thread', source: 'vscode', kind: 'message', title: '调试开始：jest', content: 'sessionId=dbg-1', timestamp: now },
+      ],
+    },
+  });
+
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+
+  assert.equal(state.conversations.has('workflow:vscode-thread'), false, 'VS Code 纯 activity 事件不应入主队列');
+  assert.equal(win.document.querySelectorAll('.conversation-item').length, 0, '主任务列表应为空');
+});
+
+test('VS Code 来源出现真实失败时才会抬升为主队列任务', async () => {
+  // P2.1：但 VS Code 端发出 type=error / level=error 的任务结束事件，
+  // 例如 onDidEndTaskProcess 退出码非 0，必须抬升到主队列，让用户能处理失败。
+  const win = loadChat();
+  const { handleMessage, state } = win.CodePanion.__test;
+  const now = Date.now();
+
+  handleMessage({
+    type: 'workflow-snapshot',
+    snapshot: {
+      threads: [{ id: 'vscode-fail-thread', source: 'vscode', title: 'sample - VS Code', status: 'error', updatedAt: now, itemCount: 1 }],
+      items: [
+        { id: 'task-fail', threadId: 'vscode-fail-thread', source: 'vscode', kind: 'status', title: '任务失败：jest', content: '退出码：1', status: 'error', timestamp: now },
+      ],
+    },
+  });
+
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+
+  assert.equal(state.conversations.has('workflow:vscode-fail-thread'), true, 'VS Code 失败事件应抬升入主队列');
+  const items = win.document.querySelectorAll('.conversation-item');
+  assert.equal(items.length, 1);
+  assert.equal(items[0].dataset.displayStatus, 'error');
+});
+
 test('failure tasks expose an inline error summary and a diagnostics copy action', async () => {
   // P1.2：失败消息必须先在主视图里"具体报了什么"，不必展开 details；
   // 同时给出可一键复制的结构化诊断文本，给 Codex/Claude 接力排查用。

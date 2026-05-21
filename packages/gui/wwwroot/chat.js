@@ -317,7 +317,10 @@ function isActionableStatus(status) {
 }
 
 function isPassiveSourceKind(source) {
+    // P2.1：VS Code 扩展只读 L2，窗口/终端/调试 activity 事件能进入来源视图，
+    // 但不应在主任务队列里制造假任务；只有显式的 prompt / error 才抬升入队。
     return [
+        'vscode',
         'cc-switch',
         'qwen-code',
         'trae',

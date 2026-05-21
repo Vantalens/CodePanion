@@ -9,6 +9,8 @@ import {
   shouldHideCodexContent,
   textFrom,
   statusFromEvent,
+  isCodexInternalEvent,
+  isCodexInternalResponseItem,
   titleFromPath,
   isDegradedTitle,
   summarizeUserMessage,
@@ -180,6 +182,102 @@ test('event_msg.task_started + task_complete map to status items', async () => {
     assert.equal(started.status, 'running');
     assert.ok(completed, 'expected 任务完成 item');
     assert.equal(completed.status, 'done');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('isCodexInternalEvent treats token / reasoning / cost noise as internal', () => {
+  // P2.1：codex-rs 真实发的 event_msg.type 中，token 计费、内部推理这些
+  // 不可读且不可操作，必须被认作内部噪音直接吞掉。
+  assert.equal(isCodexInternalEvent('token_count'), true);
+  assert.equal(isCodexInternalEvent('usage'), true);
+  assert.equal(isCodexInternalEvent('token_usage'), true);
+  assert.equal(isCodexInternalEvent('tokens'), true);
+  assert.equal(isCodexInternalEvent('reasoning'), true);
+  assert.equal(isCodexInternalEvent('reasoning_delta'), true);
+  assert.equal(isCodexInternalEvent('cost_update'), true);
+  // 真实任务事件不应被误杀。
+  assert.equal(isCodexInternalEvent('task_started'), false);
+  assert.equal(isCodexInternalEvent('user_message'), false);
+  assert.equal(isCodexInternalEvent('agent_message'), false);
+});
+
+test('isCodexInternalResponseItem treats reasoning / token_count items as internal', () => {
+  assert.equal(isCodexInternalResponseItem('reasoning'), true);
+  assert.equal(isCodexInternalResponseItem('reasoning_summary'), true);
+  assert.equal(isCodexInternalResponseItem('token_count'), true);
+  assert.equal(isCodexInternalResponseItem('usage'), true);
+  assert.equal(isCodexInternalResponseItem('message'), false);
+  assert.equal(isCodexInternalResponseItem('function_call'), false);
+});
+
+test('event_msg token / reasoning / cost records do not become workflow items', async () => {
+  // P2.1：端到端验证 — token 与 reasoning 类事件经 ingest 后不会以 status item
+  // 形式刷屏（之前会落到 fallback `kind: status`，正是用户反馈的"内部噪音"）。
+  const { snapshot, root } = await runAdapter([
+    { timestamp: freshIso(), type: 'session_meta', payload: { cwd: '/r' } },
+    { timestamp: freshIso(10), type: 'event_msg', payload: { type: 'token_count', total: 12345 } },
+    { timestamp: freshIso(20), type: 'event_msg', payload: { type: 'usage', input_tokens: 100, output_tokens: 200 } },
+    { timestamp: freshIso(30), type: 'event_msg', payload: { type: 'reasoning', text: 'thinking out loud...' } },
+    { timestamp: freshIso(40), type: 'event_msg', payload: { type: 'cost_update', usd: 0.0123 } },
+    // 同一会话里夹一条真实任务事件，验证过滤只精准杀掉内部噪音。
+    { timestamp: freshIso(50), type: 'event_msg', payload: { type: 'task_started' } },
+  ]);
+  try {
+    const noisy = snapshot.items.filter((it) =>
+      ['token_count', 'usage', 'reasoning', 'cost_update'].includes(it.title),
+    );
+    assert.equal(noisy.length, 0, `expected token/reasoning/cost noise filtered, got: ${JSON.stringify(noisy.map(n => n.title))}`);
+    const real = snapshot.items.find((it) => it.title === '任务开始');
+    assert.ok(real, '真实任务事件不应被误杀');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('response_item reasoning / token_count records are filtered before becoming status items', async () => {
+  // P2.1：response_item 里的 reasoning 是模型内部思考链，token_count 是计费统计，
+  // 默认会落到 fallback kind=status；现在必须被显式吞掉。
+  const { snapshot, root } = await runAdapter([
+    { timestamp: freshIso(), type: 'session_meta', payload: { cwd: '/r' } },
+    { timestamp: freshIso(10), type: 'response_item', payload: { type: 'reasoning', summary: 'internal CoT' } },
+    { timestamp: freshIso(20), type: 'response_item', payload: { type: 'reasoning_summary', text: 'should not appear' } },
+    { timestamp: freshIso(30), type: 'response_item', payload: { type: 'token_count', total: 999 } },
+    { timestamp: freshIso(40), type: 'response_item', payload: { type: 'message', role: 'assistant', content: 'visible reply' } },
+  ]);
+  try {
+    const internalLeaks = snapshot.items.filter((it) =>
+      it.title?.startsWith('reasoning') || it.title === 'token_count',
+    );
+    assert.equal(internalLeaks.length, 0, `reasoning/token 内部 item 不应出现，got: ${JSON.stringify(internalLeaks)}`);
+    const assistant = snapshot.items.find((it) => it.role === 'assistant');
+    assert.ok(assistant, '真实 assistant 消息应保留');
+    assert.equal(assistant.content, 'visible reply');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('approval-decision JSON written into a session jsonl never becomes a workflow item', async () => {
+  // P2.1：以前只在纯函数层验证 isCodexApprovalDecision；这里走端到端 ingest 路径，
+  // 确认审批 JSON 即使被以 user_message 形式写入 jsonl 也不会刷到任务详情里。
+  const approvalJson = JSON.stringify({
+    risk_level: 'low',
+    user_authorization: 'approved',
+    outcome: 'applied',
+    rationale: 'safe edit',
+  });
+  const { snapshot, root } = await runAdapter([
+    { timestamp: freshIso(), type: 'session_meta', payload: { cwd: '/r' } },
+    { timestamp: freshIso(10), type: 'event_msg', payload: { type: 'user_message', message: approvalJson } },
+    { timestamp: freshIso(20), type: 'event_msg', payload: { type: 'agent_message', message: 'OK 已处理。' } },
+  ]);
+  try {
+    const userMsgs = snapshot.items.filter((it) => it.role === 'user');
+    assert.equal(userMsgs.length, 0, `审批 JSON 不应作为用户消息暴露，got: ${JSON.stringify(userMsgs)}`);
+    const agent = snapshot.items.find((it) => it.role === 'assistant');
+    assert.ok(agent, '同会话的真实 assistant 回复应保留');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

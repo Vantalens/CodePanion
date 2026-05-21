@@ -185,6 +185,9 @@ export class CodexDesktopAdapter {
 
     if (raw.type === 'event_msg') {
       const eventType = String(payload.type ?? 'event');
+      // P2.1：Codex Desktop 只读同步严禁把 token 计费 / 内部推理之类内部噪音
+      // 暴露到任务视图，否则用户会被一堆 status item 刷屏。
+      if (isCodexInternalEvent(eventType)) return null;
       if (eventType === 'user_message') {
         const content = textFrom(payload.message) || textFrom(payload.text_elements) || '';
         if (shouldHideCodexContent(content)) return null;
@@ -221,6 +224,9 @@ export class CodexDesktopAdapter {
 
     if (raw.type === 'response_item') {
       const itemType = String(payload.type ?? 'response');
+      // P2.1：reasoning / token_count 这类只与计费/链路追踪有关的内部 item
+      // 不应该当成 status 渲染给用户。
+      if (isCodexInternalResponseItem(itemType)) return null;
       if (itemType === 'message') {
         const role = stringOrUndefined(payload.role) ?? 'assistant';
         if (role === 'system' || role === 'developer') return null;
@@ -321,6 +327,27 @@ export function toTimestamp(value: unknown): number | undefined {
 
 function isFreshTimestamp(timestamp: number): boolean {
   return Date.now() - timestamp <= ACTIVE_SESSION_WINDOW_MS;
+}
+
+// P2.1：codex-rs 的 event_msg 中这些类型只面向计费与链路追踪，不展示给用户。
+// 关键字保持小写匹配，避免 codex 升级时漏掉同义事件。
+export function isCodexInternalEvent(eventType: string): boolean {
+  const normalized = eventType.toLowerCase();
+  return normalized === 'token_count'
+    || normalized === 'usage'
+    || normalized === 'token_usage'
+    || normalized === 'tokens'
+    || normalized.startsWith('reasoning')
+    || normalized === 'cost_update';
+}
+
+// P2.1：response_item.reasoning 是模型内部思考，token_count 是 usage 统计，
+// 既不可读也无操作价值，直接吞掉。
+export function isCodexInternalResponseItem(itemType: string): boolean {
+  const normalized = itemType.toLowerCase();
+  return normalized.startsWith('reasoning')
+    || normalized === 'token_count'
+    || normalized === 'usage';
 }
 
 export function statusFromEvent(eventType: string): WorkflowItem['status'] | undefined {
