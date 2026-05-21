@@ -224,11 +224,13 @@
 - [x] 发布包复制 node.exe 前校验固定版本与 SHA256
 - [x] 清理过时安装与发布说明 — [INSTALL.md](INSTALL.md)、[README.md](README.md)、[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
 - [x] 验证新用户可按一份指南完成安装和运行
+- [x] 修复 GitHub Actions `Build GUI` 缺少 `packages/daemon/bundle/daemon.cjs`：GUI 项目构建前自动生成 daemon bundle，CI 改走 `npm run gui:build` — [packages/gui/CodePanion.Gui.csproj](packages/gui/CodePanion.Gui.csproj)、[.github/workflows/ci.yml](.github/workflows/ci.yml)
 
 **验收标准：**
 
 - [x] 新用户只看一份准确指南即可完成安装和运行
 - [x] 发布包可复现，运行时 hash 不一致时打包失败
+- [x] 干净 CI 环境中单独构建 GUI 不依赖已存在的 ignored bundle 产物；本地已验证 `dotnet build packages/gui/CodePanion.Gui.csproj -c Release`、`npm run gui:build`、`npm test`
 
 ### P2.2 整理文档体系
 
@@ -288,6 +290,7 @@
 - [x] HTTP 路由反例测试 — [packages/daemon/test/server.integration.test.mjs](packages/daemon/test/server.integration.test.mjs)
 - [x] WebSocket 鉴权与会话错配回归测试
 - [x] CI 最小流水线
+- [x] CI 的 `Build GUI` 步骤使用仓库脚本 `npm run gui:build`，与本地验证路径一致，避免绕过 daemon bundle 生成
 - [x] S-10 `node.exe` 版本固定 + SHA256 校验 — [scripts/package-windows.ps1](scripts/package-windows.ps1)
 - [x] P-6 `npm audit` 安全审计流程确认（2026-05-20 用户授权后执行）
 - [x] P-7 `git diff --check` 纳入提交前基线，清理 `DEVELOPMENT_TASKS.md` EOF 空行
