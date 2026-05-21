@@ -1,0 +1,23 @@
+{
+  "name": "@codepanion/adapter-sdk",
+  "version": "0.1.0",
+  "description": "Zero-dependency Node.js client for the CodePanion daemon /sources and /events endpoints",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "files": [
+    "src",
+    "examples",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "repository": "https://github.com/Vantalens/CodePanion"
+}
