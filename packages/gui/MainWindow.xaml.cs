@@ -211,8 +211,9 @@ namespace CodePanion.Gui
         {
             try
             {
-                var reply = value.EndsWith("\n", StringComparison.Ordinal) ? value : value + "\n";
-                var ok = await _daemonClient.SendReplyAsync(sessionId, reply);
+                // P2-C：换行注入集中在 CLI 侧 replyTextForPromptOption，daemon 端 resolvePromptOption
+                // 已 trim 末尾 \r?\n。GUI 不再追加 \n，避免出现 daemon outputChunks 多吞一个换行。
+                var ok = await _daemonClient.SendReplyAsync(sessionId, value);
                 AddLog(ok ? $"[回复] {sessionId}: {value}" : $"[回复失败] {sessionId}: {value}");
                 if (!ok)
                 {
@@ -229,8 +230,8 @@ namespace CodePanion.Gui
         {
             try
             {
-                var reply = value.EndsWith("\n", StringComparison.Ordinal) ? value : value + "\n";
-                var ok = await _daemonClient.SendMonitorEventReplyAsync(eventId, reply);
+                // P2-C：监控事件回复同样不再补尾换行，由 daemon/CLI 侧统一处理。
+                var ok = await _daemonClient.SendMonitorEventReplyAsync(eventId, value);
                 AddLog(ok ? $"[事件回复] {eventId}: {value}" : $"[事件回复失败] {eventId}: {value}");
                 if (!ok)
                 {

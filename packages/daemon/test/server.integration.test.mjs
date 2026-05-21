@@ -230,7 +230,7 @@ test('HTTP API requires auth and covers session lifecycle', async () => {
   });
 });
 
-test('workflow keeps same-length CLI output chunks emitted in the same millisecond', async () => {
+test('workflow merges high-frequency CLI output chunks into a single item', async () => {
   await withServer(async ({ port, token }) => {
     const registered = await request(port, token, 'POST', '/sessions', {
       command: 'codex',
@@ -240,6 +240,8 @@ test('workflow keeps same-length CLI output chunks emitted in the same milliseco
     assert.equal(registered.status, 200);
     const sessionId = registered.body.id;
 
+    // P2-D：50ms 内的多块 chunk 应合并为一条 workflow item，避免 spinner / 心跳输出
+    // 把 workflow items 与 id 计数器撑爆。
     const realDateNow = Date.now;
     try {
       Date.now = () => 1_700_000_000_000;
@@ -249,11 +251,44 @@ test('workflow keeps same-length CLI output chunks emitted in the same milliseco
       Date.now = realDateNow;
     }
 
+    // 等待合并窗口落盘 (50ms + 余量)。
+    await new Promise((resolve) => setTimeout(resolve, 120));
+
     const snapshot = await request(port, token, 'GET', `/workflow/threads/${encodeURIComponent(`session:${sessionId}`)}`);
     assert.equal(snapshot.status, 200);
     const outputItems = snapshot.body.items.filter((item) => item.kind === 'command' && item.title === '终端输出');
-    assert.equal(outputItems.length, 2);
-    assert.deepEqual(outputItems.map((item) => item.content), ['same-a\n', 'same-b\n']);
+    assert.equal(outputItems.length, 1);
+    assert.equal(outputItems[0].content, 'same-a\nsame-b\n');
+  });
+});
+
+test('workflow flushes pending CLI output before recording the next prompt', async () => {
+  await withServer(async ({ port, token }) => {
+    const registered = await request(port, token, 'POST', '/sessions', {
+      command: 'codex',
+      args: ['run'],
+      cliPid: 12347,
+    });
+    assert.equal(registered.status, 200);
+    const sessionId = registered.body.id;
+
+    // 在 50ms 合并窗口内追加 chunk，然后立刻发 prompt，应触发立即 flush
+    // 保证 prompt item 出现在 merged output 之后。
+    assert.equal((await request(port, token, 'POST', `/sessions/${sessionId}/output`, { chunk: 'tick-a\n' })).status, 200);
+    assert.equal((await request(port, token, 'POST', `/sessions/${sessionId}/output`, { chunk: 'tick-b\n' })).status, 200);
+    assert.equal((await request(port, token, 'POST', `/sessions/${sessionId}/prompt`, {
+      lastLines: '请选择：',
+      options: ['1) 是', '2) 否'],
+    })).status, 200);
+
+    const snapshot = await request(port, token, 'GET', `/workflow/threads/${encodeURIComponent(`session:${sessionId}`)}`);
+    assert.equal(snapshot.status, 200);
+    const outputItems = snapshot.body.items.filter((item) => item.kind === 'command' && item.title === '终端输出');
+    const promptItems = snapshot.body.items.filter((item) => item.kind === 'prompt');
+    assert.equal(outputItems.length, 1);
+    assert.equal(outputItems[0].content, 'tick-a\ntick-b\n');
+    assert.equal(promptItems.length, 1);
+    assert.ok(promptItems[0].timestamp >= outputItems[0].timestamp);
   });
 });
 

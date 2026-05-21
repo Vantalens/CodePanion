@@ -785,27 +785,35 @@ function disableOptionsForPrompt(promptId) {
 }
 
 function extractCodeBlocks(message) {
+    // P2-E：先批量识别再一次性裁剪上限，避免每次 push 都 splice 一次；
+    // pruneMessageState 与 MAX_CODE_BLOCKS 上限仍兜底，所以裁剪只需一次。
     const regex = /```([\w.+-]*)\n([\s\S]*?)```/g;
+    const matched = [];
     let match;
     while ((match = regex.exec(message.content)) !== null) {
         const code = match[2].trimEnd();
         if (!code.trim()) continue;
         const language = match[1] || 'text';
         if (!isUsefulCodeBlock(language, code)) continue;
+        matched.push({ language, code });
+    }
+    if (matched.length === 0) return;
+    const baseIndex = state.codeBlocks.length;
+    matched.forEach((entry, offset) => {
         const block = {
-            id: `${message.id}:code:${state.codeBlocks.length}`,
+            id: `${message.id}:code:${baseIndex + offset}`,
             messageId: message.id,
             conversationId: message.conversationId,
             title: message.conversationTitle,
-            language,
-            code,
+            language: entry.language,
+            code: entry.code,
             timestamp: message.timestamp
         };
         state.codeBlocks.push(block);
-        if (state.codeBlocks.length > MAX_CODE_BLOCKS) {
-            state.codeBlocks.splice(0, state.codeBlocks.length - MAX_CODE_BLOCKS);
-        }
         if (!state.activeCodeId) state.activeCodeId = block.id;
+    });
+    if (state.codeBlocks.length > MAX_CODE_BLOCKS) {
+        state.codeBlocks.splice(0, state.codeBlocks.length - MAX_CODE_BLOCKS);
     }
 }
 
@@ -1167,6 +1175,7 @@ function pruneWorkflowItemIdsGlobal() {
     });
     all.sort((a, b) => Number(a.item.timestamp || 0) - Number(b.item.timestamp || 0));
     const removeCount = Math.max(0, all.length - MAX_WORKFLOW_ITEM_IDS);
+    if (removeCount === 0) return;
     for (const entry of all.slice(0, removeCount)) {
         const items = state.workflowItemsByThread.get(entry.threadId);
         if (!items) continue;
@@ -1175,6 +1184,15 @@ function pruneWorkflowItemIdsGlobal() {
         state.workflowItemIds.delete(entry.item.id);
         const thread = state.workflowThreads.get(entry.threadId);
         if (thread) thread.itemCount = items.length;
+    }
+    // P2-B：item 被剪掉后，与之关联的 workflow codeBlocks 失去消息锚，必须同步清理，
+    // 否则代码视图保留对已删除消息 id 的引用，点击后跳回找不到的对话。
+    state.codeBlocks = state.codeBlocks.filter(block => {
+        if (!String(block.conversationId || '').startsWith('workflow:')) return true;
+        return state.workflowItemIds.has(block.messageId);
+    });
+    if (state.activeCodeId && !state.codeBlocks.some(block => block.id === state.activeCodeId)) {
+        state.activeCodeId = state.codeBlocks[0]?.id || '';
     }
 }
 

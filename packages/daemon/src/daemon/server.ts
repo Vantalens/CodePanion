@@ -58,6 +58,35 @@ export function createServer(
     return `session:${sessionId}:${kind}:${timestamp}:${next}`;
   };
 
+  // P2-D：把同一会话短时间内连发的 PTY 输出合并到一条 workflow item，
+  // 避免高频 chunk 把 workflow items / id 计数器撑爆；50ms 边界足以把一次
+  // CLI tick 的多块 chunk 合并，但仍能跟住人能感知的滚动节奏。
+  // 收到 prompt / exit 时强制 flush，保证顺序与边界正确。
+  const OUTPUT_MERGE_MS = 50;
+  type PendingOutput = {
+    id: string;
+    threadId: string;
+    content: string;
+    timestamp: number;
+    timer: NodeJS.Timeout;
+  };
+  const pendingOutputs = new Map<string, PendingOutput>();
+  const flushPendingOutput = (sessionId: string): void => {
+    const pending = pendingOutputs.get(sessionId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    pendingOutputs.delete(sessionId);
+    workflows.appendItem({
+      id: pending.id,
+      threadId: pending.threadId,
+      source: 'cli',
+      kind: 'command',
+      title: '终端输出',
+      content: pending.content,
+      timestamp: pending.timestamp,
+    });
+  };
+
   sessions.onEvent((event) => {
     const now = Date.now();
     if (event.type === 'session-registered') {
@@ -81,16 +110,24 @@ export function createServer(
         timestamp: event.session.startedAt,
       });
     } else if (event.type === 'session-output') {
-      workflows.appendItem({
-        id: nextSessionWorkflowItemId(event.sessionId, 'output', now),
-        threadId: `session:${event.sessionId}`,
-        source: 'cli',
-        kind: 'command',
-        title: '终端输出',
+      const existing = pendingOutputs.get(event.sessionId);
+      if (existing) {
+        existing.content += event.chunk;
+        return;
+      }
+      const id = nextSessionWorkflowItemId(event.sessionId, 'output', now);
+      const sessionId = event.sessionId;
+      const timer = setTimeout(() => flushPendingOutput(sessionId), OUTPUT_MERGE_MS);
+      if (typeof timer.unref === 'function') timer.unref();
+      pendingOutputs.set(sessionId, {
+        id,
+        threadId: `session:${sessionId}`,
         content: event.chunk,
         timestamp: now,
+        timer,
       });
     } else if (event.type === 'session-prompt') {
+      flushPendingOutput(event.sessionId);
       workflows.appendItem({
         id: nextSessionWorkflowItemId(event.sessionId, 'prompt', now),
         threadId: `session:${event.sessionId}`,
@@ -103,6 +140,7 @@ export function createServer(
         timestamp: now,
       });
     } else if (event.type === 'session-exited') {
+      flushPendingOutput(event.sessionId);
       workflows.appendItem({
         id: nextSessionWorkflowItemId(event.sessionId, 'exit', now),
         threadId: `session:${event.sessionId}`,

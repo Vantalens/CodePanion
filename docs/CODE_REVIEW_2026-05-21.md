@@ -102,6 +102,8 @@
 
 ## P2 代码清理 / 可观察性
 
+> P2-B / P2-C / P2-D / P2-E 已于 2026-05-21 收口，详见 [IMPLEMENTATION_LOG.md](./IMPLEMENTATION_LOG.md#2026-05-21-p2-backlog-收口bcde)。
+
 ### ~~P2-A chat.js `getMessageRenderKey` 重复 `options` 键~~（已修，2026-05-21 跟踪修复 M1）
 
 - 路径：[chat.js:689](../packages/gui/wwwroot/chat.js#L689)

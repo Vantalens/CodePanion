@@ -1210,3 +1210,53 @@ npm test                                   # 133 pass / 0 fail / 2 skipped（本
 npm run validate:dtos                      # C# DTO 与 protocol.ts 一致（本轮未改 schema）
 npm run gui:build                          # 0 警告 / 0 错误
 ```
+
+## 2026-05-21 P2 backlog 收口（B/C/D/E）
+
+承接 [CODE_REVIEW_2026-05-21.md](./CODE_REVIEW_2026-05-21.md) 中 P2-B/C/D/E 四项清理（P2-A 已在 P0 跟踪修复 M1 阶段处理）。本轮不涉及鉴权 / 配置 / 协议表面变化，主要是减少状态泄漏、合并高频写入、移除重复语义。
+
+### P2-B `pruneWorkflowItemIdsGlobal` 同步清理 codeBlocks
+
+- 路径：[packages/gui/wwwroot/chat.js](../packages/gui/wwwroot/chat.js)
+- 全局 LRU 裁剪 workflow item 时未联动 `state.codeBlocks`，导致代码视图保留对已删除消息 id 的引用；和 `removeWorkflowThread` 已有的清理逻辑对齐
+- 末尾按"保留 conversationId 非 workflow:* 或者 messageId 仍在 `workflowItemIds` 中"过滤 codeBlocks；若 `activeCodeId` 被剪掉则回落到下一个可见块
+- 没有命中删除时短路返回，避免空操作时仍走一次 Set/filter
+
+### P2-C 收敛 prompt 选项回复的换行注入到 CLI 单点
+
+- 路径：[packages/gui/MainWindow.xaml.cs](../packages/gui/MainWindow.xaml.cs)
+- 协议升级后 GUI → daemon `/reply` 用 `optionIndex` 决议（`sessionManager.ts:resolvePromptOption` 已 `trim` 末尾 `\r?\n`），CLI 侧 `runner.ts:replyTextForPromptOption` 自己拼 `\n` 触发 PTY 回车
+- 移除 `HandleUserReply` / `HandleMonitorEventReply` 中 `value + "\n"` 拼接，daemon `outputChunks` 不再多吞一个空行；保留 CLI 端 `\n`（PTY 唯一需要换行的地方）
+- daemon 端无需改动，trim 行为已经覆盖旧路径
+
+### P2-D server.ts 合并高频 PTY 输出 chunk
+
+- 路径：[packages/daemon/src/daemon/server.ts](../packages/daemon/src/daemon/server.ts)
+- 每条 `session-output` 立即 `appendItem` 会让 spinner / 进度条快速撑满 workflow items + id 计数器；改为按会话维护 `pendingOutputs` + 50ms 合并窗口
+- 边界事件（`session-prompt` / `session-exited`）触发前先 `flushPendingOutput`，保证 prompt 永远出现在合并输出之后；session 关闭后清理对应 counter
+- WebSocket 直播链路不变（observer 仍订阅每条 `session-output`），合并只作用在 workflow item 落盘
+
+### P2-E `extractCodeBlocks` 一次性裁剪
+
+- 路径：[packages/gui/wwwroot/chat.js](../packages/gui/wwwroot/chat.js)
+- 每识别一个代码块就 splice 一次，O(n²) 形态；改为收集 matched 数组后批量 push，最后整体裁剪到 `MAX_CODE_BLOCKS`
+- `pruneMessageState` 与 `state.codeBlocks` 上限仍兜底，不会绕过
+
+### 新增 / 调整测试
+
+- `packages/daemon/test/server.integration.test.mjs`
+  - 把"same millisecond 两条 output 各自记为单条"改为"50ms 内合并为一条 item，content 串联"
+  - 新增"flush before next prompt"：merged output 后立刻 prompt，断言 1 条 command + 1 条 prompt，且 prompt 时间戳 ≥ command 时间戳
+
+### 不做
+
+- 不为 `kind: 'command'` 单独引入 ring buffer：50ms merge + workflow retention 已能压制基线，第二层缓冲会让回放语义复杂化
+- 不动 CLI `replyTextForPromptOption` 的 `\n`：PTY 仍需要这个换行触发回车，集中在一处比分散到 GUI/server 更直观
+
+### 验证
+
+```powershell
+npm test                                   # 134 pass / 0 fail / 2 skipped（+1：output-flush-before-prompt 测试）
+npm run validate:dtos                      # C# DTO 与 protocol.ts 一致（本轮未改 schema）
+npm run gui:build                          # 0 警告 / 0 错误
+```
