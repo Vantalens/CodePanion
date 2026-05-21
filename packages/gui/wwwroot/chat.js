@@ -351,23 +351,68 @@ function makeConversationButton(item) {
         renderAll();
     });
 
-    const dotClass = item.status === 'prompt' ? 'waiting' : item.status === 'error' ? 'error' : item.status === 'done' ? 'done' : 'running';
+    // P0.3：摘要走 displayStatus（等待我/运行中/失败/需审阅/完成/来源在线），
+    // preview 显示下一步动作而不是最近一条原始输出，避免命令片段刷屏。
+    const display = deriveConversationDisplay(item);
     button.innerHTML = `
         <div class="conversation-name">
-            <span class="conversation-dot ${dotClass}"></span>
-            <span></span>
+            <span class="conversation-dot ${display.kind}"></span>
+            <span class="conversation-title-text"></span>
         </div>
         <div class="conversation-meta">
+            <span class="conversation-chip status-chip"></span>
             <span class="conversation-chip source-chip"></span>
             <span class="conversation-chip capability-chip"></span>
         </div>
         <div class="conversation-preview"></div>
     `;
-    button.querySelector('.conversation-name span:last-child').textContent = item.title;
+    button.dataset.displayStatus = display.kind;
+    button.querySelector('.conversation-title-text').textContent = item.title;
+    button.querySelector('.status-chip').textContent = display.label;
     button.querySelector('.source-chip').textContent = sourceLabel({ source: item.source });
     button.querySelector('.capability-chip').textContent = capabilityForMessage(item).level;
-    button.querySelector('.conversation-preview').textContent = item.lastContent || item.source || '';
+    button.querySelector('.conversation-preview').textContent = display.action;
     return button;
+}
+
+// P0.3：把任务的 status + 计数派生为 6 档显示状态 + 下一步动作；
+// 任意时刻 deriveConversationDisplay(conv).kind 必属下列之一：
+//   waiting-me  → 等待我（prompt）
+//   error       → 失败
+//   review      → 需审阅（done 且有 artifact/file_change/code/tool 产物）
+//   done        → 完成（done 且没有要审阅的产物）
+//   source-online → 来源在线（被动源，未抬升到 prompt/error）
+//   running     → 运行中（其余）
+function deriveConversationDisplay(item) {
+    if (!item) return { kind: 'running', label: '运行中', action: '执行中' };
+    const status = item.status || '';
+    if (status === 'prompt') {
+        return { kind: 'waiting-me', label: '等待我', action: '选择选项或输入回复' };
+    }
+    if (status === 'error') {
+        return { kind: 'error', label: '失败', action: '查看错误并复制诊断' };
+    }
+    if (status === 'done') {
+        const reviewable = (item.fileChangeCount || 0) > 0
+            || (item.codeCount || 0) > 0
+            || (item.toolCount || 0) > 0;
+        return reviewable
+            ? { kind: 'review', label: '需审阅', action: '查看新产物' }
+            : { kind: 'done', label: '完成', action: '执行已结束' };
+    }
+    if (isPassiveSourceKind(item.source) && !isActionableStatus(status)) {
+        return { kind: 'source-online', label: '来源在线', action: '等待新事件' };
+    }
+    return { kind: 'running', label: '运行中', action: runningHint(item) };
+}
+
+function runningHint(item) {
+    if ((item.errorCount || 0) > 0) return '有错误待复核';
+    if ((item.promptCount || 0) > 0) return '即将需要回复';
+    if ((item.toolCount || 0) > 0) return '工具调用中';
+    if ((item.commandCount || 0) > 0) return '命令输出中';
+    if ((item.messageCount || 0) > 0) return 'AI 处理中';
+    return '执行中';
 }
 
 function renderChat() {
@@ -471,9 +516,12 @@ function getVisibleMessages() {
 }
 
 function statusLabel(status) {
-    if (status === 'prompt') return '等待输入';
+    // P0.3：右上角 / 抽屉态文案与左侧任务列表 6 档对齐；
+    // 进入 conversation 后只能看到这五种，"需审阅"由 displayStatus 派生，
+    // 这里走的是基础字符串映射，保持简洁。
+    if (status === 'prompt') return '等待我';
     if (status === 'error') return '失败';
-    if (status === 'done') return '已完成';
+    if (status === 'done') return '完成';
     if (status === 'idle') return '等待事件';
     return '运行中';
 }
@@ -1312,16 +1360,28 @@ function refreshWorkflowConversation(threadId) {
         return;
     }
     const status = workflowStatusToMessageType(thread.status || summary.status);
+    const preview = workflowPreview(threadId, summary);
+    const lastAt = Number(thread.updatedAt || summary.lastAt || Date.now());
+    const finalStatus = isArchivedConversation({ title: thread.title, lastContent: preview, lastAt })
+        ? 'done'
+        : status;
+    // P0.3：把 summary 上的计数带到 conversation 上，
+    // 任务列表的状态/动作派生不再依赖最近一条原始消息内容。
     state.conversations.set(`workflow:${threadId}`, {
         id: `workflow:${threadId}`,
         title: deriveWorkflowTitle(threadId, thread.title),
         source: thread.source || 'workflow',
-        lastContent: workflowPreview(threadId, summary),
-        lastAt: Number(thread.updatedAt || summary.lastAt || Date.now()),
+        lastContent: preview,
+        lastAt,
         count: summary.totalCount,
-        status: isArchivedConversation({ title: thread.title, lastContent: workflowPreview(threadId, summary), lastAt: Number(thread.updatedAt || summary.lastAt || Date.now()) })
-            ? 'done'
-            : status
+        status: finalStatus,
+        promptCount: summary.promptCount,
+        errorCount: summary.errorCount,
+        codeCount: summary.codeCount,
+        fileChangeCount: summary.fileChangeCount,
+        messageCount: summary.messageCount,
+        toolCount: summary.toolCount,
+        commandCount: summary.commandCount
     });
 }
 
@@ -1735,6 +1795,6 @@ if (document.readyState === 'loading') {
 
 const api = { addMessage, clearMessages, updateConnectionStatus };
 if (window.CODEPANION_TEST === true) {
-    api.__test = { handleMessage, renderAll, state };
+    api.__test = { handleMessage, renderAll, state, deriveConversationDisplay };
 }
 window.CodePanion = api;

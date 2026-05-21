@@ -495,3 +495,98 @@ test('rendering the same task preserves existing message DOM state', async () =>
   assert.equal(win.document.querySelector('[data-message-id]'), messageBefore);
   assert.equal(win.document.querySelector('.workflow-details').open, true);
 });
+
+// P0.3：左侧任务列表必须用固定 6 档状态文案 + 下一步动作，不再直接吐原始消息内容。
+test('conversation list shows fixed 6-state status labels with next-step action text', () => {
+  const win = loadChat();
+  const { deriveConversationDisplay } = win.CodePanion.__test;
+
+  const waiting = deriveConversationDisplay({ id: 't1', status: 'prompt', source: 'cli' });
+  assert.equal(waiting.kind, 'waiting-me');
+  assert.equal(waiting.label, '等待我');
+  assert.match(waiting.action, /选择|回复/);
+
+  const error = deriveConversationDisplay({ id: 't2', status: 'error', source: 'cli' });
+  assert.equal(error.kind, 'error');
+  assert.equal(error.label, '失败');
+  assert.match(error.action, /错误|诊断/);
+
+  const review = deriveConversationDisplay({ id: 't3', status: 'done', source: 'cli', codeCount: 2, fileChangeCount: 1 });
+  assert.equal(review.kind, 'review');
+  assert.equal(review.label, '需审阅');
+  assert.match(review.action, /产物|查看/);
+
+  const done = deriveConversationDisplay({ id: 't4', status: 'done', source: 'cli' });
+  assert.equal(done.kind, 'done');
+  assert.equal(done.label, '完成');
+
+  const sourceOnline = deriveConversationDisplay({ id: 't5', status: 'activity', source: 'cc-switch' });
+  assert.equal(sourceOnline.kind, 'source-online');
+  assert.equal(sourceOnline.label, '来源在线');
+
+  const running = deriveConversationDisplay({ id: 't6', status: 'activity', source: 'cli', commandCount: 3 });
+  assert.equal(running.kind, 'running');
+  assert.equal(running.label, '运行中');
+  assert.match(running.action, /命令|输出/);
+});
+
+test('conversation list preview is the derived action, not the raw last message content', async () => {
+  const win = loadChat();
+  const { handleMessage } = win.CodePanion.__test;
+  const now = Date.now();
+
+  handleMessage({
+    type: 'workflow-snapshot',
+    snapshot: {
+      threads: [{ id: 'cli-prompt', source: 'cli', title: 'codex run', status: 'waiting', updatedAt: now, itemCount: 2 }],
+      items: [
+        { id: 'cli-prompt-out', threadId: 'cli-prompt', source: 'cli', kind: 'command', title: '终端输出', content: 'npm install\nadded 142 packages', status: 'running', timestamp: now - 10 },
+        { id: 'cli-prompt-q', threadId: 'cli-prompt', source: 'cli', kind: 'prompt', title: '等待输入', content: '是否继续？', options: ['1) 是', '2) 否'], status: 'waiting', timestamp: now },
+      ],
+    },
+  });
+
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+
+  const item = win.document.querySelector('.conversation-item');
+  assert.ok(item, '应渲染出一条任务');
+  assert.equal(item.dataset.displayStatus, 'waiting-me');
+  const preview = item.querySelector('.conversation-preview').textContent;
+  // 不应包含命令原始片段
+  assert.equal(preview.includes('npm install'), false);
+  assert.equal(preview.includes('added 142 packages'), false);
+  assert.match(preview, /选择|回复/);
+  const statusChip = item.querySelector('.status-chip').textContent;
+  assert.equal(statusChip, '等待我');
+});
+
+test('passive source workflow with a real prompt enters the main queue as 等待我', async () => {
+  const win = loadChat();
+  const { handleMessage, state } = win.CodePanion.__test;
+  const now = Date.now();
+
+  handleMessage({
+    type: 'workflow-snapshot',
+    snapshot: {
+      threads: [{ id: 'qwen-thread', source: 'qwen-code', title: 'Qwen Code', status: 'waiting', updatedAt: now, itemCount: 1 }],
+      items: [{
+        id: 'qwen-prompt',
+        threadId: 'qwen-thread',
+        source: 'qwen-code',
+        kind: 'prompt',
+        title: '等待输入',
+        content: '继续？',
+        options: ['是', '否'],
+        status: 'waiting',
+        timestamp: now,
+      }],
+    },
+  });
+
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+
+  assert.equal(state.conversations.has('workflow:qwen-thread'), true);
+  const items = win.document.querySelectorAll('.conversation-item');
+  assert.equal(items.length, 1);
+  assert.equal(items[0].dataset.displayStatus, 'waiting-me');
+});

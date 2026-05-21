@@ -314,18 +314,59 @@ button {
     background: var(--muted-2);
 }
 
-.conversation-dot.waiting { background: var(--orange); }
+.conversation-dot.waiting-me { background: var(--orange); }
 .conversation-dot.error { background: var(--red); }
 .conversation-dot.done { background: var(--green); }
+.conversation-dot.review { background: #8b5cf6; }
+.conversation-dot.source-online { background: var(--muted-2); }
 .conversation-dot.running { background: var(--accent); }
 
-.conversation-item:has(.conversation-dot.waiting) {
+/* P0.3：等待我高亮提示用户需要处理 */
+.conversation-item:has(.conversation-dot.waiting-me) {
     background: #fff8eb;
 }
 
-.conversation-item:has(.conversation-dot.waiting):hover,
-.conversation-item:has(.conversation-dot.waiting).active {
+.conversation-item:has(.conversation-dot.waiting-me):hover,
+.conversation-item:has(.conversation-dot.waiting-me).active {
     border-color: #e6b36b;
+}
+
+.conversation-item:has(.conversation-dot.error) {
+    background: #fff1f1;
+}
+
+.conversation-item:has(.conversation-dot.error):hover,
+.conversation-item:has(.conversation-dot.error).active {
+    border-color: #f2a4a4;
+}
+
+.conversation-item:has(.conversation-dot.review) {
+    background: #f5f0ff;
+}
+
+.conversation-chip.status-chip {
+    background: var(--panel-strong);
+    color: var(--text);
+}
+
+.conversation-item:has(.conversation-dot.waiting-me) .status-chip {
+    background: var(--orange);
+    color: #fff;
+}
+
+.conversation-item:has(.conversation-dot.error) .status-chip {
+    background: var(--red);
+    color: #fff;
+}
+
+.conversation-item:has(.conversation-dot.review) .status-chip {
+    background: #8b5cf6;
+    color: #fff;
+}
+
+.conversation-item:has(.conversation-dot.done) .status-chip {
+    background: var(--green);
+    color: #fff;
 }
 
 .conversation-meta {
