@@ -1,6 +1,6 @@
 # CodePanion
 
-CodePanion 是一个本地优先、供应商中立、单入口多出口的 AI 开发工作流控制台 / 控制平面，面向开发者在本机同时使用多个 AI 编程工具的真实场景。它不替代 Codex、Claude Code、VS Code、Trae、CodeBuddy、通义灵码 / Qoder、CodeGeeX、百度 Comate 等工具本身，而是作为上层控制台，把分散在终端、IDE、独立 AI 编辑器和本地适配器中的会话、状态、等待输入、结果与上下文统一收束到一个图形工作台中。
+CodePanion 是一个本地优先、供应商中立、单入口多出口的 AI 编程工作流中控台 / 控制平面，面向开发者在本机同时使用多个 AI 编程工具的真实场景。它不替代 Codex、Claude Code、VS Code、Trae、CodeBuddy、通义灵码 / Qoder、CodeGeeX、百度 Comate 等工具本身，也不试图成为通用个人 Agent、AI IDE、模型聊天客户端、Raycast 式启动器或 Activity Monitor 式进程监控器；它作为上层控制台，把分散在终端、IDE、独立 AI 编辑器和本地适配器中的会话、状态、等待输入、结果与上下文统一收束到一个图形工作台中。
 
 当前产品不推倒重做。阶段 1 保留 Windows Alpha 形态：用户双击 `CodePanion.Gui.exe` 即可打开，自动启动本地 daemon，看到所有活跃 AI 任务、等待输入任务、完成/失败状态，并能在支持的场景中直接回复或接管任务。阶段 2 才在稳定个人控制台基础上演进为本地 AI 工作流操作台，支持模板、编排、历史和回放。
 
@@ -24,6 +24,7 @@ CodePanion 现有产品是后续控制平面路线的基础，而不是需要废
 - **保留技术栈**：Alpha 阶段继续使用 Node daemon、HTTP/WebSocket、WPF/WebView2 GUI，不立即迁移 Tauri 或 Avalonia。
 - **保留核心能力**：CLI/PTTY 包装、提示检测、直接回复、系统通知、GUI 时间线、Codex Desktop 本地同步、VS Code 来源注册、外部适配器 API、本地 AI 工具进程识别。
 - **策略升级**：从“提醒 + 多源监控工具”收束为本地 AI 开发工作流控制平面，优先解决“谁在运行、谁在等我、谁失败、我能在哪里直接回复”。
+- **定位边界**：以 [产品定位契约](docs/POSITIONING.md) 为准，避免发散成通用个人 Agent、完整 AI IDE、通用启动器或系统进程监控器。
 
 ## 👥 目标用户
 

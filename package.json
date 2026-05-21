@@ -2,7 +2,7 @@
   "name": "codepanion-monorepo",
   "version": "0.1.0",
   "private": true,
-  "description": "AI tool completion notification and remote interaction hub",
+  "description": "Local-first, vendor-neutral AI coding workflow control plane",
   "workspaces": [
     "packages/daemon"
   ],

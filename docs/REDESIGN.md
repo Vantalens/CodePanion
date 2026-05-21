@@ -3,7 +3,9 @@
 ## 文档版本
 - **版本**: v2.0
 - **日期**: 2026-05-12
-- **状态**: 历史草案 — 部分要点已落地（控制平面定位、能力分层、L1/L2/L3 来源边界），代码片段中的 Focus Assist 等示例**未实现**，仅作设计参考；当前可靠信息以 [PRODUCT_ROADMAP.md](PRODUCT_ROADMAP.md)、[ARCHITECTURE.md](ARCHITECTURE.md)、[MONITORING_SOURCES.md](MONITORING_SOURCES.md) 为准。
+- **状态**: 历史草案 — 部分要点已落地（控制平面定位、能力分层、L1/L2/L3 来源边界），代码片段中的 Focus Assist、跨平台通知等示例**未实现**，仅作设计参考；当前可靠信息以 [POSITIONING.md](POSITIONING.md)、[PRODUCT_ROADMAP.md](PRODUCT_ROADMAP.md)、[ARCHITECTURE.md](ARCHITECTURE.md)、[MONITORING_SOURCES.md](MONITORING_SOURCES.md) 为准。
+
+> 读取规则：本文件不再作为当前产品路线或验收依据。若这里的对话式界面、跨平台通知、Focus Assist、自动化编排等设想与当前文档冲突，以 `POSITIONING.md`、`PRODUCT_ROADMAP.md`、`DEVELOPMENT_TASKS.md` 和已实现代码为准。
 
 ## 变更原因
 

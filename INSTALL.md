@@ -398,7 +398,3 @@ node packages/daemon/dist/index.js run -- node -e "const readline=require('readl
 2. 搜索 [Issues](https://github.com/Vantalens/CodePanion/issues)
 3. 提交新 Issue
 4. 加入社区讨论
-
----
-
-**祝你使用愉快！** 🎉

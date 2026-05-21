@@ -56,6 +56,27 @@
 
 ---
 
+## 定位纠偏（2026-05-21）
+
+**依据：** `D:\Owen\Documents\OneDrive\桌面\deep-research-report.md`
+
+**判断：** 当前“本地优先、供应商中立、单入口多出口”的方向正确，但所有公开文案和任务规划必须继续收束为“开发者本机 AI 编程任务中控台 / 控制平面”，避免与通用个人 Agent、完整 AI IDE、Raycast 式 launcher、Activity Monitor 式进程监控器、单厂 AI 工作台正面撞车。
+
+- [x] 新增 [docs/POSITIONING.md](docs/POSITIONING.md)，作为 README、路线图、GUI 文案、包描述和后续规划的定位契约
+- [x] 根 README 与文档中心改用 `deep-research-report.md` 的新报告路径和定位口径
+- [x] 根 package 与 daemon package 描述从“提醒 / 远程交互”改为“本地 AI 编程工作流控制平面”
+- [x] 产品路线补充四类不对位对象：通用个人 Agent、完整 AI IDE、通用 launcher、系统进程监控器
+- [x] 用户指南补充“只走公开 API、CLI/PTTY、只读同步、扩展和显式适配器”的边界
+- [x] 用户指南从泛跨平台说明收束为 Windows Alpha：Node 24、.NET 8、便携版 EXE、PowerShell 故障排查
+- [x] 文档中心和安装指南移除营销式结尾，`REDESIGN.md` 明确只作历史草案参考
+
+**后续文案约束：**
+
+- [ ] 新增官网、应用商店、安装器或 README 摘要时，必须优先引用定位契约而不是临时营销话术
+- [ ] 新增功能前先判断它服务的是“AI 编程任务状态 / 等待输入 / 回复 / 跳转 / 审计”，还是会把产品带向通用 Agent、AI IDE、launcher 或进程监控器
+
+---
+
 # 阶段 1：Windows Alpha 个人本地控制台闭环
 
 ## 阶段 1 退出标准

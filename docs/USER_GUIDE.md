@@ -1,6 +1,6 @@
 # CodePanion 用户指南
 
-欢迎使用 CodePanion！本指南将帮助你快速上手并充分利用 CodePanion 的功能。
+本指南面向 Windows Alpha 用户和本地开发者，说明如何用 CodePanion 管住本机上的多个 AI 编程任务。
 
 ## 目录
 
@@ -18,7 +18,7 @@
 
 ## 什么是 CodePanion？
 
-CodePanion 是一个本地优先的个人 AI 工作流中控台，专为同时使用多个 AI 编程工具（如 Claude Code、GitHub Copilot CLI、Codex）的开发者设计。
+CodePanion 是一个本地优先、供应商中立的 AI 编程工作流中控台，专为同时使用多个 AI 编程工具（如 Claude Code、GitHub Copilot CLI、Codex、Trae、CodeBuddy）的开发者设计。
 
 ### 核心问题
 
@@ -43,6 +43,8 @@ CodePanion 会：
 ### 产品边界
 
 - CodePanion 不是聊天客户端，而是 AI 工作流控制层
+- CodePanion 不是通用个人 Agent、完整 AI IDE、通用启动器或系统进程监控器
+- CodePanion 只在公开 API、CLI/PTTY、只读同步、扩展和显式适配器范围内接入工具
 - 当前聚焦个人本地使用，不做多用户协作
 - 后续会从“本地控制台”演进到“本地工作流操作台”，而不是企业平台
 
@@ -52,11 +54,14 @@ CodePanion 会：
 
 ### 系统要求
 
-- **操作系统**：Windows 10/11、macOS 10.15+、Linux
-- **Node.js**：24.0 或更高版本（普通用户使用便携版时由发布包内置）
-- **.NET SDK**：6.0 或更高版本（仅 GUI 需要）
+- **操作系统**：Windows 10/11 64-bit
+- **Node.js**：24.0 或更高版本（普通用户使用 Windows 便携版时由发布包内置）
+- **.NET SDK**：8.0 或更高版本（仅源码构建 GUI 需要）
+- **WebView2 Runtime**：Windows 11 通常已内置，Windows 10 可安装 Evergreen Runtime
 
 ### 安装步骤
+
+普通用户推荐直接使用 Windows 便携版：生成或下载 `dist/CodePanion-win-x64/` 后双击 `CodePanion.Gui.exe`。下面的源码安装步骤主要面向开发者。
 
 #### 1. 克隆或下载项目
 
@@ -125,9 +130,9 @@ codepanion status
 
 ---
 
-### 第二步：启动 GUI 界面（可选）
+### 第二步：启动 GUI 界面
 
-GUI 界面提供可视化的提示响应功能。
+普通用户双击 Windows 便携版中的 `CodePanion.Gui.exe`。开发者从源码启动时使用：
 
 ```bash
 npm run gui:run
@@ -439,10 +444,9 @@ codepanion reply abc123 "yes"
 
 ### 配置文件位置
 
-CodePanion 的配置文件位于：
+CodePanion 当前 Windows Alpha 的配置文件位于：
 
 - **Windows**: `C:\Users\<用户名>\.codepanion\config.json`
-- **macOS/Linux**: `~/.codepanion/config.json`
 
 ### 默认配置
 
@@ -692,8 +696,8 @@ codepanion stop
 # 卸载全局安装
 npm uninstall -g codepanion
 
-# 删除配置文件（可选）
-rm -rf ~/.codepanion
+# 删除配置目录（可选，PowerShell）
+Remove-Item -LiteralPath "$env:USERPROFILE\.codepanion" -Recurse -Force
 ```
 
 ---
@@ -707,12 +711,8 @@ rm -rf ~/.codepanion
 **解决方案**：
 
 1. 检查端口是否被占用：
-   ```bash
-   # Windows
+   ```powershell
    netstat -ano | findstr :7777
-   
-   # macOS/Linux
-   lsof -i :7777
    ```
 
 2. 尝试使用不同端口：
@@ -721,8 +721,8 @@ rm -rf ~/.codepanion
    ```
 
 3. 查看日志：
-   ```bash
-   cat ~/.codepanion/logs/daemon.log
+   ```powershell
+   Get-Content -LiteralPath "$env:USERPROFILE\.codepanion\logs\daemon.log" -Tail 80
    ```
 
 ---
@@ -816,7 +816,7 @@ rm -rf ~/.codepanion
 
 如果以上方法都无法解决问题：
 
-1. 查看日志文件：`~/.codepanion/logs/`
+1. 查看日志文件：`%USERPROFILE%\.codepanion\logs\`
 2. 提交 Issue：https://github.com/Vantalens/CodePanion/issues
 3. 包含以下信息：
    - 操作系统和版本
@@ -832,5 +832,3 @@ rm -rf ~/.codepanion
 - 阅读[架构文档](./ARCHITECTURE.md)了解内部实现
 - 查看[API 文档](./API.md)进行集成开发
 - 探索[配置选项](#配置)自定义 CodePanion
-
-祝你使用愉快！🎉

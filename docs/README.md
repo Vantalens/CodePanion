@@ -2,14 +2,14 @@
 
 欢迎来到 CodePanion 文档中心！这里包含了围绕“本地优先、供应商中立、单入口多出口的 AI 开发工作流控制台 / 控制平面”所需的文档资源。
 
-当前战略采用《AI IDE 个人本地工作流控制台市场分析与 CodePanion 策略报告》的核心判断：保留现有 Windows Alpha 产品和本地 daemon 架构，不推倒重做；把现有提醒、多源监控和 workflow 模型收束为本地控制平面。旧路线报告已从仓库中清理，当前路线以 [产品路线](PRODUCT_ROADMAP.md)、[架构设计](ARCHITECTURE.md)、[监控源说明](MONITORING_SOURCES.md) 和根目录 [开发任务清单](../DEVELOPMENT_TASKS.md) 为准。
+当前战略采用 `D:\Owen\Documents\OneDrive\桌面\deep-research-report.md` 的核心判断：保留现有 Windows Alpha 产品和本地 daemon 架构，不推倒重做；把现有提醒、多源监控和 workflow 模型收束为本地 AI 编程工作流控制平面。旧路线报告已从仓库中清理，当前路线以 [产品定位契约](POSITIONING.md)、[产品路线](PRODUCT_ROADMAP.md)、[架构设计](ARCHITECTURE.md)、[监控源说明](MONITORING_SOURCES.md) 和根目录 [开发任务清单](../DEVELOPMENT_TASKS.md) 为准。
 
 ## 📚 文档导航
 
 ### 🚀 快速开始
 
 - **[README.md](../README.md)** - 项目概述和快速开始指南
-- **[INSTALL.md](../INSTALL.md)** - 详细的安装指南（Windows/macOS/Linux）
+- **[INSTALL.md](../INSTALL.md)** - Windows Alpha 安装、便携版和源码构建指南
 - **[用户指南](USER_GUIDE.md)** - 完整的使用教程和最佳实践
 
 ### 🏗️ 开发文档
@@ -21,13 +21,14 @@
 - **[Claude Code 接入指南](INTEGRATIONS_CLAUDE_CODE.md)** - 固化 CLI/PTY、hooks、VS Code 三条接入路径
 - **[Codex 接入指南](INTEGRATIONS_CODEX.md)** - 固化 CLI/PTY、Codex Desktop 同步、VS Code 终端三条接入路径
 - **[能力证据矩阵](CAPABILITY_EVIDENCE.md)** - 每条入口的 L1/L2/L3 能力都对应代码引用与自动化测试
+- **[产品定位契约](POSITIONING.md)** - 根据外部研究报告收束产品叙事，避免与通用 Agent、AI IDE、launcher 或进程监控器撞定位
 - **[产品路线](PRODUCT_ROADMAP.md)** - 报告策略、现有产品保留决策、Alpha/Beta/GA 演进路线
 - **[重新设计文档](REDESIGN.md)** - 架构重构和改进计划
 
 ### 📋 战略依据
 
-- **外部研究报告** - `D:\Owen\Documents\OneDrive\桌面\CodePanion_report.md`，作为当前定位、工具优先级、商业化和风险策略的主要依据
-- **研究报告 PDF** - `D:\Owen\Documents\OneDrive\桌面\AI IDE 个人本地工作流控制台市场分析与 CodePanion 策略报告.pdf`
+- **外部研究报告** - `D:\Owen\Documents\OneDrive\桌面\deep-research-report.md`，作为当前定位、工具优先级、商业化和风险策略的主要依据
+- **定位执行口径** - 仓库内以 [产品定位契约](POSITIONING.md) 为准，所有公开文案避免把 CodePanion 写成通用个人 Agent、完整 AI IDE、通用 launcher 或进程监控器
 
 ### 📦 发布文档
 
@@ -65,7 +66,7 @@
 
 ### 📊 我想了解项目状态
 
-1. 先看 [产品路线](PRODUCT_ROADMAP.md) 了解当前定位、产品保留决策和方向
+1. 先看 [产品定位契约](POSITIONING.md) 和 [产品路线](PRODUCT_ROADMAP.md) 了解当前定位、产品保留决策和方向
 2. 再看 [架构设计](ARCHITECTURE.md) 与 [开发指南](DEVELOPMENT.md) 了解当前实现边界
 3. 如需了解战略依据，再查看桌面上的 CodePanion 研究报告
 4. 阅读 [更新日志](../CHANGELOG.md) 了解版本历史
@@ -147,11 +148,6 @@
 
 ## 📅 文档更新
 
-- **最后更新**: 2026-05-19
+- **最后更新**: 2026-05-21
 - **版本**: v0.2.0
 - **维护者**: CodePanion Team
-
----
-
-**祝你使用愉快！** 🎉
-
