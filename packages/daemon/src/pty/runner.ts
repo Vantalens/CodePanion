@@ -99,14 +99,37 @@ export async function runWithPty(input: RunArgs): Promise<number> {
     });
   });
 
-  ws.on('message', (raw) => {
+  const parseInjectInputEvent = (raw: unknown): { type: 'inject-input'; sessionId: string; text: string } | null => {
+    let parsed: unknown;
     try {
-      const event = JSON.parse(raw.toString()) as WsServerEvent;
-      if (event.type === 'inject-input' && event.sessionId === session.id) {
-        term.write(event.text);
-      }
+      parsed = JSON.parse(String(raw));
     } catch (err) {
       debug('ws message parse failed', (err as Error).message);
+      return null;
+    }
+
+    if (!parsed || typeof parsed !== 'object') {
+      return null;
+    }
+
+    const record = parsed as Record<string, unknown>;
+    if (record.type !== 'inject-input') {
+      return null;
+    }
+    if (typeof record.sessionId !== 'string' || typeof record.text !== 'string') {
+      return null;
+    }
+    if (record.text.length > 100_000) {
+      return null;
+    }
+
+    return { type: 'inject-input', sessionId: record.sessionId, text: record.text };
+  };
+
+  ws.on('message', (raw) => {
+    const event = parseInjectInputEvent(raw);
+    if (event && event.sessionId === session.id) {
+      term.write(event.text);
     }
   });
 
