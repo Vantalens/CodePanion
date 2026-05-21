@@ -99,6 +99,24 @@ export async function runWithPty(input: RunArgs): Promise<number> {
     });
   });
 
+  const isSafePtyInput = (text: string): boolean => {
+    // Allow normal printable input and common interactive keys only.
+    // Block ESC/control sequences that can manipulate terminal state.
+    for (let i = 0; i < text.length; i += 1) {
+      const code = text.charCodeAt(i);
+      const isCommonKey = code === 0x08 || code === 0x09 || code === 0x0a || code === 0x0d; // \b \t \n \r
+      const isPrintableAscii = code >= 0x20 && code <= 0x7e;
+      const isExtendedUnicode = code >= 0x80;
+      if (!isCommonKey && !isPrintableAscii && !isExtendedUnicode) {
+        return false;
+      }
+      if (code === 0x1b) {
+        return false;
+      }
+    }
+    return true;
+  };
+
   const parseInjectInputEvent = (raw: unknown): { type: 'inject-input'; sessionId: string; text: string } | null => {
     let parsed: unknown;
     try {
@@ -120,6 +138,9 @@ export async function runWithPty(input: RunArgs): Promise<number> {
       return null;
     }
     if (record.text.length > 100_000) {
+      return null;
+    }
+    if (!isSafePtyInput(record.text)) {
       return null;
     }
 
