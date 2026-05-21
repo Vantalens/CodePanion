@@ -881,6 +881,15 @@ button {
     line-height: 1.5;
 }
 
+/* P1.1：等待输入选项上方明确写回复将到哪里，避免对回复去处的歧义。 */
+.prompt-target {
+    margin-bottom: 2px;
+    padding: 4px 0;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 650;
+}
+
 .option-number {
     width: 23px;
     height: 23px;

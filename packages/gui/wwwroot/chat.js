@@ -232,7 +232,14 @@ function renderConversationList() {
     const allConversations = Array.from(state.conversations.values())
         .filter(item => item.id !== 'all')
         .filter(isUserFacingConversation)
-        .sort((a, b) => b.lastAt - a.lastAt);
+        .sort((a, b) => {
+            // P1.1：等待我 > 失败 > 需审阅 > 运行中 > 来源在线 > 完成；
+            // 同档按 lastAt 倒序保持最新的在上，等待输入永远不会被普通输出淹没。
+            const priA = conversationPriority(a);
+            const priB = conversationPriority(b);
+            if (priA !== priB) return priA - priB;
+            return b.lastAt - a.lastAt;
+        });
 
     updateQueueMetrics(allConversations);
 
@@ -413,6 +420,22 @@ function runningHint(item) {
     if ((item.commandCount || 0) > 0) return '命令输出中';
     if ((item.messageCount || 0) > 0) return 'AI 处理中';
     return '执行中';
+}
+
+// P1.1：把任务在队列里排成"等待我 → 失败 → 需审阅 → 运行中 → 来源在线 → 完成"，
+// 多任务并行时等待输入永远在最前，普通输出再吵也不会盖掉它。
+function conversationPriority(item) {
+    if (!item) return 99;
+    const display = deriveConversationDisplay(item);
+    switch (display.kind) {
+        case 'waiting-me': return 0;
+        case 'error': return 1;
+        case 'review': return 2;
+        case 'running': return 3;
+        case 'source-online': return 4;
+        case 'done': return 5;
+        default: return 6;
+    }
 }
 
 function renderChat() {
@@ -771,6 +794,25 @@ function renderOptions(sessionId, eventId, options, messageId) {
     container.className = 'prompt-options';
     container.dataset.promptId = sessionId || eventId || messageId || generateId();
 
+    // P1.1：没有 sessionId 也没有 eventId 时根本无处回写，
+    // 不再渲染按钮/输入框，避免"记录本次选择"这种假回复误导用户。
+    if (!sessionId && !eventId) {
+        const hint = document.createElement('div');
+        hint.className = 'prompt-hint';
+        hint.textContent = '该提示无可回写的目标会话，请回到来源工具中继续。';
+        container.appendChild(hint);
+        return container;
+    }
+
+    // P1.1：在选项上方明确告知回复将写到哪个目标，避免用户搞不清楚回复的去处。
+    const targetText = describeReplyTarget(sessionId, eventId);
+    if (targetText) {
+        const target = document.createElement('div');
+        target.className = 'prompt-target';
+        target.textContent = targetText;
+        container.appendChild(target);
+    }
+
     options.forEach((option, index) => {
         const button = document.createElement('button');
         button.className = 'option-button';
@@ -782,10 +824,11 @@ function renderOptions(sessionId, eventId, options, messageId) {
     });
 
     if (!sessionId) {
+        // event 回写到来源适配器：选项 + 自定义输入都允许。
         const input = document.createElement('input');
         input.className = 'custom-input';
         input.type = 'text';
-        input.placeholder = eventId ? '输入自定义回复，按 Enter 发送' : '记录本次选择，按 Enter 确认';
+        input.placeholder = '输入自定义回复，按 Enter 发送';
         input.addEventListener('keydown', (event) => {
             if (event.key === 'Enter' && input.value.trim()) {
                 selectOption(sessionId, eventId, input.value.trim(), container.dataset.promptId);
@@ -803,6 +846,12 @@ function renderOptions(sessionId, eventId, options, messageId) {
     }
 
     return container;
+}
+
+function describeReplyTarget(sessionId, eventId) {
+    if (sessionId) return '回复将写回 CLI/PTTY 会话';
+    if (eventId) return '回复将通过事件发送到来源适配器';
+    return '';
 }
 
 function selectOption(sessionId, eventId, value, promptId) {
@@ -1387,12 +1436,17 @@ function refreshWorkflowConversation(threadId) {
 
 function chooseInitialConversation() {
     if (state.activeConversation) return;
-    const best = Array.from(state.conversations.values())
+    // P1.1：首次进入或重连后没有选中任务时，优先落到等待我 / 失败 / 需审阅；
+    // 单纯 lastAt 倒序会把刚结束的 done 任务排到等待输入之前。
+    const candidates = Array.from(state.conversations.values())
         .filter(isUserFacingConversation)
-        .filter(item => item.status !== 'done')
-        .sort((a, b) => b.lastAt - a.lastAt)[0]
-        || Array.from(state.conversations.values()).filter(isUserFacingConversation).sort((a, b) => b.lastAt - a.lastAt)[0];
-    state.activeConversation = best?.id || '';
+        .sort((a, b) => {
+            const priA = conversationPriority(a);
+            const priB = conversationPriority(b);
+            if (priA !== priB) return priA - priB;
+            return b.lastAt - a.lastAt;
+        });
+    state.activeConversation = candidates[0]?.id || '';
 }
 
 function deriveWorkflowTitle(threadId, fallback) {
@@ -1795,6 +1849,6 @@ if (document.readyState === 'loading') {
 
 const api = { addMessage, clearMessages, updateConnectionStatus };
 if (window.CODEPANION_TEST === true) {
-    api.__test = { handleMessage, renderAll, state, deriveConversationDisplay };
+    api.__test = { handleMessage, renderAll, state, deriveConversationDisplay, conversationPriority };
 }
 window.CodePanion = api;

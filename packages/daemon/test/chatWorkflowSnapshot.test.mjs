@@ -560,6 +560,107 @@ test('conversation list preview is the derived action, not the raw last message 
   assert.equal(statusChip, '等待我');
 });
 
+// P1.1：等待我必须固定在队列最前，普通输出再多再新都不能盖掉它。
+test('waiting-me tasks are pinned to the top of the conversation list', async () => {
+  const win = loadChat();
+  const { handleMessage } = win.CodePanion.__test;
+  const now = Date.now();
+
+  handleMessage({
+    type: 'workflow-snapshot',
+    snapshot: {
+      threads: [
+        // running 任务时间最新；prompt 任务时间稍旧；按 lastAt 倒序时 prompt 会被压到后面，
+        // 这条测试用来防止这种回退。
+        { id: 'busy', source: 'cli', title: 'busy task', status: 'running', updatedAt: now, itemCount: 1 },
+        { id: 'ask', source: 'cli', title: 'ask user', status: 'waiting', updatedAt: now - 5000, itemCount: 1 },
+        { id: 'dead', source: 'cli', title: 'finished task', status: 'done', updatedAt: now - 2000, itemCount: 1 },
+      ],
+      items: [
+        { id: 'busy-out', threadId: 'busy', source: 'cli', kind: 'message', title: 'assistant', content: 'still working', timestamp: now },
+        { id: 'ask-q', threadId: 'ask', source: 'cli', kind: 'prompt', title: '等待输入', content: 'Continue?', options: ['yes', 'no'], status: 'waiting', timestamp: now - 5000 },
+        { id: 'dead-out', threadId: 'dead', source: 'cli', kind: 'message', title: 'assistant', content: 'all done', timestamp: now - 2000 },
+      ],
+    },
+  });
+
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+
+  const items = Array.from(win.document.querySelectorAll('.conversation-item'));
+  assert.ok(items.length >= 2, '应渲染出多条任务');
+  // 第一条必须是等待我，不管它 lastAt 是否更旧。
+  assert.equal(items[0].dataset.displayStatus, 'waiting-me');
+  assert.match(items[0].querySelector('.conversation-title-text').textContent, /ask user/);
+});
+
+test('prompts without a real reply target do not render any reply entry', async () => {
+  // P1.1：threadId 不是 session: 开头且 item.id 不是 monitor: 开头时，
+  // 既没法回 CLI 也没法回事件适配器，必须只展示提示文本 + 引导，不渲染按钮/输入。
+  const win = loadChat();
+  const { handleMessage } = win.CodePanion.__test;
+  const now = Date.now();
+
+  handleMessage({
+    type: 'workflow-snapshot',
+    snapshot: {
+      threads: [{ id: 'codex-thread', source: 'codex-desktop', title: 'Codex review', status: 'waiting', updatedAt: now, itemCount: 1 }],
+      items: [{
+        id: 'codex-prompt',
+        threadId: 'codex-thread',
+        source: 'codex-desktop',
+        kind: 'prompt',
+        title: '等待输入',
+        content: '是否继续？',
+        options: ['是', '否'],
+        status: 'waiting',
+        timestamp: now,
+      }],
+    },
+  });
+
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+
+  assert.equal(win.document.querySelector('.option-button'), null, '不应渲染选项按钮');
+  assert.equal(win.document.querySelector('.custom-input'), null, '不应渲染自定义输入框');
+  const hint = win.document.querySelector('.prompt-hint');
+  assert.ok(hint, '应给出"该提示无可回写目标"提示');
+  assert.match(hint.textContent, /回到来源工具/);
+  assert.equal(win.document.getElementById('omnibar').hidden, true, 'omnibar 也必须隐藏');
+});
+
+test('session prompt detail surfaces a reply-target line above the options', async () => {
+  // P1.1：选项上方明确写"回复将写回 CLI/PTTY 会话"，
+  // 用户不必猜回复会去哪。
+  const win = loadChat();
+  const { handleMessage } = win.CodePanion.__test;
+  const now = Date.now();
+
+  handleMessage({
+    type: 'workflow-snapshot',
+    snapshot: {
+      threads: [{ id: 'session:codex-shell', source: 'cli', title: 'codex', status: 'waiting', updatedAt: now, itemCount: 1 }],
+      items: [{
+        id: 'shell-q',
+        threadId: 'session:codex-shell',
+        source: 'cli',
+        kind: 'prompt',
+        title: '等待输入',
+        content: 'Continue?',
+        options: ['yes', 'no'],
+        status: 'waiting',
+        timestamp: now,
+      }],
+    },
+  });
+
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+
+  const target = win.document.querySelector('.prompt-target');
+  assert.ok(target, '应渲染 .prompt-target 标识回复去向');
+  assert.match(target.textContent, /CLI|PTTY|会话/);
+  assert.equal(win.document.querySelectorAll('.option-button').length, 2);
+});
+
 test('passive source workflow with a real prompt enters the main queue as 等待我', async () => {
   const win = loadChat();
   const { handleMessage, state } = win.CodePanion.__test;
