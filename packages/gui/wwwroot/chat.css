@@ -273,7 +273,7 @@ button {
     color: inherit;
     text-align: left;
     cursor: pointer;
-    transition: background-color 140ms ease, border-color 140ms ease, transform 140ms ease;
+    transition: background-color 120ms ease, border-color 120ms ease;
 }
 
 .conversation-item:hover,
@@ -284,10 +284,6 @@ button {
 
 .conversation-item.active {
     box-shadow: inset 3px 0 0 var(--accent);
-}
-
-.conversation-item:hover {
-    transform: translateY(-1px);
 }
 
 .conversation-name,
@@ -515,7 +511,6 @@ button {
     gap: 12px;
     padding: 0 0 14px;
     position: relative;
-    animation: message-in 160ms ease-out;
 }
 
 .message:not(:last-child)::before {
@@ -602,6 +597,15 @@ button {
 .message-done .message-card { border-color: #9fd8b8; }
 .message-output .message-card {
     color: var(--muted);
+    background: #f8fafc;
+}
+
+.message-activity .workflow-details,
+.message-error .workflow-details {
+    margin-top: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
     background: #f8fafc;
 }
 
@@ -752,15 +756,20 @@ button {
 }
 
 .workflow-details summary {
-    padding: 10px 0 0;
+    padding: 0;
     color: var(--muted);
     font-size: 12px;
     cursor: pointer;
+    font-weight: 700;
 }
 
 .workflow-detail-row {
     padding: 10px 0;
     border-bottom: 1px solid var(--line);
+}
+
+.workflow-detail-row:last-child {
+    border-bottom: 0;
 }
 
 .workflow-detail-title {
@@ -1014,17 +1023,6 @@ button {
 
 #omnibar-input:disabled {
     opacity: 0.62;
-}
-
-@keyframes message-in {
-    from {
-        opacity: 0;
-        transform: translateY(8px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
 }
 
 @media (prefers-reduced-motion: reduce) {

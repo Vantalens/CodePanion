@@ -23,6 +23,7 @@ const ACTIVE_CONVERSATION_WINDOW_MS = 1000 * 60 * 60 * 24 * 3;
 const ARCHIVE_CONVERSATION_WINDOW_MS = 1000 * 60 * 60 * 24 * 14;
 let renderScheduled = false;
 let renderSmoothScroll = false;
+const AUTO_SCROLL_THRESHOLD_PX = 96;
 
 function updateConnectionStatus(connected) {
     state.connected = Boolean(connected);
@@ -184,12 +185,15 @@ function appendMessageIfVisible(message, wasEmpty) {
     const container = document.getElementById('chat-container');
     const visible = message.conversationId === state.activeConversation;
     if (!visible) return;
+    const shouldStickToBottom = isNearScrollBottom(container);
 
     if (wasEmpty || container.querySelector('.empty-state')) {
         container.innerHTML = '';
     }
     container.appendChild(renderMessage(message));
-    requestAnimationFrame(() => container.scrollTo({ top: container.scrollHeight, behavior: 'auto' }));
+    if (shouldStickToBottom) {
+        requestAnimationFrame(() => scrollContainerToBottom(container, 'auto'));
+    }
 }
 
 function clearMessages() {
@@ -366,6 +370,7 @@ function renderChat() {
     const title = document.getElementById('conversation-title');
     const messages = getVisibleMessages();
     const conversation = state.conversations.get(state.activeConversation);
+    const shouldStickToBottom = isNearScrollBottom(container);
 
     title.textContent = state.activeConversation
         ? conversation?.title || '任务'
@@ -386,8 +391,25 @@ function renderChat() {
 
     container.innerHTML = '';
     messages.forEach(message => container.appendChild(renderMessage(message)));
-    const behavior = renderSmoothScroll ? 'smooth' : 'auto';
-    requestAnimationFrame(() => container.scrollTo({ top: container.scrollHeight, behavior }));
+    if (shouldStickToBottom) {
+        const behavior = renderSmoothScroll ? 'smooth' : 'auto';
+        requestAnimationFrame(() => scrollContainerToBottom(container, behavior));
+    }
+}
+
+function isNearScrollBottom(container) {
+    if (!container) return true;
+    if (container.scrollHeight <= container.clientHeight) return true;
+    return container.scrollHeight - container.scrollTop - container.clientHeight <= AUTO_SCROLL_THRESHOLD_PX;
+}
+
+function scrollContainerToBottom(container, behavior = 'auto') {
+    if (!container) return;
+    if (typeof container.scrollTo === 'function') {
+        container.scrollTo({ top: container.scrollHeight, behavior });
+        return;
+    }
+    container.scrollTop = container.scrollHeight;
 }
 
 function updateStageMeta(conversation, messages) {
@@ -867,7 +889,7 @@ function handleMessage(message) {
             if (message.snapshot) applyWorkflowSnapshot(message.snapshot);
             break;
         case 'workflow-event':
-            if (message.data) applyWorkflowEvent(message.data);
+            applyWorkflowEvent(message.data || message);
             break;
         case 'source-registered':
             if (message.source) {
@@ -1296,7 +1318,8 @@ function buildIntegratedWorkflowMessages(threadId) {
             windowTitle: meta.title || '',
             workspace: first.filePath || meta.workspace || '',
             timestamp: first.timestamp,
-            content: buildActivitySummary(counts, activityBuffer.length, first.timestamp, last.timestamp)
+            content: buildActivitySummary(counts, activityBuffer.length, first.timestamp, last.timestamp),
+            rawItems: activityBuffer.slice()
         }));
         activityBuffer.length = 0;
     };
@@ -1365,6 +1388,7 @@ function trimIntegratedMessages(messages) {
 function isPrimaryWorkflowMessage(item) {
     if (shouldIgnoreWorkflowItem(item)) return false;
     if (isLowValueStatus(item)) return false;
+    if (item.kind === 'command' || item.kind === 'tool_call') return false;
     if (item.kind === 'prompt') return true;
     if (item.status === 'waiting' || item.status === 'error') return true;
     if (item.status === 'done' && item.kind !== 'message' && item.kind !== 'artifact') return false;
@@ -1442,10 +1466,10 @@ function buildActivitySummary(counts, total, startAt, endAt) {
     const parts = [];
     if (counts.file_change) parts.push(`${counts.file_change} 个文件`);
     if (counts.tool_call) parts.push(`${counts.tool_call} 次操作`);
-    if (counts.command) parts.push(`${counts.command} 条输出`);
+    if (counts.command) parts.push(`${counts.command} 条命令输出`);
     if (counts.artifact) parts.push(`${counts.artifact} 段代码`);
     if (parts.length === 0) parts.push(`${total} 条记录`);
-    return `已处理${duration}  ${parts.join('，')}`;
+    return `**执行记录**\n\n已处理${duration} ${parts.join('，')}`;
 }
 
 function shouldShowActivitySummary(items, counts) {
@@ -1598,6 +1622,6 @@ if (document.readyState === 'loading') {
 
 const api = { addMessage, clearMessages, updateConnectionStatus };
 if (window.CODEPANION_TEST === true) {
-    api.__test = { handleMessage, state };
+    api.__test = { handleMessage, renderAll, state };
 }
 window.CodePanion = api;

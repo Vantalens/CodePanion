@@ -234,3 +234,118 @@ test('status-only shell sessions are not shown as actionable tasks', async () =>
   assert.equal(state.activeConversation, '');
   assert.equal(win.document.querySelectorAll('.conversation-item').length, 0);
 });
+
+test('new workflow events do not steal the selected task', async () => {
+  const win = loadChat();
+  const { handleMessage, state } = win.CodePanion.__test;
+  const now = Date.now();
+
+  handleMessage({
+    type: 'workflow-snapshot',
+    snapshot: {
+      threads: [
+        { id: 'task-a', source: 'codex-desktop', title: 'Task A', status: 'running', updatedAt: now - 2000, itemCount: 1 },
+        { id: 'task-b', source: 'codex-desktop', title: 'Task B', status: 'running', updatedAt: now - 1000, itemCount: 1 },
+      ],
+      items: [
+        { id: 'a-msg', threadId: 'task-a', source: 'codex-desktop', kind: 'message', title: 'assistant', content: 'Task A content', timestamp: now - 2000 },
+        { id: 'b-msg', threadId: 'task-b', source: 'codex-desktop', kind: 'message', title: 'assistant', content: 'Task B content', timestamp: now - 1000 },
+      ],
+    },
+  });
+
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+
+  state.activeConversation = 'workflow:task-a';
+  win.CodePanion.__test.renderAll();
+
+  handleMessage({
+    type: 'workflow-event',
+    item: {
+      id: 'b-msg-2',
+      threadId: 'task-b',
+      source: 'codex-desktop',
+      kind: 'message',
+      title: 'assistant',
+      content: 'Task B newer content',
+      timestamp: now,
+    },
+  });
+
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+
+  assert.equal(state.activeConversation, 'workflow:task-a');
+  assert.match(win.document.getElementById('conversation-title').textContent, /Task A/);
+});
+
+test('command workflow items are folded into execution details instead of primary messages', async () => {
+  const win = loadChat();
+  const { handleMessage } = win.CodePanion.__test;
+  const now = Date.now();
+
+  handleMessage({
+    type: 'workflow-snapshot',
+    snapshot: {
+      threads: [{ id: 'mixed-thread', source: 'codex-desktop', title: 'Mixed task', status: 'running', updatedAt: now, itemCount: 3 }],
+      items: [
+        { id: 'goal', threadId: 'mixed-thread', source: 'codex-desktop', kind: 'message', title: 'user', content: 'Fix the GUI', timestamp: now - 2000 },
+        { id: 'cmd', threadId: 'mixed-thread', source: 'codex-desktop', kind: 'command', title: 'cmd.exe', content: 'dotnet build packages/gui/CodePanion.Gui.csproj -c Release\nBuild FAILED.', status: 'error', timestamp: now - 1000 },
+        { id: 'assistant', threadId: 'mixed-thread', source: 'codex-desktop', kind: 'message', title: 'assistant', content: 'The GUI build fails because daemon.cjs is missing.', timestamp: now },
+      ],
+    },
+  });
+
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+
+  const chatText = win.document.getElementById('chat-container').textContent;
+  assert.match(chatText, /The GUI build fails/);
+  assert.match(chatText, /执行记录/);
+  assert.doesNotMatch(chatText, /\*\*命令\/输出：cmd\.exe\*\*/);
+
+  const rawDetails = win.document.querySelector('.workflow-details');
+  assert.ok(rawDetails);
+  assert.equal(rawDetails.open, false);
+  assert.match(rawDetails.textContent, /cmd\.exe/);
+});
+
+test('active conversation does not force autoscroll while user is reading older content', async () => {
+  const win = loadChat();
+  const { state } = win.CodePanion.__test;
+  const container = win.document.getElementById('chat-container');
+  let scrollCalls = 0;
+
+  Object.defineProperty(container, 'scrollHeight', { configurable: true, value: 1200 });
+  Object.defineProperty(container, 'clientHeight', { configurable: true, value: 300 });
+  Object.defineProperty(container, 'scrollTop', { configurable: true, writable: true, value: 0 });
+  container.scrollTo = () => {
+    scrollCalls += 1;
+  };
+
+  win.CodePanion.addMessage({
+    id: 'session-first',
+    type: 'activity',
+    source: 'cli',
+    sessionId: 'stable-session',
+    timestamp: Date.now() - 1000,
+    content: 'first output',
+  });
+
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+  scrollCalls = 0;
+  state.activeConversation = 'session:stable-session';
+  container.scrollTop = 0;
+
+  win.CodePanion.addMessage({
+    id: 'session-second',
+    type: 'activity',
+    source: 'cli',
+    sessionId: 'stable-session',
+    timestamp: Date.now(),
+    content: 'new output while reading older content',
+  });
+
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+
+  assert.equal(state.activeConversation, 'session:stable-session');
+  assert.equal(scrollCalls, 0);
+});
