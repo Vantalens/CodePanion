@@ -52,11 +52,10 @@ jobs:
         run: npm run validate:extensions
 
       - name: Build GUI
-        run: dotnet build packages/gui/CodePanion.Gui.csproj -c Release
+        run: npm run gui:build
 
       - name: Package Windows portable build
         shell: pwsh
         run: |
           $env:CODEPANION_NODE_PATH = (Get-Command node).Source
           npm run package:windows
-

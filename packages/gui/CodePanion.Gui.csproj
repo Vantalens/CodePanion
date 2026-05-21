@@ -28,6 +28,11 @@
     <Version>0.0.0</Version>
   </PropertyGroup>
 
+  <Target Name="BuildDaemonBundle" BeforeTargets="BeforeBuild">
+    <Message Text="Building daemon bundle for GUI output..." Importance="High" />
+    <Exec WorkingDirectory="$(MSBuildThisFileDirectory)..\.." Command="npm run build:daemon-bundle" />
+  </Target>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2592.51" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
