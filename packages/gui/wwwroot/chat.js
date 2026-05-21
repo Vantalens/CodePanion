@@ -374,10 +374,19 @@ function makeConversationButton(item) {
         <div class="conversation-preview"></div>
     `;
     button.dataset.displayStatus = display.kind;
+    if (item.source) button.dataset.source = item.source;
     button.querySelector('.conversation-title-text').textContent = item.title;
     button.querySelector('.status-chip').textContent = display.label;
     button.querySelector('.source-chip').textContent = sourceLabel({ source: item.source });
-    button.querySelector('.capability-chip').textContent = capabilityForMessage(item).level;
+    // P1.3：能力 chip 同步显示文案与颜色，让用户一眼区分只读 / 弱接入 / 可回写。
+    const capability = capabilityForMessage(item);
+    const capChip = button.querySelector('.capability-chip');
+    capChip.textContent = capability.level;
+    const capClass = capabilityChipClass(capability.rawLevel);
+    if (capClass) {
+        capChip.classList.add(capClass);
+        capChip.dataset.capabilityLevel = capability.rawLevel || '';
+    }
     button.querySelector('.conversation-preview').textContent = display.action;
     return button;
 }
@@ -527,7 +536,25 @@ function updateStageMeta(conversation, messages) {
     };
     setText('stage-source', source ? sourceLabel({ source }) : '来源未选择');
     setText('stage-capability', capability.level);
+    // P1.3：stage 顶部 capability chip 颜色与列表 chip 对齐，
+    // 用户在 stage / list / drawer 三个地方看到的能力色一致。
+    applyCapabilityClass('stage-capability', capability.rawLevel);
     setText('stage-status', statusLabel(conversation?.status || latest?.type || 'idle'));
+}
+
+function applyCapabilityClass(elementId, rawLevel) {
+    const el = document.getElementById(elementId);
+    if (!el) return;
+    Array.from(el.classList)
+        .filter(name => name.startsWith('capability-'))
+        .forEach(name => el.classList.remove(name));
+    const klass = capabilityChipClass(rawLevel);
+    if (klass) {
+        el.classList.add(klass);
+        el.dataset.capabilityLevel = rawLevel || '';
+    } else {
+        delete el.dataset.capabilityLevel;
+    }
 }
 
 function getVisibleMessages() {
@@ -556,7 +583,9 @@ function capabilityForMessage(messageOrSource) {
             messageOrSource.integrationKind || metadataFromSourceId(messageOrSource.sourceId, 'integrationKind'),
             messageOrSource.privacyBoundary || metadataFromSourceId(messageOrSource.sourceId, 'privacyBoundary')
         );
-        if (level) return { level: capabilityLevelLabel(level), detail };
+        // P1.3：rawLevel 保留原始 L1/L1-L2/L2/L2-L3/L3/L4，UI 拿去派生 chip 颜色与可写回提示；
+        // level 给出人话标签，detail 给出"只读同步 / 进程识别 / 可回复"具体说明。
+        if (level) return { rawLevel: level, level: capabilityLevelLabel(level), detail };
         return capabilityForSource(messageOrSource.source);
     }
     return capabilityForSource(messageOrSource);
@@ -570,13 +599,23 @@ function metadataFromSourceId(sourceId, key) {
 }
 
 function capabilityLevelLabel(level) {
-    if (level === 'L1') return 'L1 来源识别';
-    if (level === 'L1-L2') return 'L1/L2 接入';
-    if (level === 'L2') return 'L2 状态事件';
-    if (level === 'L2-L3') return 'L2/L3 事件回复';
-    if (level === 'L3') return 'L3 回复/继续';
+    // P1.3：人话化能力层级；让"只读 / 弱接入 / 可回写 / 可编排"在一眼就能区分，
+    // 避免用户把 L1 进程识别误解为 L3 深度接管。
+    if (level === 'L1') return 'L1 进程识别';
+    if (level === 'L1-L2') return 'L1/L2 弱接入';
+    if (level === 'L2') return 'L2 只读事件';
+    if (level === 'L2-L3') return 'L2/L3 事件可回';
+    if (level === 'L3') return 'L3 可回写会话';
     if (level === 'L4') return 'L4 工作流编排';
     return level;
+}
+
+// P1.3：把 capabilityLevel 派生成 CSS class，给 chip / stage / drawer 同步上色，
+// 形成"只读灰 → 弱蓝 → 可写主蓝 → 编排紫"的视觉梯度。
+function capabilityChipClass(rawLevel) {
+    if (!rawLevel) return '';
+    const id = String(rawLevel).toLowerCase().replace(/[^a-z0-9]/g, '');
+    return `capability-${id}`;
 }
 
 function integrationDetail(integrationKind, privacyBoundary) {
@@ -595,46 +634,28 @@ function integrationDetail(integrationKind, privacyBoundary) {
 
 function capabilityForSource(source) {
     const normalized = String(source || '').toLowerCase();
+    // P1.3：所有内置来源都返回 rawLevel + 人话 label + detail，
+    // chip 颜色与文案统一从 rawLevel 派生，避免 stage / list / drawer 三处对不上。
+    const make = (rawLevel, detail) => ({ rawLevel, level: capabilityLevelLabel(rawLevel), detail });
     if (normalized === 'cli' || normalized === 'codex' || normalized === 'claude-code') {
-        return {
-            level: 'L3 回复/继续',
-            detail: '可从终端/PTTY 会话识别等待输入并回写回复。'
-        };
+        return make('L3', '可从终端/PTTY 会话识别等待输入并回写回复。');
     }
     if (normalized === 'codex-desktop') {
-        return {
-            level: 'L2 状态事件',
-            detail: '可同步本地线程与工作流状态；回复能力取决于事件目标。'
-        };
+        return make('L2', '可同步本地线程与工作流状态；回复能力取决于事件目标。');
     }
     if (normalized === 'vscode') {
-        return {
-            level: 'L2 状态事件',
-            detail: '通过显式来源注册接收轻量事件，不读取编辑器私有状态。'
-        };
+        return make('L2', '通过显式来源注册接收轻量事件，不读取编辑器私有状态。');
     }
     if (normalized === 'cc-switch') {
-        return {
-            level: 'L1/L2 配置切换',
-            detail: '可识别账号或 provider 切换器状态；真实切换仍由 CC Switch 执行，CodePanion 不读取账号凭据。'
-        };
+        return make('L1-L2', '可识别账号或 provider 切换器状态；真实切换仍由 CC Switch 执行，CodePanion 不读取账号凭据。');
     }
     if (['qwen-code', 'codebuddy', 'lingma', 'trae', 'comate', 'codegeex', 'marscode', 'ai-ide'].includes(normalized)) {
-        return {
-            level: 'L1/L2 接入',
-            detail: '当前以存在识别和轻量状态为主，不把弱接入展示为可接管。'
-        };
+        return make('L1-L2', '当前以存在识别和轻量状态为主，不把弱接入展示为可接管。');
     }
     if (normalized === 'user') {
-        return {
-            level: '本地输入',
-            detail: '用户在 CodePanion 中发出的回复或记录。'
-        };
+        return { rawLevel: '', level: '本地输入', detail: '用户在 CodePanion 中发出的回复或记录。' };
     }
-    return {
-        level: 'L1 来源识别',
-        detail: '已进入统一任务模型，深度能力以来源适配器为准。'
-    };
+    return make('L1', '已进入统一任务模型，深度能力以来源适配器为准。');
 }
 
 function privacyBoundaryText(source) {
@@ -733,12 +754,25 @@ function renderMessage(message) {
         card.appendChild(renderWorkflowSummary(message.workflowSummary));
     }
 
+    // P1.2：失败态先把"具体报了什么"放在主视图，让用户不必展开 details 就能判断来源；
+    // 大段日志依旧通过下面的 workflow-details 折叠。
+    if (message.type === 'error') {
+        const errorSummary = renderErrorSummary(message);
+        if (errorSummary) card.appendChild(errorSummary);
+    }
+
     if (Array.isArray(message.rawItems) && message.rawItems.length > 0) {
         card.appendChild(renderWorkflowDetails(message.rawItems));
     }
 
     if (message.type === 'prompt') {
         card.appendChild(renderOptions(message.sessionId, message.eventId, message.options || [], message.id));
+    }
+
+    // P1.2：失败专属动作 — 复制本次失败诊断（来源/标题/能力/报错原文/相关命令），
+    // 用户可直接粘给 Codex / Claude 继续排查。
+    if (message.type === 'error') {
+        card.appendChild(renderDiagnosticsAction(message));
     }
 
     item.appendChild(avatar);
@@ -995,16 +1029,52 @@ function renderContextDrawer() {
     setText('drawer-source-name', source ? sourceLabel({ source }) : '未选择任务');
     setText('drawer-source-detail', conversation ? `${statusLabel(conversation.status)} · ${conversation.title || '未命名任务'}` : '选择一个任务后显示来源状态。');
     setText('drawer-capability', capability.level);
+    applyCapabilityClass('drawer-capability', capability.rawLevel);
     setText('drawer-privacy', privacyBoundaryText(latest?.privacyBoundary || metadataFromSourceId(latest?.sourceId, 'privacyBoundary') || source));
     setText('drawer-action-note', capability.detail);
 
     const canReply = Boolean(prompt);
-    const contextText = messages.map(message => `[${sourceLabel(message)}] ${compactText(message.content)}`).join('\n');
+    // P1.2：复制上下文从"一行一条 compactText"升级为结构化诊断文本，
+    // 任务标题/来源/能力/隐私边界/最近完整消息都在里面，能直接喂给 Codex / Claude 继续排查。
+    const stageContext = buildStageContext(conversation, messages);
     wireActionButton('stage-focus-reply', canReply, () => focusActiveReply(), { hideWhenDisabled: true });
     wireActionButton('drawer-focus-reply', canReply, () => focusActiveReply(), { hideWhenDisabled: true });
-    wireActionButton('stage-copy-context', messages.length > 0, () => copyText(contextText));
+    wireActionButton('stage-copy-context', messages.length > 0, () => copyText(stageContext));
     wireActionButton('drawer-copy-workspace', Boolean(workspace), () => copyText(workspace));
     wireOmnibar(prompt);
+}
+
+// P1.2：复制上下文走结构化诊断格式，保留来源、能力、隐私边界与最近若干条完整消息，
+// 方便用户把上下文一次性丢给 Codex / Claude 继续排查。
+function buildStageContext(conversation, messages) {
+    const safeMessages = Array.isArray(messages) ? messages : [];
+    const latest = safeMessages[safeMessages.length - 1] || {};
+    const source = conversation?.source || latest.source || '';
+    const capability = capabilityForMessage(latest.source ? latest : { source });
+    const lines = [];
+    lines.push('# CodePanion 任务上下文');
+    lines.push(`任务：${conversation?.title || latest.conversationTitle || '当前任务'}`);
+    if (source) lines.push(`来源：${sourceLabel({ source })}`);
+    if (conversation?.status) lines.push(`状态：${statusLabel(conversation.status)}`);
+    lines.push(`能力：${capability.level}`);
+    const privacy = privacyBoundaryText(latest.privacyBoundary || metadataFromSourceId(latest.sourceId, 'privacyBoundary') || source);
+    if (privacy) lines.push(`隐私边界：${privacy}`);
+
+    const recent = safeMessages.slice(-12);
+    if (recent.length > 0) {
+        lines.push('');
+        lines.push('## 最近消息');
+        recent.forEach(message => {
+            const time = new Date(message.timestamp || Date.now()).toLocaleTimeString('zh-CN', { hour12: false });
+            lines.push(`### [${time}] ${sourceLabel(message)} · ${typeLabel(message.type || 'activity')}`);
+            const content = String(message.content || '').trim();
+            lines.push(content ? truncateForDiagnostics(content) : '（无文本内容）');
+            lines.push('');
+        });
+    }
+
+    lines.push('（由 CodePanion 任务上下文导出）');
+    return lines.join('\n');
 }
 
 function wireActionButton(id, enabled, handler, options = {}) {
@@ -1736,6 +1806,119 @@ function renderWorkflowSummary(summary) {
     return wrapper;
 }
 
+function renderErrorSummary(message) {
+    const rawItems = Array.isArray(message.rawItems) ? message.rawItems : [];
+    const errored = rawItems.filter(item => item && item.status === 'error');
+    if (errored.length === 0 && !String(message.content || '').trim()) return null;
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'error-summary';
+
+    const heading = document.createElement('div');
+    heading.className = 'error-summary-title';
+    heading.textContent = errored.length > 0
+        ? `失败 ${errored.length} 项`
+        : '本次任务以失败结束';
+    wrapper.appendChild(heading);
+
+    errored.slice(0, 3).forEach(item => {
+        const row = document.createElement('div');
+        row.className = 'error-summary-row';
+        const label = document.createElement('strong');
+        const titleText = item.title ? ` · ${item.title}` : '';
+        label.textContent = `${workflowKindLabel(item.kind)}${titleText}`;
+        row.appendChild(label);
+        const content = String(item.content || '').trim();
+        if (content) {
+            const excerpt = document.createElement('span');
+            excerpt.textContent = compactText(content);
+            row.appendChild(excerpt);
+        }
+        wrapper.appendChild(row);
+    });
+
+    if (errored.length > 3) {
+        const more = document.createElement('div');
+        more.className = 'error-summary-more';
+        more.textContent = `另有 ${errored.length - 3} 项错误，详情见下方原始事件。`;
+        wrapper.appendChild(more);
+    }
+
+    return wrapper;
+}
+
+function renderDiagnosticsAction(message) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'diagnostics-action';
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'action-button';
+    button.textContent = '复制本次失败诊断';
+    button.addEventListener('click', () => {
+        copyText(buildFailureDiagnostics(message));
+    });
+    wrapper.appendChild(button);
+    return wrapper;
+}
+
+// P1.2：失败诊断必须能让用户独立判断"是命令、工具调用、连接还是适配器的问题"，
+// 复制内容覆盖任务标题、来源、能力层级、错误摘要、报错原始事件、最近相关命令。
+function buildFailureDiagnostics(message) {
+    const conversation = state.conversations.get(message.conversationId);
+    const capability = capabilityForMessage(message);
+    const lines = [];
+    lines.push('# CodePanion 失败诊断');
+    lines.push(`时间：${new Date(message.timestamp).toISOString()}`);
+    lines.push(`任务：${conversation?.title || message.conversationTitle || '未命名任务'}`);
+    lines.push(`来源：${sourceLabel(message)}（${capability.level}）`);
+    if (message.workspace) lines.push(`工作区：${message.workspace}`);
+    lines.push('');
+    lines.push('## 失败摘要');
+    lines.push(String(message.content || '').trim() || '（daemon 未给出摘要）');
+
+    const rawItems = Array.isArray(message.rawItems) ? message.rawItems : [];
+    const errored = rawItems.filter(item => item && item.status === 'error');
+    if (errored.length > 0) {
+        lines.push('');
+        lines.push('## 报错原始事件');
+        errored.forEach(item => {
+            lines.push(`- ${workflowKindLabel(item.kind)}：${item.title || '(无标题)'}`);
+            const content = String(item.content || '').trim();
+            if (content) {
+                lines.push('```');
+                lines.push(truncateForDiagnostics(content));
+                lines.push('```');
+            }
+        });
+    }
+
+    const recent = rawItems.filter(item => item && (item.kind === 'command' || item.kind === 'tool_call')).slice(-4);
+    if (recent.length > 0) {
+        lines.push('');
+        lines.push('## 最近命令 / 工具调用');
+        recent.forEach(item => {
+            lines.push(`- [${workflowKindLabel(item.kind)}] ${item.title || ''}`.trim());
+            const content = String(item.content || '').trim();
+            if (content) {
+                lines.push('```');
+                lines.push(truncateForDiagnostics(content));
+                lines.push('```');
+            }
+        });
+    }
+
+    lines.push('');
+    lines.push('（由 CodePanion P1.2 失败诊断导出，可粘贴给 Codex / Claude 继续排查）');
+    return lines.join('\n');
+}
+
+function truncateForDiagnostics(content) {
+    const text = String(content || '');
+    const max = 2000;
+    if (text.length <= max) return text;
+    return `${text.slice(0, max)}\n... 已截断，剩余 ${text.length - max} 字符`;
+}
+
 function renderWorkflowDetails(items) {
     const details = document.createElement('details');
     details.className = 'workflow-details';
@@ -1849,6 +2032,17 @@ if (document.readyState === 'loading') {
 
 const api = { addMessage, clearMessages, updateConnectionStatus };
 if (window.CODEPANION_TEST === true) {
-    api.__test = { handleMessage, renderAll, state, deriveConversationDisplay, conversationPriority };
+    api.__test = {
+        handleMessage,
+        renderAll,
+        state,
+        deriveConversationDisplay,
+        conversationPriority,
+        capabilityForMessage,
+        capabilityLevelLabel,
+        capabilityChipClass,
+        buildFailureDiagnostics,
+        buildStageContext
+    };
 }
 window.CodePanion = api;

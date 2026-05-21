@@ -691,3 +691,128 @@ test('passive source workflow with a real prompt enters the main queue as 等待
   assert.equal(items.length, 1);
   assert.equal(items[0].dataset.displayStatus, 'waiting-me');
 });
+
+test('failure tasks expose an inline error summary and a diagnostics copy action', async () => {
+  // P1.2：失败消息必须先在主视图里"具体报了什么"，不必展开 details；
+  // 同时给出可一键复制的结构化诊断文本，给 Codex/Claude 接力排查用。
+  const win = loadChat();
+  const { handleMessage, buildFailureDiagnostics } = win.CodePanion.__test;
+  const now = Date.now();
+
+  handleMessage({
+    type: 'workflow-snapshot',
+    snapshot: {
+      threads: [{ id: 'fail-thread', source: 'cli', title: 'Failing task', status: 'error', updatedAt: now, itemCount: 3 }],
+      items: [
+        { id: 'goal', threadId: 'fail-thread', source: 'cli', kind: 'message', title: 'user', content: 'run tests', timestamp: now - 3000 },
+        { id: 'cmd', threadId: 'fail-thread', source: 'cli', kind: 'command', title: 'npm test', content: 'Error: jest exited with code 1', status: 'error', timestamp: now - 2000 },
+        { id: 'assistant', threadId: 'fail-thread', source: 'cli', kind: 'message', title: 'assistant', content: '测试失败：jest 退出码 1。', timestamp: now - 1000 },
+      ],
+    },
+  });
+
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+
+  const summary = win.document.querySelector('.error-summary');
+  assert.ok(summary, '失败消息必须在主视图渲染 .error-summary');
+  assert.match(summary.textContent, /npm test|jest/);
+
+  const buttons = Array.from(win.document.querySelectorAll('.diagnostics-action .action-button'));
+  assert.ok(buttons.some(btn => /复制.*失败.*诊断/.test(btn.textContent)), '应渲染诊断复制按钮');
+
+  // buildFailureDiagnostics 是核心复制内容生成器，单独验证其结构。
+  const diagnostics = buildFailureDiagnostics({
+    id: 'workflow-group:fail-thread',
+    type: 'error',
+    source: 'cli',
+    conversationId: 'workflow:fail-thread',
+    timestamp: now,
+    content: '本次任务以失败结束',
+    rawItems: [
+      { kind: 'command', title: 'npm test', content: 'Error: jest exited with code 1', status: 'error' },
+    ],
+  });
+  assert.match(diagnostics, /# CodePanion 失败诊断/);
+  assert.match(diagnostics, /来源：/);
+  assert.match(diagnostics, /失败摘要/);
+  assert.match(diagnostics, /报错原始事件|最近命令/);
+  assert.match(diagnostics, /jest/);
+});
+
+test('capability chip exposes Chinese level label and a per-level CSS class', async () => {
+  // P1.3：CLI/PTTY 是 L3 可回写会话，弱接入来源（cc-switch 等）必须有不同的视觉色；
+  // 文案要直接告诉用户"是只读还是可写、是 L1 进程识别还是 L4 编排"。
+  const win = loadChat();
+  const { handleMessage, capabilityLevelLabel, capabilityChipClass } = win.CodePanion.__test;
+  const now = Date.now();
+
+  assert.match(capabilityLevelLabel('L1'), /L1.*进程识别/);
+  assert.match(capabilityLevelLabel('L1-L2'), /L1.*L2.*弱接入/);
+  assert.match(capabilityLevelLabel('L2'), /L2.*只读/);
+  assert.match(capabilityLevelLabel('L2-L3'), /L2.*L3.*事件可回/);
+  assert.match(capabilityLevelLabel('L3'), /L3.*可回写/);
+  assert.match(capabilityLevelLabel('L4'), /L4.*工作流编排/);
+
+  assert.equal(capabilityChipClass('L1'), 'capability-l1');
+  assert.equal(capabilityChipClass('L1-L2'), 'capability-l1l2');
+  assert.equal(capabilityChipClass('L2'), 'capability-l2');
+  assert.equal(capabilityChipClass('L2-L3'), 'capability-l2l3');
+  assert.equal(capabilityChipClass('L3'), 'capability-l3');
+  assert.equal(capabilityChipClass('L4'), 'capability-l4');
+
+  win.CodePanion.addMessage({
+    id: 'cli-activity',
+    type: 'activity',
+    source: 'cli',
+    sessionId: 'cli-session',
+    timestamp: now,
+    content: 'running',
+  });
+
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+
+  const conversationChip = win.document.querySelector('.conversation-item .capability-chip');
+  assert.ok(conversationChip, '任务列表应展示能力 chip');
+  assert.ok(
+    Array.from(conversationChip.classList).some(cls => cls.startsWith('capability-l')),
+    'CLI 会话的 chip 必须带 capability-lX class，确保色块和能力层级一致'
+  );
+});
+
+test('weakly-coupled sources surface a lower capability level than CLI sessions', async () => {
+  // P1.3：cc-switch 这类只读弱接入来源不能和 CLI / VS Code 一样标 L3，
+  // 用户要能从能力色一眼区分"只读 vs 可写"。
+  // cc-switch 默认 passive 不入队，给它加 prompt 强行抬升让它真实渲染出来对比。
+  const win = loadChat();
+  const { handleMessage } = win.CodePanion.__test;
+  const now = Date.now();
+
+  handleMessage({
+    type: 'workflow-snapshot',
+    snapshot: {
+      threads: [
+        { id: 'session:cli-shell', source: 'cli', title: 'cli task', status: 'running', updatedAt: now, itemCount: 1 },
+        { id: 'switch-thread', source: 'cc-switch', title: 'config switch', status: 'waiting', updatedAt: now, itemCount: 1 },
+      ],
+      items: [
+        { id: 'cli-msg', threadId: 'session:cli-shell', source: 'cli', kind: 'message', title: 'assistant', content: 'cli is running', timestamp: now },
+        { id: 'switch-prompt', threadId: 'switch-thread', source: 'cc-switch', kind: 'prompt', title: '需要确认', content: '切换 provider？', options: ['是', '否'], status: 'waiting', timestamp: now },
+      ],
+    },
+  });
+
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+
+  const chips = Array.from(win.document.querySelectorAll('.conversation-item'))
+    .map(item => ({
+      source: item.dataset.source,
+      capability: item.querySelector('.capability-chip')?.dataset.capabilityLevel,
+    }));
+
+  const cli = chips.find(c => c.source === 'cli');
+  const switcher = chips.find(c => c.source === 'cc-switch');
+  assert.ok(cli, 'CLI 任务应渲染');
+  assert.ok(switcher, 'cc-switch 任务（带 prompt）应渲染');
+  assert.equal(cli.capability, 'L3', 'CLI 必须是 L3 可回写');
+  assert.notEqual(cli.capability, switcher.capability, 'CLI 与 cc-switch 的能力层级必须不同');
+});
