@@ -865,3 +865,120 @@ test('weakly-coupled sources surface a lower capability level than CLI sessions'
   assert.equal(cli.capability, 'L3', 'CLI 必须是 L3 可回写');
   assert.notEqual(cli.capability, switcher.capability, 'CLI 与 cc-switch 的能力层级必须不同');
 });
+
+test('三个及以上并行任务同屏渲染时优先级排序稳定且不抢焦点', async () => {
+  // P2.2：真机验收要求"至少 3 个并行任务同时存在时，界面仍稳定可读"。
+  // 验证：四档优先级（等待我 / 失败 / 运行中 / 完成）的任务同时存在时，
+  // 排序遵循 conversationPriority；用户选中其中一个后，其他任务收到新事件不会抢焦点。
+  const win = loadChat();
+  const { handleMessage, state } = win.CodePanion.__test;
+  const now = Date.now();
+
+  handleMessage({
+    type: 'workflow-snapshot',
+    snapshot: {
+      threads: [
+        { id: 'run-thread', source: 'cli', title: '后台编译任务', status: 'running', updatedAt: now - 4000, itemCount: 1 },
+        { id: 'wait-thread', source: 'codex-desktop', title: '等待确认任务', status: 'waiting', updatedAt: now - 3000, itemCount: 1 },
+        { id: 'fail-thread', source: 'cli', title: '失败任务', status: 'error', updatedAt: now - 2000, itemCount: 1 },
+        { id: 'done-thread', source: 'codex-desktop', title: '完成任务', status: 'done', updatedAt: now - 1000, itemCount: 1 },
+      ],
+      items: [
+        { id: 'run-msg', threadId: 'run-thread', source: 'cli', kind: 'message', title: 'assistant', content: '正在编译 daemon 子项目', timestamp: now - 4000 },
+        { id: 'wait-prompt', threadId: 'wait-thread', source: 'codex-desktop', kind: 'prompt', title: '需要确认', content: '是否继续？', options: ['是', '否'], status: 'waiting', timestamp: now - 3000 },
+        { id: 'fail-status', threadId: 'fail-thread', source: 'cli', kind: 'status', title: '失败', content: '退出码 1', status: 'error', timestamp: now - 2000 },
+        { id: 'done-msg', threadId: 'done-thread', source: 'codex-desktop', kind: 'message', title: 'assistant', content: '任务执行完成', status: 'done', timestamp: now - 1000 },
+      ],
+    },
+  });
+
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+
+  // 至少 3 个并行任务全部进入主任务队列。
+  const items = Array.from(win.document.querySelectorAll('.conversation-item'));
+  assert.ok(items.length >= 3, `至少应渲染 3 个并行任务，实际：${items.length}`);
+
+  // 优先级排序：等待我必须置顶（P1.1 已固化），按 displayStatus 验证。
+  const order = items.map(node => node.dataset.displayStatus || '');
+  assert.equal(order[0], 'waiting-me', `等待我任务必须置顶，实际顺序：${order.join(', ')}`);
+  const errorIdx = order.indexOf('error');
+  const runningIdx = order.indexOf('running');
+  assert.ok(errorIdx > 0 && runningIdx > errorIdx, `失败应在 running 之前，运行中应在等待我之后，实际：${order.join(', ')}`);
+
+  // 队列计数：1 等待 / 1 运行 / 1 失败。
+  assert.equal(win.document.getElementById('queue-waiting').textContent, '1');
+  assert.equal(win.document.getElementById('queue-error').textContent, '1');
+  assert.equal(win.document.getElementById('queue-running').textContent, '1');
+
+  // 选中"运行中任务"，再给其他任务发新事件，焦点不能漂移。
+  state.activeConversation = 'workflow:run-thread';
+  win.CodePanion.__test.renderAll();
+  assert.equal(state.activeConversation, 'workflow:run-thread');
+
+  handleMessage({
+    type: 'workflow-event',
+    data: {
+      action: 'item-append',
+      item: { id: 'fail-extra', threadId: 'fail-thread', source: 'cli', kind: 'status', title: '失败附加', content: '更多失败上下文', status: 'error', timestamp: now },
+    },
+  });
+  handleMessage({
+    type: 'workflow-event',
+    data: {
+      action: 'item-append',
+      item: { id: 'wait-extra', threadId: 'wait-thread', source: 'codex-desktop', kind: 'prompt', title: '再次询问', content: '继续？', options: ['是', '否'], status: 'waiting', timestamp: now },
+    },
+  });
+
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+
+  assert.equal(state.activeConversation, 'workflow:run-thread', '其他任务的新事件不能抢走用户当前选中的任务');
+});
+
+test('中文文本在主视图与复制上下文中完整保留不乱码', async () => {
+  // P2.2：真机验收要求"中文文本在 daemon、WebView、日志和复制内容中不乱码"。
+  // 验证：含中文 + emoji + 全角符号的内容能完整渲染到 DOM 主聊天区，
+  // 复制上下文 buildStageContext 输出同样保留原始字符（不被 \uXXXX / HTML 实体转义）。
+  const win = loadChat();
+  const { handleMessage, buildStageContext, state } = win.CodePanion.__test;
+  const now = Date.now();
+
+  const assistantMessage = '已读取文件：src/服务/账户.ts，准备执行第①步重构🚀';
+
+  handleMessage({
+    type: 'workflow-snapshot',
+    snapshot: {
+      threads: [{ id: 'zh-thread', source: 'cli', title: '示例工程「账户重构」', status: 'running', updatedAt: now, itemCount: 1 }],
+      items: [
+        { id: 'zh-assistant', threadId: 'zh-thread', source: 'cli', kind: 'message', title: 'assistant', content: assistantMessage, timestamp: now },
+      ],
+    },
+  });
+
+  state.activeConversation = 'workflow:zh-thread';
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+  win.CodePanion.__test.renderAll();
+
+  // 主聊天区必须保留中文消息内容（不能被 escape 成 &#x... 或 \uXXXX）。
+  const chat = win.document.getElementById('chat-container').textContent;
+  assert.ok(chat.includes('src/服务/账户.ts'), `主视图必须保留中文路径，实际：${chat}`);
+  assert.ok(chat.includes('第①步'), '主视图必须保留全角圆圈数字');
+  assert.ok(chat.includes('🚀'), '主视图必须保留 emoji');
+  assert.doesNotMatch(chat, /\\u[0-9a-fA-F]{4}/, '主视图不能出现 \\uXXXX 形式的转义');
+  assert.doesNotMatch(chat, /&#x?[0-9a-fA-F]+;/, '主视图不能出现 HTML 实体转义');
+
+  // 复制上下文必须是原始 UTF-8 字符。
+  const conversation = state.conversations.get('workflow:zh-thread');
+  const messagesAsMessages = (state.workflowItemsByThread.get('zh-thread') || []).map(item => ({
+    type: item.kind === 'prompt' ? 'prompt' : 'activity',
+    source: item.source,
+    timestamp: item.timestamp,
+    content: item.content,
+  }));
+  const context = buildStageContext(conversation, messagesAsMessages);
+  assert.match(context, /src\/服务\/账户\.ts/, '复制上下文必须包含中文路径');
+  assert.match(context, /第①步/, '复制上下文必须保留全角圆圈数字');
+  assert.match(context, /🚀/, '复制上下文必须保留 emoji');
+  assert.doesNotMatch(context, /\\u[0-9a-fA-F]{4}/, '复制上下文不能出现 \\uXXXX 形式的转义');
+  assert.doesNotMatch(context, /&#x?[0-9a-fA-F]+;/, '复制上下文不能出现 HTML 实体转义');
+});
