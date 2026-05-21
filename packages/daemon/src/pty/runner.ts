@@ -137,6 +137,7 @@ export async function runWithPty(input: RunArgs): Promise<number> {
     const event = parseInjectInputEvent(raw);
     if (event && event.sessionId === session.id && event.optionIndex < currentPromptOptions.length) {
       term.write(replyTextForPromptOption(currentPromptOptions[event.optionIndex]));
+      currentPromptOptions = [];
     }
   });
 
@@ -178,6 +179,9 @@ export async function runWithPty(input: RunArgs): Promise<number> {
   term.onData((data) => {
     process.stdout.write(data);
     detector.feed(data);
+    // 不在每次输出时清 currentPromptOptions：spinner / 心跳输出仍处于等待用户回复阶段，
+    // 清掉会让随后到来的 inject-input 命中空数组导致回复丢失。
+    // 选项更新由下一次 onPrompt 覆盖；ws inject-input 处理后由该分支清空。
     outputQueue.push(data);
     if (outputQueue.join('').length > 2048) flush();
     else scheduleFlush();

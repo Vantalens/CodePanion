@@ -132,6 +132,7 @@ export const WorkflowItemSchema = z.object({
   role: z.string().optional(),
   title: z.string().optional(),
   content: z.string().default(''),
+  options: z.array(z.string().max(500)).max(32).optional(),
   language: z.string().optional(),
   filePath: z.string().optional(),
   status: WorkflowStatusSchema.optional(),
@@ -200,6 +201,7 @@ export const SessionInfoSchema = z.object({
   status: z.enum(['running', 'waiting', 'exited']),
   exitCode: z.number().int().nullable().optional(),
   lastPrompt: z.string().optional(),
+  lastPromptOptions: z.array(z.string().max(500)).max(32).optional(),
 });
 export type SessionInfo = z.infer<typeof SessionInfoSchema>;
 
@@ -217,4 +219,6 @@ export type WsServerEvent =
   | { type: 'monitor-event'; event: MonitorEvent & { id: string; timestamp: number } }
   | { type: 'workflow-snapshot'; snapshot: WorkflowSnapshot }
   | { type: 'workflow-event'; event: { action: 'thread-upsert' | 'item-append' | 'status'; thread?: WorkflowThread; item?: WorkflowItem } }
+  | { type: 'sessions-snapshot'; sessions: SessionInfo[] }
+  | { type: 'sources-snapshot'; sources: MonitorSource[] }
   | { type: 'hello'; pid: number; version: string };

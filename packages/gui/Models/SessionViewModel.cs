@@ -98,6 +98,14 @@ namespace CodePanion.Gui.Models
             _exitCode = info.ExitCode;
         }
 
+        public void UpdateFrom(SessionInfo info)
+        {
+            // 动态字段走 setter 触发 PropertyChanged；不可变标识字段（Id/Command/StartedAt）不变。
+            Status = info.Status;
+            LastPrompt = info.LastPrompt;
+            ExitCode = info.ExitCode;
+        }
+
         public event PropertyChangedEventHandler? PropertyChanged;
 
         protected virtual void OnPropertyChanged(string propertyName)

@@ -244,7 +244,12 @@ function renderConversationList() {
     }
     conversations = conversations.slice(0, activeView === 'active' ? 24 : 60);
 
-    if (!state.activeConversation || !conversations.some(item => item.id === state.activeConversation)) {
+    // P0.1: 只有当前 active 在全量 conversations 中已彻底消失时才回退；
+    // 切换 view 导致 active 不在 filtered 结果中时保持不变，避免抢焦点。
+    if (state.activeConversation && !allConversations.some(item => item.id === state.activeConversation)) {
+        state.activeConversation = '';
+    }
+    if (!state.activeConversation) {
         state.activeConversation = conversations[0]?.id || '';
     }
 
@@ -582,14 +587,18 @@ function privacyBoundaryText(source) {
 }
 
 function latestActionablePrompt(messages) {
-    return messages.slice().reverse().find(message => message.type === 'prompt' && (message.sessionId || message.eventId));
+    return messages.slice().reverse().find(message => {
+        if (message.type !== 'prompt') return false;
+        if (message.sessionId) return Array.isArray(message.options) && message.options.length > 0;
+        return Boolean(message.eventId);
+    });
 }
 
 function focusActiveReply() {
-    const input = document.querySelector('.message-prompt .custom-input:not(:disabled)');
-    if (!input) return false;
-    input.focus();
-    input.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    const target = document.querySelector('.message-prompt .custom-input:not(:disabled), .message-prompt .option-button:not(:disabled)');
+    if (!target) return false;
+    target.focus();
+    target.scrollIntoView({ block: 'center', behavior: 'smooth' });
     return true;
 }
 
@@ -736,6 +745,13 @@ function renderOptions(sessionId, eventId, options, messageId) {
         });
         container.appendChild(input);
         setTimeout(() => input.focus(), 80);
+    } else if (options.length === 0) {
+        // session prompt 无解析到的选项（自由文本输入：密码、文件名等）：
+        // 出于安全与正确性，daemon 不接受自由文本注入，引导用户回到 CLI 终端。
+        const hint = document.createElement('div');
+        hint.className = 'prompt-hint';
+        hint.textContent = '该提示需要自由文本回复，请在 CLI 终端中直接输入。';
+        container.appendChild(hint);
     }
 
     return container;
@@ -744,6 +760,8 @@ function renderOptions(sessionId, eventId, options, messageId) {
 function selectOption(sessionId, eventId, value, promptId) {
     if (sessionId) {
         sendToHost({ type: 'reply', sessionId, value: String(value) });
+        disableOptionsForPrompt(promptId);
+        return;
     } else if (eventId) {
         sendToHost({ type: 'event-reply', eventId, value: String(value) });
     }
@@ -761,7 +779,8 @@ function selectOption(sessionId, eventId, value, promptId) {
 
 function disableOptionsForPrompt(promptId) {
     if (!promptId) return;
-    document.querySelectorAll(`[data-prompt-id="${CSS.escape(promptId)}"] .option-button, [data-prompt-id="${CSS.escape(promptId)}"] .custom-input`)
+    const escapedPromptId = CSS.escape(promptId);
+    document.querySelectorAll(`[data-prompt-id="${escapedPromptId}"] .option-button, [data-prompt-id="${escapedPromptId}"] .custom-input`)
         .forEach(el => { el.disabled = true; });
 }
 
@@ -898,22 +917,23 @@ function wireOmnibar(prompt) {
     if (!input || !submit) return;
 
     const enabled = Boolean(prompt);
+    const allowTextReply = Boolean(prompt && !prompt.sessionId);
     if (omnibar) {
-        omnibar.hidden = !enabled;
-        document.getElementById('app-shell')?.classList.toggle('omnibar-hidden', !enabled);
+        omnibar.hidden = !allowTextReply;
+        document.getElementById('app-shell')?.classList.toggle('omnibar-hidden', !allowTextReply);
     }
-    input.disabled = !enabled;
-    submit.disabled = !enabled;
-    input.placeholder = enabled ? '输入回复，按 Enter 发送到当前等待任务' : '选择可回复的等待任务后启用';
+    input.disabled = !allowTextReply;
+    submit.disabled = !allowTextReply;
+    input.placeholder = allowTextReply ? '输入回复，按 Enter 发送到当前等待任务' : '当前会话只能点选提示选项';
 
-    submit.onclick = enabled ? () => {
+    submit.onclick = allowTextReply ? () => {
         const value = input.value.trim();
         if (!value) return;
         selectOption(prompt.sessionId, prompt.eventId, value, prompt.id);
         input.value = '';
     } : null;
 
-    input.onkeydown = enabled ? (event) => {
+    input.onkeydown = allowTextReply ? (event) => {
         if (event.key === 'Enter' && input.value.trim()) {
             selectOption(prompt.sessionId, prompt.eventId, input.value.trim(), prompt.id);
             input.value = '';
@@ -952,6 +972,23 @@ function handleMessage(message) {
                 renderContextDrawer();
             }
             break;
+        case 'sources-snapshot': {
+            // observer 重连重建：snapshot 是权威列表，清掉已不存在的旧来源。
+            const sources = Array.isArray(message.sources) ? message.sources : [];
+            const nextIds = new Set();
+            sources.forEach(source => {
+                if (!source) return;
+                const sourceId = source.id || source.Id;
+                if (!sourceId) return;
+                nextIds.add(sourceId);
+                state.sources.set(sourceId, source);
+            });
+            for (const id of Array.from(state.sources.keys())) {
+                if (!nextIds.has(id)) state.sources.delete(id);
+            }
+            renderContextDrawer();
+            break;
+        }
         case 'source-disconnected': {
             const sourceId = message.sourceId || message.SourceId || '';
             const source = state.sources.get(sourceId);
@@ -1153,10 +1190,12 @@ function workflowItemToMessage(item, id) {
         type: messageType,
         source: item.source || 'workflow',
         threadId,
+        sessionId: threadId.startsWith('session:') ? threadId.slice('session:'.length) : '',
         windowTitle: '',
         workspace: item.filePath || '',
         timestamp: item.timestamp || Date.now(),
         content: workflowContent(kind, title, content, item.language),
+        options: item.options,
         level: status,
         role: item.role || ''
     };
@@ -1171,6 +1210,7 @@ function normalizeWorkflowItem(item, id) {
         timestamp: Number(item.timestamp || item.Timestamp || Date.now()),
         title: item.title || item.Title || '',
         content: String(item.content || item.Content || ''),
+        options: Array.isArray(item.options) ? item.options : Array.isArray(item.Options) ? item.Options : undefined,
         language: item.language || item.Language || '',
         status: item.status || item.Status || '',
         role: item.role || item.Role || '',
@@ -1397,6 +1437,7 @@ function buildIntegratedWorkflowMessages(threadId) {
                 workspace: item.filePath || meta.workspace || '',
                 timestamp: item.timestamp,
                 content,
+                options: item.options,
                 level: item.status,
                 role: normalizeWorkflowRole(item)
             }));

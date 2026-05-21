@@ -30,6 +30,8 @@ namespace CodePanion.Gui.Services
         public event EventHandler<MonitorEventArgs>? MonitorEventReceived;
         public event EventHandler<JToken>? WorkflowSnapshotReceived;
         public event EventHandler<JToken>? WorkflowEventReceived;
+        public event EventHandler<SessionInfo[]>? SessionsSnapshotReceived;
+        public event EventHandler<MonitorSourceInfo[]>? SourcesSnapshotReceived;
         public event EventHandler<string>? LogMessage;
 
         public DaemonClient()
@@ -283,6 +285,16 @@ namespace CodePanion.Gui.Services
                         {
                             WorkflowSnapshotReceived?.Invoke(this, json["snapshot"]!);
                         }
+                        break;
+
+                    case "sessions-snapshot":
+                        var sessions = json["sessions"]?.ToObject<SessionInfo[]>() ?? Array.Empty<SessionInfo>();
+                        SessionsSnapshotReceived?.Invoke(this, sessions);
+                        break;
+
+                    case "sources-snapshot":
+                        var sources = json["sources"]?.ToObject<MonitorSourceInfo[]>() ?? Array.Empty<MonitorSourceInfo>();
+                        SourcesSnapshotReceived?.Invoke(this, sources);
                         break;
 
                     case "workflow-event":

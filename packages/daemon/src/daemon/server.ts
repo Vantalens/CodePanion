@@ -98,6 +98,7 @@ export function createServer(
         kind: 'prompt',
         title: '等待输入',
         content: event.fullOutput || event.lastLines,
+        options: event.options,
         status: 'waiting',
         timestamp: now,
       });
@@ -521,6 +522,10 @@ function handleWs(
     });
 
     ws.send(JSON.stringify({ type: 'hello', pid: process.pid, version: VERSION }));
+    // Observer 重连后必须能从 snapshot 恢复完整视图（sessions / sources / workflows），
+    // 否则左侧任务列表会因只接收增量事件而保持为空。
+    ws.send(JSON.stringify({ type: 'sessions-snapshot', sessions: sessions.list() }));
+    ws.send(JSON.stringify({ type: 'sources-snapshot', sources: sources.list() }));
     ws.send(JSON.stringify({ type: 'workflow-snapshot', snapshot: workflows.snapshot() }));
   }
 

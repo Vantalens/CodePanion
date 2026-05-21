@@ -416,6 +416,71 @@ test('/sessions/:id/reply rejects text that is not a current prompt option', asy
   });
 });
 
+test('/sessions/:id/reply cannot reuse a stale prompt option after a reply or new output', async () => {
+  await withServer(async ({ port, token }) => {
+    const registered = await request(port, token, 'POST', '/sessions', {
+      command: 'codex',
+      args: ['run'],
+      cliPid: 12345,
+    });
+    const sessionId = registered.body.id;
+    const cli = await openWs(`ws://127.0.0.1:${port}/ws?role=cli&sessionId=${sessionId}`, {
+      protocols: tokenSubprotocol(token),
+    });
+    try {
+      await request(port, token, 'POST', `/sessions/${sessionId}/prompt`, { lastLines: 'Continue?', options: ['yes', 'no'] });
+      const injectPromise = waitForMessage(cli, (message) => message.type === 'inject-input' && message.sessionId === sessionId);
+      assert.equal((await request(port, token, 'POST', `/sessions/${sessionId}/reply`, { text: 'yes' })).status, 200);
+      await injectPromise;
+      assert.equal((await request(port, token, 'POST', `/sessions/${sessionId}/reply`, { text: 'yes' })).status, 400);
+
+      await request(port, token, 'POST', `/sessions/${sessionId}/prompt`, { lastLines: 'Continue again?', options: ['go', 'stop'] });
+      await request(port, token, 'POST', `/sessions/${sessionId}/output`, { chunk: 'continued\n' });
+      assert.equal((await request(port, token, 'POST', `/sessions/${sessionId}/reply`, { text: 'go' })).status, 400);
+    } finally {
+      await closeWs(cli);
+    }
+  });
+});
+
+test('observer ws handshake delivers sessions/sources/workflow snapshots so reconnected GUI restores lists', async () => {
+  // 回归 P0-E：observer 重连后，左侧任务/来源列表必须能从 snapshot 恢复，
+  // 否则只有增量事件抵达的客户端会显示空白。
+  await withServer(async ({ port, token }) => {
+    const session = await request(port, token, 'POST', '/sessions', {
+      command: 'codex',
+      args: ['run'],
+      cliPid: 31001,
+    });
+    assert.equal(session.status, 200);
+    const sessionId = session.body.id;
+
+    const source = await request(port, token, 'POST', '/sources/register', {
+      kind: 'cli',
+      name: 'observer-snapshot-test',
+    });
+    assert.equal(source.status, 200);
+    const sourceId = source.body.id;
+
+    const { ws, wait } = await openWsBuffered(`ws://127.0.0.1:${port}/ws?role=observer`, {
+      protocols: tokenSubprotocol(token),
+    });
+    try {
+      const sessionsSnap = await wait((m) => m.type === 'sessions-snapshot');
+      const sourcesSnap = await wait((m) => m.type === 'sources-snapshot');
+      const workflowSnap = await wait((m) => m.type === 'workflow-snapshot');
+
+      assert.ok(Array.isArray(sessionsSnap.sessions));
+      assert.ok(sessionsSnap.sessions.some((s) => s.id === sessionId));
+      assert.ok(Array.isArray(sourcesSnap.sources));
+      assert.ok(sourcesSnap.sources.some((s) => s.id === sourceId));
+      assert.ok(workflowSnap.snapshot);
+    } finally {
+      await closeWs(ws);
+    }
+  });
+});
+
 test('/sessions/:id/exit rejects invalid payloads', async () => {
   await withServer(async ({ port, token }) => {
     const registered = await request(port, token, 'POST', '/sessions', { command: 'codex', cliPid: 22003 });

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows;
@@ -53,6 +54,8 @@ namespace CodePanion.Gui
             _daemonClient.MonitorEventReceived += OnMonitorEventReceived;
             _daemonClient.WorkflowSnapshotReceived += OnWorkflowSnapshotReceived;
             _daemonClient.WorkflowEventReceived += OnWorkflowEventReceived;
+            _daemonClient.SessionsSnapshotReceived += OnSessionsSnapshotReceived;
+            _daemonClient.SourcesSnapshotReceived += OnSourcesSnapshotReceived;
             _daemonClient.LogMessage += OnLogMessage;
 
             Loaded += MainWindow_Loaded;
@@ -242,7 +245,6 @@ namespace CodePanion.Gui
                 StatusBarText.Text = "已连接到 daemon";
                 ReconnectButton.Visibility = Visibility.Collapsed;
                 SendMessageToWeb(new { type = "connection-status", connected = true });
-                SendStatusMessage("done", "daemon 已连接", "连接恢复后会自动刷新 workflow snapshot。");
                 AddLog("已连接到 daemon");
             });
         }
@@ -251,17 +253,12 @@ namespace CodePanion.Gui
         {
             Dispatcher.Invoke(() =>
             {
-                var shouldAnnounce = _isConnected || _reconnectAttempts == 0;
                 _isConnected = false;
                 StatusIndicator.Fill = new SolidColorBrush(Colors.Gray);
                 StatusText.Text = "未连接";
                 StatusBarText.Text = "与 daemon 断开连接，正在后台重试...";
                 ReconnectButton.Visibility = Visibility.Visible;
                 SendMessageToWeb(new { type = "connection-status", connected = false });
-                if (shouldAnnounce)
-                {
-                    SendStatusMessage("error", "daemon 已断开", "CodePanion 会每 2 秒自动尝试重连；你也可以手动点击重新连接。");
-                }
                 StartAutoReconnect();
                 AddLog("与 daemon 断开连接");
             });
@@ -451,6 +448,42 @@ namespace CodePanion.Gui
                     type = "monitor-event",
                     data = e.Event
                 });
+            });
+        }
+
+        private void OnSessionsSnapshotReceived(object? sender, SessionInfo[] snapshot)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                // P0.1：按 id 做差量更新，避免 Clear+Add 抖动选中与重建 ViewModel 引用。
+                var snapshotIds = new HashSet<string>();
+                foreach (var session in snapshot)
+                {
+                    if (string.IsNullOrEmpty(session.Id)) continue;
+                    snapshotIds.Add(session.Id);
+                    var existing = FindSession(session.Id);
+                    if (existing != null) existing.UpdateFrom(session);
+                    else _sessions.Add(new SessionViewModel(session));
+                }
+                for (int i = _sessions.Count - 1; i >= 0; i--)
+                {
+                    if (!snapshotIds.Contains(_sessions[i].Id)) _sessions.RemoveAt(i);
+                }
+                UpdateSessionCount();
+                if (_sessions.Count > 0 && SessionListView.SelectedIndex < 0)
+                {
+                    SessionListView.SelectedIndex = 0;
+                }
+            });
+        }
+
+        private void OnSourcesSnapshotReceived(object? sender, MonitorSourceInfo[] sources)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                // 一次性投递整份 snapshot，让 web 端做 reset+merge，
+                // 否则只发 source-registered 会保留已下线但 disconnect 事件丢失的来源。
+                SendMessageToWeb(new { type = "sources-snapshot", sources });
             });
         }
 

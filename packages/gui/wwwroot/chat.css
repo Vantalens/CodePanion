@@ -830,6 +830,16 @@ button {
     cursor: not-allowed;
 }
 
+.prompt-hint {
+    padding: 8px 12px;
+    border: 1px dashed var(--line-strong);
+    border-radius: var(--radius);
+    color: var(--text-muted, var(--text));
+    background: var(--panel-soft, var(--panel));
+    font-size: 13px;
+    line-height: 1.5;
+}
+
 .option-number {
     width: 23px;
     height: 23px;

@@ -1048,3 +1048,112 @@ npm test                                   # 117 pass / 0 fail / 2 skipped
 npm run validate:extensions                # manifest + activation contract ok
 git diff --check                           # 仅 LF/CRLF autocrlf warning
 ```
+
+---
+
+## 2026-05-21 全仓审计 P0 修复
+
+backlog 详见 [docs/CODE_REVIEW_2026-05-21.md](./CODE_REVIEW_2026-05-21.md)。下方记录 P0 五项的实际落地。
+
+### P0-A 主聊天流不再被重连状态噪音淹没
+
+- 路径：[packages/gui/MainWindow.xaml.cs](../packages/gui/MainWindow.xaml.cs)
+- 取消 `OnDaemonConnected` / `OnDaemonDisconnected` 里向 chat-stream 发 `SendStatusMessage` 的调用，仅保留窗口顶部状态条更新
+- 重连状态属于「环境状态」而非「对话内容」，混入会话流违背产品 P0 看得懂原则
+
+### P0-B 切换视图不再抢焦点重置 activeConversation
+
+- 路径：[packages/gui/wwwroot/chat.js:247](../packages/gui/wwwroot/chat.js#L247)
+- 仅当当前 active 在「全量 conversations」中已彻底消失时才回退到第一条；筛选导致暂不可见不触发重置
+- 旧逻辑会在用户每次切换 view（如 all → waiting）时把光标拽回头部，违反「不抢焦点」原则
+
+### P0-C VS Code 扩展配置命名空间笔误
+
+- 路径：[packages/vscode-extension/extension.js](../packages/vscode-extension/extension.js)
+- `vscode.workspace.getConfiguration('projects')` 改为 `'codepanion'`，与 `package.json` `contributes.configuration.title` 对齐
+- 旧拼写永远拿不到用户设置，CapabilityLevel `port` 永远走默认 7777
+
+### P0-D inject-input 与 spinner 输出的竞态
+
+- 路径：[packages/daemon/src/daemon/sessionManager.ts:80](../packages/daemon/src/daemon/sessionManager.ts#L80)、[packages/daemon/src/pty/runner.ts:179](../packages/daemon/src/pty/runner.ts#L179)
+- 旧实现一旦看到任意 output 立即清掉 `lastPromptOptions` / `currentPromptOptions`，spinner 心跳一闪就让 GUI 回复被判 `invalid-reply`
+- 改为按 chunk 内容区分：
+  - 仅含 `\r` 的覆盖式心跳（spinner）→ 保留 options
+  - 含 `\n` 的真实输出 → 视为 CLI 已越过当前 prompt，清掉 options 防误注入旧选择
+- daemon 与 CLI runner 两侧同步修复，保证 inject-input 收到时 currentPromptOptions 仍有效
+- 回归测试：[packages/daemon/test/sessionManager.test.mjs](../packages/daemon/test/sessionManager.test.mjs) 新增 `keeps prompt options through spinner output`；原 `cannot reuse a stale prompt option after a reply or new output` 继续覆盖 `\n` 真输出场景
+
+### P0-E observer 重连后 sessions/sources 视图恢复
+
+- 路径：[packages/daemon/src/daemon/server.ts:524](../packages/daemon/src/daemon/server.ts#L524)、[packages/daemon/src/shared/protocol.ts:222](../packages/daemon/src/shared/protocol.ts#L222)、[packages/gui/Services/DaemonClient.cs:289](../packages/gui/Services/DaemonClient.cs#L289)
+- 增补 `sessions-snapshot` / `sources-snapshot` 两个 WsServerEvent，observer 握手后立刻和 workflow-snapshot 一起下发
+- C# 端在 `DaemonClient` 暴露 `SessionsSnapshotReceived` / `SourcesSnapshotReceived` 事件，`MainWindow` 重新填充 `_sessions` 集合并把每个来源以 `source-registered` 形态投给 WebView
+- `SessionInfoSchema` 增补 `lastPromptOptions`，便于重连后 GUI 在等待中的会话上仍能展示选项
+- DTO 同步：`npm run gen:dtos` 重新生成 [packages/gui/Models/Generated/ProtocolDtos.g.cs](../packages/gui/Models/Generated/ProtocolDtos.g.cs)，`npm run validate:dtos` 通过
+
+### 附带：P1-E VS Code 扩展 daemonRequest 抛弃非 JSON 响应
+
+- 路径：[packages/vscode-extension/extension.js](../packages/vscode-extension/extension.js)
+- `JSON.parse(text)` 包 try/catch；非 JSON（如 daemon 返回 HTML 错误页）走 reject，附 method/route/cause，避免静默吞掉
+
+**验证**：
+
+```powershell
+npm test                                   # 129 pass / 0 fail / 2 skipped（新增 1 条 spinner 回归）
+npm run validate:dtos                      # C# DTO 与 protocol.ts 一致
+npm run gui:build                          # 0 警告 0 错误
+```
+
+P1 / P2 项继续留在 [docs/CODE_REVIEW_2026-05-21.md](./CODE_REVIEW_2026-05-21.md) backlog。
+
+### 2026-05-21 P0 实施自评跟踪修复
+
+对 2026-05-21 P0 五项修复做了一轮代码审核（详见对话），落地以下跟踪修复，避免 P0-D/E 自身引入新的边界态：
+
+- **M1（=backlog P2-A）** [packages/gui/wwwroot/chat.js:689](../packages/gui/wwwroot/chat.js#L689)：`getMessageRenderKey` 删除新引入的重复 `options` 键，保留 `options: message.options || null` 那行；对象字面量同名键的静默覆盖问题清零
+- **M2** [packages/daemon/src/daemon/sessionManager.ts:96](../packages/daemon/src/daemon/sessionManager.ts#L96)：`appendOutput` 含 `\n` 时除了清 `lastPromptOptions`，再把 `status='waiting'` 拉回 `running`。否则用户在 CLI 终端直接回车（不走 daemon inject）后，GUI 会卡在「等待但已无选项」的死锁中间态；observer 重连还会把这个错状态固化到 `sessions-snapshot` 推给客户端
+- **M3** [packages/gui/MainWindow.xaml.cs:453](../packages/gui/MainWindow.xaml.cs#L453)：`OnSessionsSnapshotReceived` 在重建列表前先记 `previousId`，重建后按 id 恢复选中；找不到再回退 `SelectedIndex = 0`。P0-E 的本意只是恢复列表，不应附带把用户选中切走（与 P0-A/B 的「不抢焦点」原则一致）
+- **S1** [packages/daemon/test/server.integration.test.mjs](../packages/daemon/test/server.integration.test.mjs)：补一条 observer 握手集成测试，断言连接后能依次拿到 `sessions-snapshot` / `sources-snapshot` / `workflow-snapshot` 且包含先前注册的 session/source id
+- **M2 单测** [packages/daemon/test/sessionManager.test.mjs](../packages/daemon/test/sessionManager.test.mjs)：新增 `resets waiting → running when real output crosses the prompt`
+
+**验证**：
+
+```powershell
+npm test                                   # 131 pass / 0 fail / 2 skipped（新增 2 条回归）
+npm run validate:dtos                      # C# DTO 与 protocol.ts 一致
+npm run gui:build                          # 0 警告 0 错误
+```
+
+### 2026-05-21 P0 实施二轮代码审核跟踪修复
+
+二轮代码审核（详见对话）发现 M2/M3 落地后仍有三处可加固，本次一起处理：
+
+- **N1** [packages/daemon/src/daemon/sessionManager.ts:80](../packages/daemon/src/daemon/sessionManager.ts#L80)：`appendOutput` 头部加 `if (rec.status === 'exited') return;`，并删掉冗余的 `if (rec.status !== 'waiting') rec.status = 'running';`。原写法在 onExit 后 60s 删除窗口内若收到延迟 chunk，会把 `exited` 错改回 `running`；冗余条件在新逻辑下完全等价于内嵌的 `waiting → running` 分支
+- **N2** [packages/gui/Services/DaemonClient.cs:34](../packages/gui/Services/DaemonClient.cs#L34)、[MainWindow.xaml.cs:481](../packages/gui/MainWindow.xaml.cs#L481)：`SourcesSnapshotReceived` 事件签名 `JArray` → `MonitorSourceInfo[]`，与 `SessionsSnapshotReceived` 强类型对齐；反序列化也改用 `ToObject<MonitorSourceInfo[]>()`
+- **N3** [packages/gui/wwwroot/chat.js:773](../packages/gui/wwwroot/chat.js#L773)：`disableOptionsForPrompt` 删掉只覆盖 `"`/`\` 的不完整 CSS.escape polyfill；WebView2 与 jsdom 均原生提供 `CSS.escape`
+
+**验证**：
+
+```powershell
+npm test                                   # 131 pass / 0 fail / 2 skipped
+npm run validate:dtos                      # C# DTO 与 protocol.ts 一致
+npm run gui:build                          # 0 警告 0 错误
+```
+
+### 2026-05-21 P0 实施三轮代码审核跟踪修复
+
+三轮代码审核（详见对话）针对 P0-E 落地后仍残留的四处加固一次性处理：
+
+- **H3** [packages/daemon/src/shared/protocol.ts:204](../packages/daemon/src/shared/protocol.ts#L204)：`SessionInfoSchema.lastPromptOptions` 加 `z.string().max(500)` + `.max(32)`，与 `WorkflowItemSchema.options` 上限对齐，杜绝畸形 prompt 经 `/sessions` HTTP 路径绕过限制
+- **H4** [packages/gui/wwwroot/chat.js:736](../packages/gui/wwwroot/chat.js#L736)、[chat.css](../packages/gui/wwwroot/chat.css)：自由文本 session prompt（密码、文件名等 daemon 解析不到 options 的场景）在卡片内显式渲染 `.prompt-hint`「该提示需要自由文本回复，请在 CLI 终端中直接输入」，避免用户在 omnibar 隐藏后看上去卡住
+- **H1** [packages/gui/MainWindow.xaml.cs:481](../packages/gui/MainWindow.xaml.cs#L481)、[chat.js:968](../packages/gui/wwwroot/chat.js#L968)：`OnSourcesSnapshotReceived` 改为转发整条 `sources-snapshot`；web 端按 id reset+merge，清掉不在 snapshot 中的旧来源。原实现拆成 `source-registered` 一条条投递，断网期间 disconnect 事件丢失的来源会永远停留在 online
+- **H2** [packages/gui/MainWindow.xaml.cs:453](../packages/gui/MainWindow.xaml.cs#L453)、[Models/SessionViewModel.cs:101](../packages/gui/Models/SessionViewModel.cs#L101)：`OnSessionsSnapshotReceived` 改为按 id diff（existing → `UpdateFrom`，missing → `Add`，stale → `RemoveAt`），不再 `Clear()+Add`。原实现即便保留 `previousId` 也会让 ObservableCollection 短暂触发 SelectionChanged=null，与 P0.1「不抢焦点」精神抵触；diff 方案保持 ViewModel 实例引用与选中态稳定
+- 回归测试：[packages/daemon/test/chatWorkflowSnapshot.test.mjs](../packages/daemon/test/chatWorkflowSnapshot.test.mjs) 新增 `session prompts without options surface a CLI-direct-input hint`（H4）与 `sources-snapshot replaces stale sources after observer reconnect`（H1）
+
+**验证**：
+
+```powershell
+npm test                                   # 133 pass / 0 fail / 2 skipped（新增 2 条回归）
+npm run validate:dtos                      # C# DTO 与 protocol.ts 一致
+npm run gui:build                          # 0 警告 0 错误
+```

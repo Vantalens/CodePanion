@@ -73,7 +73,20 @@ function request(method, route, payload) {
           reject(err);
           return;
         }
-        resolve(text ? JSON.parse(text) : {});
+        if (!text) {
+          resolve({});
+          return;
+        }
+        try {
+          resolve(JSON.parse(text));
+        } catch (parseErr) {
+          const err = new Error(`${method} ${route} returned non-JSON: ${text.slice(0, 200)}`);
+          err.status = res.statusCode;
+          err.method = method;
+          err.route = route;
+          err.cause = parseErr;
+          reject(err);
+        }
       });
     });
     req.on('error', reject);
@@ -142,7 +155,7 @@ async function activate(context) {
     // config file may not exist yet; the next event will populate cache.
   }
   settingsListener = vscode.workspace.onDidChangeConfiguration(e => {
-    if (e.affectsConfiguration('projects')) invalidateConfig();
+    if (e.affectsConfiguration('codepanion')) invalidateConfig();
   });
   context.subscriptions.push(settingsListener);
   context.subscriptions.push({ dispose: () => { try { configWatcher?.close(); } catch {} configWatcher = null; } });

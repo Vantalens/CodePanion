@@ -80,6 +80,8 @@ export class SessionManager {
   appendOutput(id: string, chunk: string) {
     const rec = this.sessions.get(id);
     if (!rec) return;
+    // 已 exited 的会话在 60s 删除窗口内可能仍收到延迟输出，绝不能把状态拉回 running。
+    if (rec.status === 'exited') return;
 
     rec.outputBuffer = (rec.outputBuffer + chunk).slice(-8192);
     this.appendFullOutput(rec, chunk);
@@ -89,7 +91,15 @@ export class SessionManager {
       type: 'output'
     });
 
-    rec.status = 'running';
+    // 区分 spinner 心跳与真实输出：
+    // - spinner 只用 \r 覆盖当前行（无 \n）→ 仍属"等待用户回复"阶段，保留 options + waiting
+    //   否则随后到来的 inject reply 会拿不到 option 列表而被判 invalid-reply
+    // - 含 \n 的输出代表 CLI 已越过当前 prompt → 清掉 options 并把 waiting 转回 running，
+    //   避免用户在 CLI 终端直接回车（不走 daemon inject）后 GUI 卡在「等待但无选项」死锁态
+    if (chunk.includes('\n')) {
+      rec.lastPromptOptions = undefined;
+      if (rec.status === 'waiting') rec.status = 'running';
+    }
     this.broadcast({ type: 'session-output', sessionId: id, chunk });
   }
 
@@ -122,6 +132,7 @@ export class SessionManager {
     if (!rec) return;
     rec.status = 'exited';
     rec.exitCode = exitCode;
+    rec.lastPromptOptions = undefined;
     const durationMs = Date.now() - rec.startedAt;
     this.broadcast({ type: 'session-exited', sessionId: id, exitCode, durationMs });
     setTimeout(() => this.sessions.delete(id), 60_000).unref();
@@ -143,6 +154,7 @@ export class SessionManager {
     rec.cliSocket.send(JSON.stringify(event));
     this.broadcast({ type: 'reply-injected', sessionId: id, text });
     rec.status = 'running';
+    rec.lastPromptOptions = undefined;
     return 'ok';
   }
 
@@ -182,7 +194,7 @@ export class SessionManager {
   }
 
   private toInfo(rec: SessionRecord): SessionInfo {
-    const { cliSocket, outputBuffer, fullOutputChars, cliPid, lastPromptOptions, ...info } = rec;
+    const { cliSocket, outputBuffer, fullOutputChars, cliPid, fullOutput, outputChunks, ...info } = rec;
     return info;
   }
 

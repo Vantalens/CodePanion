@@ -65,3 +65,37 @@ test('SessionManager includes retained output when prompt is raised', () => {
   assert.deepEqual(prompt.options, ['yes', 'no']);
   assert.equal(prompt.fullOutput, 'step 1\n');
 });
+
+test('SessionManager keeps prompt options through spinner output', () => {
+  // 回归：spinner / 心跳输出曾会清掉 lastPromptOptions，导致随后 injectReply 被判 invalid-reply。
+  const manager = new SessionManager();
+  const session = registerSession(manager);
+  manager.attachCliSocket(session.id, {
+    readyState: 1,
+    OPEN: 1,
+    send: () => {},
+  });
+
+  manager.markPrompt(session.id, 'Continue? (y/n)', ['yes', 'no']);
+  manager.appendOutput(session.id, '\r⠋ thinking\r');
+  manager.appendOutput(session.id, '\r⠙ thinking\r');
+
+  const result = manager.injectReply(session.id, 'yes');
+  assert.equal(result, 'ok');
+});
+
+test('SessionManager resets waiting → running when real output crosses the prompt', () => {
+  // 回归：用户在 CLI 终端直接回车（不走 daemon inject）后，含 \n 的真实输出抵达 daemon，
+  // 旧实现只清 lastPromptOptions 但保留 status='waiting'，GUI 会卡在「等待但无选项」死锁态。
+  const manager = new SessionManager();
+  const session = registerSession(manager);
+
+  manager.markPrompt(session.id, 'Continue? (y/n)', ['yes', 'no']);
+  assert.equal(manager.list().find((s) => s.id === session.id).status, 'waiting');
+
+  manager.appendOutput(session.id, 'continued\n');
+
+  const info = manager.list().find((s) => s.id === session.id);
+  assert.equal(info.status, 'running');
+  assert.equal(info.lastPromptOptions, undefined);
+});

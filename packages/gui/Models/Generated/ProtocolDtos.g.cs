@@ -21,6 +21,7 @@ namespace CodePanion.Gui.Models
         public string Status { get; set; } = "running";
         public int? ExitCode { get; set; }
         public string? LastPrompt { get; set; }
+        public string[]? LastPromptOptions { get; set; }
     }
 
     public class MonitorSourceInfo

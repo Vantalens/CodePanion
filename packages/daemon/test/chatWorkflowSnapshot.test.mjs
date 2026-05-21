@@ -157,6 +157,119 @@ test('omnibar is hidden when the selected task has no actionable reply target', 
   assert.equal(win.document.getElementById('omnibar-input').disabled, true);
 });
 
+test('session prompts require explicit options and do not expose custom text entry', async () => {
+  const win = loadChat();
+  const { handleMessage } = win.CodePanion.__test;
+  const now = Date.now();
+
+  handleMessage({
+    type: 'workflow-snapshot',
+    snapshot: {
+      threads: [{ id: 'session:prompt-thread', source: 'cli', title: 'codex', status: 'waiting', updatedAt: now, itemCount: 1 }],
+      items: [{
+        id: 'prompt-without-options',
+        threadId: 'session:prompt-thread',
+        source: 'cli',
+        kind: 'prompt',
+        title: '等待输入',
+        content: 'Password:',
+        status: 'waiting',
+        timestamp: now,
+      }],
+    },
+  });
+
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+
+  assert.equal(win.document.getElementById('omnibar').hidden, true);
+  assert.equal(win.document.getElementById('stage-focus-reply').hidden, true);
+  assert.equal(win.document.querySelector('.custom-input'), null);
+
+  handleMessage({
+    type: 'workflow-event',
+    data: {
+      action: 'item-append',
+      item: {
+        id: 'prompt-with-options',
+        threadId: 'session:prompt-thread',
+        source: 'cli',
+        kind: 'prompt',
+        title: '等待输入',
+        content: 'Continue?',
+        status: 'waiting',
+        timestamp: now + 1,
+        options: ['yes', 'no'],
+      },
+    },
+  });
+
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+
+  assert.equal(win.document.getElementById('omnibar').hidden, true);
+  assert.equal(win.document.getElementById('stage-focus-reply').hidden, false);
+  assert.equal(win.document.querySelectorAll('.option-button').length, 2);
+  assert.equal(win.document.querySelector('.custom-input'), null);
+
+  win.document.querySelector('.option-button').click();
+  assert.doesNotMatch(win.document.getElementById('chat-container').textContent, /您的回复/);
+});
+
+test('session prompts without options surface a CLI-direct-input hint', async () => {
+  // H4：自由文本 session prompt（密码、文件名）在 GUI 不可点选/不可输入时，
+  // 必须给用户明确引导回到 CLI 终端输入，否则会看上去"卡住"。
+  const win = loadChat();
+  const { handleMessage } = win.CodePanion.__test;
+  const now = Date.now();
+
+  handleMessage({
+    type: 'workflow-snapshot',
+    snapshot: {
+      threads: [{ id: 'session:freeform', source: 'cli', title: 'codex', status: 'waiting', updatedAt: now, itemCount: 1 }],
+      items: [{
+        id: 'freeform-prompt',
+        threadId: 'session:freeform',
+        source: 'cli',
+        kind: 'prompt',
+        title: '等待输入',
+        content: 'Password:',
+        status: 'waiting',
+        timestamp: now,
+      }],
+    },
+  });
+
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+
+  const hint = win.document.querySelector('.prompt-hint');
+  assert.ok(hint, '应渲染 .prompt-hint 引导用户');
+  assert.match(hint.textContent, /CLI 终端/);
+  assert.equal(win.document.querySelector('.option-button'), null);
+  assert.equal(win.document.querySelector('.custom-input'), null);
+});
+
+test('sources-snapshot replaces stale sources after observer reconnect', async () => {
+  // H1：sources-snapshot 是权威列表，未出现的来源必须被清掉，
+  // 否则 disconnect 事件丢失时会留下永久"online"的死来源。
+  const win = loadChat();
+  const { handleMessage, state } = win.CodePanion.__test;
+
+  handleMessage({ type: 'source-registered', source: { id: 'stale-source', kind: 'cli', name: 'stale', status: 'online' } });
+  handleMessage({ type: 'source-registered', source: { id: 'kept-source', kind: 'cli', name: 'kept', status: 'online' } });
+  assert.equal(state.sources.size, 2);
+
+  handleMessage({
+    type: 'sources-snapshot',
+    sources: [
+      { id: 'kept-source', kind: 'cli', name: 'kept', status: 'online' },
+      { id: 'fresh-source', kind: 'cli', name: 'fresh', status: 'online' },
+    ],
+  });
+
+  assert.equal(state.sources.has('stale-source'), false);
+  assert.equal(state.sources.has('kept-source'), true);
+  assert.equal(state.sources.has('fresh-source'), true);
+});
+
 test('internal approval transcripts are not shown as user tasks', async () => {
   const win = loadChat();
   const { handleMessage, state } = win.CodePanion.__test;
