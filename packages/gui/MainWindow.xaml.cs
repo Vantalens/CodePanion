@@ -17,6 +17,12 @@ namespace CodePanion.Gui
 {
     public partial class MainWindow : Window
     {
+        // P1-A：长跑后限制 _sessions 中已退出会话条数，避免无限增长。
+        private const int MaxExitedSessions = 50;
+        // P1-F：重连退避上限，与 SessionManager 60s 删除窗口同量级。
+        private const int ReconnectMinSeconds = 2;
+        private const int ReconnectMaxSeconds = 30;
+
         private readonly DaemonClient _daemonClient;
         private readonly ObservableCollection<SessionViewModel> _sessions;
         private readonly SoundPlayer _soundPlayer;
@@ -37,7 +43,7 @@ namespace CodePanion.Gui
             SessionListView.ItemsSource = _sessions;
             _reconnectTimer = new DispatcherTimer
             {
-                Interval = TimeSpan.FromSeconds(2)
+                Interval = TimeSpan.FromSeconds(ReconnectMinSeconds)
             };
             _reconnectTimer.Tick += AutoReconnectTimer_Tick;
 
@@ -85,11 +91,19 @@ namespace CodePanion.Gui
             }
         }
 
+        // P1-C：async void 整体兜底，未捕获异常不再让 WPF 进程崩溃。
         private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
-            await InitializeWebView();
-            AddLog("正在连接到 CodePanion daemon...");
-            await ConnectToDaemon();
+            try
+            {
+                await InitializeWebView();
+                AddLog("正在连接到 CodePanion daemon...");
+                await ConnectToDaemon();
+            }
+            catch (Exception ex)
+            {
+                AddLog($"窗口加载失败：{ex.GetType().Name} - {ex.Message}");
+            }
         }
 
         private async System.Threading.Tasks.Task InitializeWebView()
@@ -195,23 +209,37 @@ namespace CodePanion.Gui
 
         private async void HandleUserReply(string sessionId, string value)
         {
-            var reply = value.EndsWith("\n", StringComparison.Ordinal) ? value : value + "\n";
-            var ok = await _daemonClient.SendReplyAsync(sessionId, reply);
-            AddLog(ok ? $"[回复] {sessionId}: {value}" : $"[回复失败] {sessionId}: {value}");
-            if (!ok)
+            try
             {
-                SendStatusMessage("error", "回复发送失败", $"目标会话不可用或 daemon 未连接：{sessionId}");
+                var reply = value.EndsWith("\n", StringComparison.Ordinal) ? value : value + "\n";
+                var ok = await _daemonClient.SendReplyAsync(sessionId, reply);
+                AddLog(ok ? $"[回复] {sessionId}: {value}" : $"[回复失败] {sessionId}: {value}");
+                if (!ok)
+                {
+                    SendStatusMessage("error", "回复发送失败", $"目标会话不可用或 daemon 未连接：{sessionId}");
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"回复处理异常：{ex.GetType().Name} - {ex.Message}");
             }
         }
 
         private async void HandleMonitorEventReply(string eventId, string value)
         {
-            var reply = value.EndsWith("\n", StringComparison.Ordinal) ? value : value + "\n";
-            var ok = await _daemonClient.SendMonitorEventReplyAsync(eventId, reply);
-            AddLog(ok ? $"[事件回复] {eventId}: {value}" : $"[事件回复失败] {eventId}: {value}");
-            if (!ok)
+            try
             {
-                SendStatusMessage("error", "事件回复失败", $"目标事件不可用或 daemon 未连接：{eventId}");
+                var reply = value.EndsWith("\n", StringComparison.Ordinal) ? value : value + "\n";
+                var ok = await _daemonClient.SendMonitorEventReplyAsync(eventId, reply);
+                AddLog(ok ? $"[事件回复] {eventId}: {value}" : $"[事件回复失败] {eventId}: {value}");
+                if (!ok)
+                {
+                    SendStatusMessage("error", "事件回复失败", $"目标事件不可用或 daemon 未连接：{eventId}");
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"事件回复处理异常：{ex.GetType().Name} - {ex.Message}");
             }
         }
 
@@ -267,9 +295,12 @@ namespace CodePanion.Gui
         private void StartAutoReconnect()
         {
             if (_reconnectTimer.IsEnabled) return;
+            _reconnectTimer.Interval = TimeSpan.FromSeconds(ReconnectMinSeconds);
             _reconnectTimer.Start();
         }
 
+        // P1-F：指数退避，2s → 4s → 8s → 16s → 30s（封顶），避免 daemon 长时间不可用时 2s 刷屏重试。
+        // P1-C：async void + try/catch 兜底，避免未捕获异常崩溃 WPF 进程。
         private async void AutoReconnectTimer_Tick(object? sender, EventArgs e)
         {
             if (_isConnected || _isReconnectInProgress) return;
@@ -290,9 +321,19 @@ namespace CodePanion.Gui
                     }
                 }
             }
+            catch (Exception ex)
+            {
+                AddLog($"自动重连异常：{ex.GetType().Name} - {ex.Message}");
+            }
             finally
             {
                 _isReconnectInProgress = false;
+                if (!_isConnected)
+                {
+                    var shift = Math.Min(_reconnectAttempts, 4); // 1<<4 == 16，再乘 base 仍 ≤ 32s
+                    var nextSecs = Math.Min(ReconnectMaxSeconds, ReconnectMinSeconds * (1 << shift));
+                    _reconnectTimer.Interval = TimeSpan.FromSeconds(nextSecs);
+                }
             }
         }
 
@@ -378,7 +419,9 @@ namespace CodePanion.Gui
                 {
                     session.Status = "exited";
                     session.ExitCode = e.ExitCode;
+                    session.ExitedAt = DateTimeOffset.Now.ToUnixTimeMilliseconds();
                 }
+                PruneExitedSessions();
                 UpdateSessionCount();
                 SendMessageToWeb(new
                 {
@@ -551,20 +594,29 @@ namespace CodePanion.Gui
             SessionCountText.Text = activeCount.ToString();
         }
 
+        // P1-A：仅裁剪 exited 会话，活跃会话永远保留；超出 MaxExitedSessions 时按 ExitedAt 升序删最老。
+        private void PruneExitedSessions()
+        {
+            var exited = new List<SessionViewModel>();
+            foreach (var session in _sessions)
+            {
+                if (session.Status == "exited") exited.Add(session);
+            }
+            if (exited.Count <= MaxExitedSessions) return;
+            exited.Sort((a, b) => a.ExitedAt.CompareTo(b.ExitedAt));
+            var dropCount = exited.Count - MaxExitedSessions;
+            for (int i = 0; i < dropCount; i++)
+            {
+                _sessions.Remove(exited[i]);
+            }
+        }
+
         private void AddLog(string message)
         {
             var logMessage = $"[{DateTime.Now:HH:mm:ss}] {message}";
             System.Diagnostics.Debug.WriteLine(logMessage);
-
-            try
-            {
-                var logDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codepanion");
-                Directory.CreateDirectory(logDir);
-                File.AppendAllText(Path.Combine(logDir, "gui.log"), logMessage + Environment.NewLine, System.Text.Encoding.UTF8);
-            }
-            catch
-            {
-            }
+            // P1-D：走异步队列 + 滚动写入，不在 Dispatcher 线程同步 File.AppendAllText。
+            GuiLogWriter.Instance.Enqueue(logMessage);
         }
 
         private void SessionListView_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -577,13 +629,20 @@ namespace CodePanion.Gui
 
         private async void Settings_Click(object sender, RoutedEventArgs e)
         {
-            var settingsWindow = new SettingsWindow { Owner = this };
-            if (settingsWindow.ShowDialog() == true)
+            try
             {
-                AddLog("设置已更新，正在重新加载 daemon 连接配置...");
-                _reconnectTimer.Stop();
-                _daemonClient.ReloadConfig();
-                await _daemonClient.ReconnectAsync();
+                var settingsWindow = new SettingsWindow { Owner = this };
+                if (settingsWindow.ShowDialog() == true)
+                {
+                    AddLog("设置已更新，正在重新加载 daemon 连接配置...");
+                    _reconnectTimer.Stop();
+                    _daemonClient.ReloadConfig();
+                    await _daemonClient.ReconnectAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"设置应用失败：{ex.GetType().Name} - {ex.Message}");
             }
         }
 
@@ -599,6 +658,10 @@ namespace CodePanion.Gui
                 {
                     StartAutoReconnect();
                 }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"手动重连异常：{ex.GetType().Name} - {ex.Message}");
             }
             finally
             {
@@ -621,6 +684,7 @@ namespace CodePanion.Gui
         {
             _daemonClient.Dispose();
             _trayIcon?.Dispose();
+            GuiLogWriter.Instance.Dispose();
             Application.Current.Shutdown();
         }
 
@@ -635,6 +699,7 @@ namespace CodePanion.Gui
             _daemonClient.Dispose();
             _trayIcon?.Dispose();
             _soundPlayer.Dispose();
+            GuiLogWriter.Instance.Dispose();
             base.OnClosed(e);
         }
     }

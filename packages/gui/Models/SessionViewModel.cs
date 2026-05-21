@@ -8,6 +8,7 @@ namespace CodePanion.Gui.Models
         private string _status;
         private string? _lastPrompt;
         private int? _exitCode;
+        private long _exitedAt;
 
         public string Id { get; set; }
         public string Command { get; set; }
@@ -55,6 +56,20 @@ namespace CodePanion.Gui.Models
                 {
                     _exitCode = value;
                     OnPropertyChanged(nameof(ExitCode));
+                }
+            }
+        }
+
+        // 由 MainWindow 在 session-exited 时填入，用于裁剪最老的 exited 会话。
+        public long ExitedAt
+        {
+            get => _exitedAt;
+            set
+            {
+                if (_exitedAt != value)
+                {
+                    _exitedAt = value;
+                    OnPropertyChanged(nameof(ExitedAt));
                 }
             }
         }

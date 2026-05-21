@@ -1157,3 +1157,56 @@ npm test                                   # 133 pass / 0 fail / 2 skipped（新
 npm run validate:dtos                      # C# DTO 与 protocol.ts 一致
 npm run gui:build                          # 0 警告 0 错误
 ```
+
+---
+
+## 2026-05-21 P1 backlog 收口（A/B/C/D/F）
+
+[docs/CODE_REVIEW_2026-05-21.md](./CODE_REVIEW_2026-05-21.md) 中 P1-A/B/C/D/F 五项一次性收口；P1-E 已在 P0 段附带修复。
+
+### P1-A GUI `_sessions` 永不裁剪 exited
+
+- 路径：[packages/gui/MainWindow.xaml.cs](../packages/gui/MainWindow.xaml.cs)、[packages/gui/Models/SessionViewModel.cs](../packages/gui/Models/SessionViewModel.cs)
+- 新增 `SessionViewModel.ExitedAt`，`OnSessionExited` 设置后调 `PruneExitedSessions()`
+- 按 `ExitedAt` 升序裁剪到 `MaxExitedSessions = 50`（活跃会话永远保留）
+- daemon 已有 60s 删除窗口仅作内存裁剪，不会广播"删除"事件，所以 GUI 端必须独立做 LRU；observer 重连 sessions-snapshot 同步路径已在 H2 收敛
+
+### P1-B `DaemonClient.DefaultRequestHeaders` 并发不安全
+
+- 路径：[packages/gui/Services/DaemonClient.cs](../packages/gui/Services/DaemonClient.cs)
+- 抽出 `PostJsonAsync(url, payload)`：用 `HttpRequestMessage` 把 `Authorization` 头挂在请求实例上，不再 `Clear() + Add()` 共享 `DefaultRequestHeaders`
+- `SendReplyAsync` / `SendMonitorEventReplyAsync` / `RegisterSourceAsync` 全部走该 helper；未来 Dispatcher 单线程约束放宽后也不会触发 `InvalidOperationException`
+
+### P1-C MainWindow `async void` 异常兜底
+
+- 路径：[packages/gui/MainWindow.xaml.cs](../packages/gui/MainWindow.xaml.cs)
+- `MainWindow_Loaded` / `HandleUserReply` / `HandleMonitorEventReply` / `Settings_Click` / `Reconnect_Click` / `AutoReconnectTimer_Tick` 全部加 try/catch 总兜底
+- 异常落到 `AddLog($"... {ex.GetType().Name} - {ex.Message}")`，不再让 WPF 进程因未捕获 async 异常崩溃
+
+### P1-D `gui.log` 滚动 + 异步写入
+
+- 路径：[packages/gui/Services/GuiLogWriter.cs](../packages/gui/Services/GuiLogWriter.cs)（新增）、[packages/gui/MainWindow.xaml.cs](../packages/gui/MainWindow.xaml.cs)、[packages/gui/Services/DaemonClient.cs](../packages/gui/Services/DaemonClient.cs)
+- 新增 `GuiLogWriter` 单例：`Channel<string>` bounded(10_000) + DropOldest，后台单 worker `Task` 消费写盘
+- `MainWindow.AddLog` 与 `DaemonClient.Log` 都改为 `GuiLogWriter.Instance.Enqueue`；DaemonClient 不再直接写文件，统一通过事件流到 `MainWindow.OnLogMessage`
+- 文件超 5MB 滚动到 `gui.log.1/.2/.3`，最旧覆盖；进程关闭路径（`OnClosed` / `Exit_Click`）调 `Dispose()` 让 worker 把队列刷干
+- 解决：UI Dispatcher 不再被同步 `File.AppendAllText` 阻塞；长跑后日志不再无限增长
+
+### P1-F DaemonClient 重连无指数退避
+
+- 路径：[packages/gui/MainWindow.xaml.cs](../packages/gui/MainWindow.xaml.cs)
+- `ReconnectMinSeconds=2` / `ReconnectMaxSeconds=30`；`StartAutoReconnect` 重置间隔到 2s
+- `AutoReconnectTimer_Tick` finally 段：未连上时 `Interval = min(30s, 2s * 2^min(attempts, 4))`，序列 2/4/8/16/30s 上限
+- 连接成功路径 `OnDaemonConnected` 已重置 `_reconnectAttempts = 0` 并 stop timer，下次断线从 2s 重新起步
+
+### 不做
+
+- 不在 daemon 侧广播"session 已从内存删除"事件：当前 GUI LRU 已够，新事件会扩协议表面
+- 不为 `GuiLogWriter` 引入 NLog/Serilog 依赖：5MB×4 文件 + 异步 Channel 足以解决长跑+卡顿两个 P1 痛点
+
+### 验证
+
+```powershell
+npm test                                   # 133 pass / 0 fail / 2 skipped（本轮未新增 daemon 单测）
+npm run validate:dtos                      # C# DTO 与 protocol.ts 一致（本轮未改 schema）
+npm run gui:build                          # 0 警告 / 0 错误
+```

@@ -323,23 +323,28 @@ namespace CodePanion.Gui.Services
             }
         }
 
+        // P1-B：Authorization 走 per-request HttpRequestMessage，不再共享 DefaultRequestHeaders；
+        // 即便多个 POST 并发也不会互相 Clear 同一全局集合，杜绝 InvalidOperationException 与头错乱。
+        private async Task<HttpResponseMessage> PostJsonAsync(string url, object payload)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Post, url)
+            {
+                Content = new StringContent(
+                    JsonConvert.SerializeObject(payload),
+                    Encoding.UTF8,
+                    "application/json"
+                )
+            };
+            request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {_token}");
+            return await _httpClient.SendAsync(request);
+        }
+
         public async Task<bool> SendReplyAsync(string sessionId, string text)
         {
             try
             {
                 var url = $"{_daemonUrl}/sessions/{sessionId}/reply";
-                var payload = new { text };
-                var content = new StringContent(
-                    JsonConvert.SerializeObject(payload),
-                    Encoding.UTF8,
-                    "application/json"
-                );
-
-                _httpClient.DefaultRequestHeaders.Clear();
-                _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {_token}");
-
-                var response = await _httpClient.PostAsync(url, content);
-
+                var response = await PostJsonAsync(url, new { text });
                 if (!response.IsSuccessStatusCode)
                 {
                     var error = await response.Content.ReadAsStringAsync();
@@ -360,17 +365,7 @@ namespace CodePanion.Gui.Services
             try
             {
                 var url = $"{_daemonUrl}/events/{Uri.EscapeDataString(eventId)}/reply";
-                var payload = new { text };
-                var content = new StringContent(
-                    JsonConvert.SerializeObject(payload),
-                    Encoding.UTF8,
-                    "application/json"
-                );
-
-                _httpClient.DefaultRequestHeaders.Clear();
-                _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {_token}");
-
-                var response = await _httpClient.PostAsync(url, content);
+                var response = await PostJsonAsync(url, new { text });
                 if (!response.IsSuccessStatusCode)
                 {
                     var error = await response.Content.ReadAsStringAsync();
@@ -391,10 +386,7 @@ namespace CodePanion.Gui.Services
             try
             {
                 var url = $"{_daemonUrl}/sources/register";
-                var content = new StringContent(JsonConvert.SerializeObject(payload), Encoding.UTF8, "application/json");
-                _httpClient.DefaultRequestHeaders.Clear();
-                _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {_token}");
-                var response = await _httpClient.PostAsync(url, content);
+                var response = await PostJsonAsync(url, payload);
                 var body = await response.Content.ReadAsStringAsync();
                 if (!response.IsSuccessStatusCode)
                 {
@@ -439,22 +431,9 @@ namespace CodePanion.Gui.Services
         private void Log(string message)
         {
             var logMessage = $"[{DateTime.Now:HH:mm:ss.fff}] {message}";
+            // P1-D：仅触发事件由 MainWindow.AddLog → GuiLogWriter 统一异步落盘，
+            // 避免 daemon 网络回调线程同步 File.AppendAllText 阻塞 + 与 AddLog 重复写盘。
             LogMessage?.Invoke(this, logMessage);
-
-            // 同时写入日志文件
-            try
-            {
-                var logPath = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                    ".codepanion",
-                    "gui.log"
-                );
-                File.AppendAllText(logPath, logMessage + Environment.NewLine, Encoding.UTF8);
-            }
-            catch
-            {
-                // 忽略日志写入错误
-            }
         }
 
         private static string MaskToken(string token)

@@ -56,6 +56,8 @@
 
 ## P1 资源监管 / 稳态运行隐患
 
+> P1-A / P1-B / P1-C / P1-D / P1-F 已于 2026-05-21 收口，详见 [IMPLEMENTATION_LOG.md](./IMPLEMENTATION_LOG.md#2026-05-21-p1-backlog-收口abcdf)。P1-E 在 P0 段附带修复。
+
 ### P1-A GUI `_sessions` 永不裁剪 exited
 
 - 路径：[MainWindow.xaml.cs:36](../packages/gui/MainWindow.xaml.cs#L36)
