@@ -19,6 +19,7 @@ test('PromptDetector detects yes/no prompts after idle', async () => {
 
   assert.equal(prompts.length, 1);
   assert.match(prompts[0].lastLines, /Continue\? \(y\/n\)/);
+  assert.deepEqual(prompts[0].options, ['y', 'n']);
 });
 
 test('PromptDetector extracts numbered options', async () => {

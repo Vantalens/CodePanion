@@ -261,14 +261,17 @@ test('new workflow events do not steal the selected task', async () => {
 
   handleMessage({
     type: 'workflow-event',
-    item: {
-      id: 'b-msg-2',
-      threadId: 'task-b',
-      source: 'codex-desktop',
-      kind: 'message',
-      title: 'assistant',
-      content: 'Task B newer content',
-      timestamp: now,
+    data: {
+      action: 'item-append',
+      item: {
+        id: 'b-msg-2',
+        threadId: 'task-b',
+        source: 'codex-desktop',
+        kind: 'message',
+        title: 'assistant',
+        content: 'Task B newer content',
+        timestamp: now,
+      },
     },
   });
 
@@ -276,6 +279,7 @@ test('new workflow events do not steal the selected task', async () => {
 
   assert.equal(state.activeConversation, 'workflow:task-a');
   assert.match(win.document.getElementById('conversation-title').textContent, /Task A/);
+  assert.match(state.conversations.get('workflow:task-b').lastContent, /Task B newer content/);
 });
 
 test('command workflow items are folded into execution details instead of primary messages', async () => {
@@ -348,4 +352,33 @@ test('active conversation does not force autoscroll while user is reading older 
 
   assert.equal(state.activeConversation, 'session:stable-session');
   assert.equal(scrollCalls, 0);
+});
+
+test('rendering the same task preserves existing message DOM state', async () => {
+  const win = loadChat();
+
+  win.CodePanion.addMessage({
+    id: 'stable-message',
+    type: 'activity',
+    source: 'cli',
+    sessionId: 'stable-session',
+    timestamp: Date.now(),
+    content: 'Execution record',
+    rawItems: [
+      { id: 'cmd', title: 'cmd.exe', content: 'dotnet build', status: 'running' },
+    ],
+  });
+
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+
+  const messageBefore = win.document.querySelector('[data-message-id]');
+  const detailsBefore = win.document.querySelector('.workflow-details');
+  assert.ok(messageBefore);
+  assert.ok(detailsBefore);
+  detailsBefore.open = true;
+
+  win.CodePanion.__test.renderAll();
+
+  assert.equal(win.document.querySelector('[data-message-id]'), messageBefore);
+  assert.equal(win.document.querySelector('.workflow-details').open, true);
 });

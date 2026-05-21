@@ -22,6 +22,7 @@ export interface SessionRecord extends SessionInfo {
   fullOutput: string[];
   fullOutputChars: number;
   outputChunks: OutputChunk[];
+  lastPromptOptions?: string[];
 }
 
 export class SessionManager {
@@ -97,6 +98,7 @@ export class SessionManager {
     if (!rec) return;
     rec.status = 'waiting';
     rec.lastPrompt = lastLines;
+    rec.lastPromptOptions = options;
 
     this.appendOutputChunk(rec, {
       timestamp: Date.now(),
@@ -125,9 +127,11 @@ export class SessionManager {
     setTimeout(() => this.sessions.delete(id), 60_000).unref();
   }
 
-  injectReply(id: string, text: string): boolean {
+  injectReply(id: string, text: string): 'ok' | 'not-connected' | 'invalid-reply' {
     const rec = this.sessions.get(id);
-    if (!rec || !rec.cliSocket || rec.cliSocket.readyState !== rec.cliSocket.OPEN) return false;
+    if (!rec || !rec.cliSocket || rec.cliSocket.readyState !== rec.cliSocket.OPEN) return 'not-connected';
+    const optionIndex = this.resolvePromptOption(rec, text);
+    if (optionIndex < 0) return 'invalid-reply';
 
     this.appendOutputChunk(rec, {
       timestamp: Date.now(),
@@ -135,11 +139,11 @@ export class SessionManager {
       type: 'reply'
     });
 
-    const event: WsServerEvent = { type: 'inject-input', sessionId: id, text };
+    const event: WsServerEvent = { type: 'inject-input', sessionId: id, optionIndex };
     rec.cliSocket.send(JSON.stringify(event));
     this.broadcast({ type: 'reply-injected', sessionId: id, text });
     rec.status = 'running';
-    return true;
+    return 'ok';
   }
 
   list(): SessionInfo[] {
@@ -178,7 +182,7 @@ export class SessionManager {
   }
 
   private toInfo(rec: SessionRecord): SessionInfo {
-    const { cliSocket, outputBuffer, fullOutputChars, cliPid, ...info } = rec;
+    const { cliSocket, outputBuffer, fullOutputChars, cliPid, lastPromptOptions, ...info } = rec;
     return info;
   }
 
@@ -203,4 +207,24 @@ export class SessionManager {
       rec.outputChunks.splice(0, rec.outputChunks.length - this.maxOutputChunks);
     }
   }
+
+  private resolvePromptOption(rec: SessionRecord, text: string): number {
+    const options = rec.lastPromptOptions;
+    if (!options?.length) return -1;
+    const normalized = normalizeReplyText(text);
+    return options.findIndex((option) => {
+      const normalizedOption = normalizeReplyText(option);
+      return normalized === normalizedOption || normalized === optionReplyToken(normalizedOption);
+    });
+  }
+}
+
+function normalizeReplyText(text: string): string {
+  return text.trim().replace(/\r?\n$/, '');
+}
+
+function optionReplyToken(option: string): string {
+  const numbered = option.match(/^(\d+)[.)\]]?\s+/);
+  if (numbered) return numbered[1];
+  return option;
 }

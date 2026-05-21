@@ -49,6 +49,12 @@ function resolveExecutable(name: string): string {
   return name;
 }
 
+function replyTextForPromptOption(option: string): string {
+  const numbered = option.trim().match(/^(\d+)[.)\]]?\s+/);
+  if (numbered) return `${numbered[1]}\n`;
+  return `${option.trim()}\n`;
+}
+
 export async function runWithPty(input: RunArgs): Promise<number> {
   const cfg = loadConfig();
   const health = await checkHealth();
@@ -99,25 +105,9 @@ export async function runWithPty(input: RunArgs): Promise<number> {
     });
   });
 
-  const isSafePtyInput = (text: string): boolean => {
-    // Allow normal printable input and common interactive keys only.
-    // Block ESC/control sequences that can manipulate terminal state.
-    for (let i = 0; i < text.length; i += 1) {
-      const code = text.charCodeAt(i);
-      const isCommonKey = code === 0x08 || code === 0x09 || code === 0x0a || code === 0x0d; // \b \t \n \r
-      const isPrintableAscii = code >= 0x20 && code <= 0x7e;
-      const isExtendedUnicode = code >= 0x80;
-      if (!isCommonKey && !isPrintableAscii && !isExtendedUnicode) {
-        return false;
-      }
-      if (code === 0x1b) {
-        return false;
-      }
-    }
-    return true;
-  };
+  let currentPromptOptions: string[] = [];
 
-  const parseInjectInputEvent = (raw: unknown): { type: 'inject-input'; sessionId: string; text: string } | null => {
+  const parseInjectInputEvent = (raw: unknown): { type: 'inject-input'; sessionId: string; optionIndex: number } | null => {
     let parsed: unknown;
     try {
       parsed = JSON.parse(String(raw));
@@ -134,23 +124,19 @@ export async function runWithPty(input: RunArgs): Promise<number> {
     if (record.type !== 'inject-input') {
       return null;
     }
-    if (typeof record.sessionId !== 'string' || typeof record.text !== 'string') {
+    if (typeof record.sessionId !== 'string' || typeof record.optionIndex !== 'number') {
       return null;
     }
-    if (record.text.length > 100_000) {
+    if (!Number.isInteger(record.optionIndex) || record.optionIndex < 0) {
       return null;
     }
-    if (!isSafePtyInput(record.text)) {
-      return null;
-    }
-
-    return { type: 'inject-input', sessionId: record.sessionId, text: record.text };
+    return { type: 'inject-input', sessionId: record.sessionId, optionIndex: record.optionIndex };
   };
 
   ws.on('message', (raw) => {
     const event = parseInjectInputEvent(raw);
-    if (event && event.sessionId === session.id) {
-      term.write(event.text);
+    if (event && event.sessionId === session.id && event.optionIndex < currentPromptOptions.length) {
+      term.write(replyTextForPromptOption(currentPromptOptions[event.optionIndex]));
     }
   });
 
@@ -170,6 +156,7 @@ export async function runWithPty(input: RunArgs): Promise<number> {
   const detector = new PromptDetector({
     idleMs: cfg.promptIdleMs,
     onPrompt: (lastLines, options) => {
+      currentPromptOptions = options ?? [];
       postPrompt(session.id, lastLines, options).catch(reportClientFailure('postPrompt'));
     },
   });

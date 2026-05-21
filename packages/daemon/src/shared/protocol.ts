@@ -209,7 +209,7 @@ export type WsServerEvent =
   | { type: 'session-prompt'; sessionId: string; lastLines: string; options?: string[]; fullOutput?: string }
   | { type: 'session-exited'; sessionId: string; exitCode: number; durationMs: number }
   | { type: 'reply-injected'; sessionId: string; text: string }
-  | { type: 'inject-input'; sessionId: string; text: string }
+  | { type: 'inject-input'; sessionId: string; optionIndex: number }
   | { type: 'monitor-event-reply'; eventId: string; sourceId?: string; text: string; timestamp: number }
   | { type: 'notification'; data: MonitorEvent & { title: string; message: string; timestamp: number } }
   | { type: 'source-registered'; source: MonitorSource }

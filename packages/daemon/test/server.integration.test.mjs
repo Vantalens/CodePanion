@@ -395,6 +395,27 @@ test('/sessions/:id/reply rejects invalid payloads', async () => {
   });
 });
 
+test('/sessions/:id/reply rejects text that is not a current prompt option', async () => {
+  await withServer(async ({ port, token }) => {
+    const registered = await request(port, token, 'POST', '/sessions', {
+      command: 'codex',
+      args: ['run'],
+      cliPid: 12345,
+    });
+    const sessionId = registered.body.id;
+    const cli = await openWs(`ws://127.0.0.1:${port}/ws?role=cli&sessionId=${sessionId}`, {
+      protocols: tokenSubprotocol(token),
+    });
+    try {
+      await request(port, token, 'POST', `/sessions/${sessionId}/prompt`, { lastLines: 'Continue?', options: ['yes', 'no'] });
+      const reply = await request(port, token, 'POST', `/sessions/${sessionId}/reply`, { text: 'rm -rf .' });
+      assert.equal(reply.status, 400);
+    } finally {
+      await closeWs(cli);
+    }
+  });
+});
+
 test('/sessions/:id/exit rejects invalid payloads', async () => {
   await withServer(async ({ port, token }) => {
     const registered = await request(port, token, 'POST', '/sessions', { command: 'codex', cliPid: 22003 });
@@ -427,11 +448,13 @@ test('WebSocket observer receives workflow events and CLI socket receives inject
         protocols: tokenSubprotocol(token),
       });
       try {
+        await request(port, token, 'POST', `/sessions/${sessionId}/prompt`, { lastLines: 'Continue? (y/n)', options: ['yes', 'no'] });
         const injectPromise = waitForMessage(cli, (message) => message.type === 'inject-input' && message.sessionId === sessionId);
         const reply = await request(port, token, 'POST', `/sessions/${sessionId}/reply`, { text: 'yes\n' });
         assert.equal(reply.status, 200);
         const injected = await injectPromise;
-        assert.equal(injected.text, 'yes\n');
+        assert.equal(injected.optionIndex, 0);
+        assert.equal('text' in injected, false);
       } finally {
         await closeWs(cli);
       }
@@ -463,14 +486,16 @@ test('multiple CLI sessions run in parallel without cross-talk', async () => {
         // Reply 互不串扰：先在两端各注册一次 waiter，再交叉发 reply。
         const aInject = waitForMessage(cliA, (message) => message.type === 'inject-input');
         const bInject = waitForMessage(cliB, (message) => message.type === 'inject-input');
+        await request(port, token, 'POST', `/sessions/${a.id}/prompt`, { lastLines: 'Pick one', options: ['from-A', 'other-A'] });
+        await request(port, token, 'POST', `/sessions/${b.id}/prompt`, { lastLines: 'Pick one', options: ['other-B', 'from-B'] });
         assert.equal((await request(port, token, 'POST', `/sessions/${a.id}/reply`, { text: 'from-A\n' })).status, 200);
         assert.equal((await request(port, token, 'POST', `/sessions/${b.id}/reply`, { text: 'from-B\n' })).status, 200);
         const aGot = await aInject;
         const bGot = await bInject;
         assert.equal(aGot.sessionId, a.id);
-        assert.equal(aGot.text, 'from-A\n');
+        assert.equal(aGot.optionIndex, 0);
         assert.equal(bGot.sessionId, b.id);
-        assert.equal(bGot.text, 'from-B\n');
+        assert.equal(bGot.optionIndex, 1);
 
         // Output 不污染对方会话历史。
         await request(port, token, 'POST', `/sessions/${a.id}/output`, { chunk: 'output-A\n' });

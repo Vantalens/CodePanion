@@ -43,7 +43,7 @@ export class PromptDetector {
     if (!looksLikePrompt(trimmed, cleaned)) return;
 
     const lastLines = lines.slice(-6).filter((l) => l.length > 0).join('\n');
-    const options = extractNumberedOptions(cleaned);
+    const options = extractPromptOptions(cleaned, trimmed);
     this.firedForCurrentIdle = true;
     this.opts.onPrompt(lastLines, options);
   }
@@ -55,8 +55,17 @@ function looksLikePrompt(lastLine: string, fullBuffer: string): boolean {
   if (/\((y\/n|yes\/no)\)\s*\??\s*$/i.test(lastLine)) return true;
   if (/\[(y\/n|y\/N|Y\/n)\]\s*$/i.test(lastLine)) return true;
   if (/(请输入|请回复|请选择|请确认|是否)/i.test(lastLine)) return true;
-  if (extractNumberedOptions(fullBuffer)?.length ?? 0) return true;
+  if (extractPromptOptions(fullBuffer, lastLine)?.length ?? 0) return true;
   return false;
+}
+
+function extractPromptOptions(text: string, lastLine: string): string[] | undefined {
+  const numbered = extractNumberedOptions(text);
+  if (numbered) return numbered;
+  if (/\((yes\/no)\)\s*\??\s*$/i.test(lastLine)) return ['yes', 'no'];
+  if (/\((y\/n)\)\s*\??\s*$/i.test(lastLine)) return ['y', 'n'];
+  if (/\[(y\/N|Y\/n|y\/n)\]\s*$/i.test(lastLine)) return ['y', 'n'];
+  return undefined;
 }
 
 function extractNumberedOptions(text: string): string[] | undefined {

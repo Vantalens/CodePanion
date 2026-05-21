@@ -370,9 +370,10 @@ function renderChat() {
     const title = document.getElementById('conversation-title');
     const messages = getVisibleMessages();
     const conversation = state.conversations.get(state.activeConversation);
+    const activeConversation = state.activeConversation || '';
     const shouldStickToBottom = isNearScrollBottom(container);
 
-    title.textContent = state.activeConversation
+    title.textContent = activeConversation
         ? conversation?.title || '任务'
         : '当前任务';
     updateStageMeta(conversation, messages);
@@ -386,15 +387,46 @@ function renderChat() {
                 </div>
             </div>
         `;
+        container.dataset.conversationId = activeConversation;
         return;
     }
 
-    container.innerHTML = '';
-    messages.forEach(message => container.appendChild(renderMessage(message)));
+    if (container.dataset.conversationId !== activeConversation || container.querySelector('.empty-state')) {
+        container.innerHTML = '';
+        container.dataset.conversationId = activeConversation;
+    }
+    syncChatMessages(container, messages);
     if (shouldStickToBottom) {
         const behavior = renderSmoothScroll ? 'smooth' : 'auto';
         requestAnimationFrame(() => scrollContainerToBottom(container, behavior));
     }
+}
+
+function syncChatMessages(container, messages) {
+    const existingById = new Map();
+    container.querySelectorAll('[data-message-id]').forEach(node => {
+        existingById.set(node.dataset.messageId, node);
+    });
+
+    const nodes = messages.map(message => {
+        const messageId = String(message.id);
+        const renderKey = getMessageRenderKey(message);
+        const existing = existingById.get(messageId);
+        if (existing?.dataset.renderKey === renderKey) {
+            return existing;
+        }
+        const next = renderMessage(message);
+        next.dataset.renderKey = renderKey;
+        return next;
+    });
+
+    if (hasSameChildren(container, nodes)) return;
+    container.replaceChildren(...nodes);
+}
+
+function hasSameChildren(container, nodes) {
+    if (container.children.length !== nodes.length) return false;
+    return nodes.every((node, index) => container.children[index] === node);
 }
 
 function isNearScrollBottom(container) {
@@ -572,6 +604,7 @@ function renderMessage(message) {
     const item = document.createElement('article');
     item.className = `message message-${message.type} ${message.role ? `message-role-${message.role}` : ''}`;
     item.dataset.messageId = message.id;
+    item.dataset.renderKey = getMessageRenderKey(message);
     if (message.sessionId) item.dataset.sessionId = message.sessionId;
 
     const avatar = document.createElement('div');
@@ -633,6 +666,25 @@ function renderMessage(message) {
     return item;
 }
 
+function getMessageRenderKey(message) {
+    return JSON.stringify({
+        id: message.id,
+        type: message.type,
+        role: message.role,
+        source: message.source,
+        sessionId: message.sessionId,
+        eventId: message.eventId,
+        threadId: message.threadId,
+        timestamp: message.timestamp,
+        content: message.content,
+        level: message.level,
+        capabilityLevel: message.capabilityLevel,
+        workflowSummary: message.workflowSummary || null,
+        rawItems: message.rawItems || null,
+        options: message.options || null
+    });
+}
+
 function formatMessageContent(message) {
     if (message.type !== 'output') return message.content;
     if (/```/.test(message.content)) return message.content;
@@ -672,17 +724,19 @@ function renderOptions(sessionId, eventId, options, messageId) {
         container.appendChild(button);
     });
 
-    const input = document.createElement('input');
-    input.className = 'custom-input';
-    input.type = 'text';
-    input.placeholder = sessionId || eventId ? '输入自定义回复，按 Enter 发送' : '记录本次选择，按 Enter 确认';
-    input.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' && input.value.trim()) {
-            selectOption(sessionId, eventId, input.value.trim(), container.dataset.promptId);
-        }
-    });
-    container.appendChild(input);
-    setTimeout(() => input.focus(), 80);
+    if (!sessionId) {
+        const input = document.createElement('input');
+        input.className = 'custom-input';
+        input.type = 'text';
+        input.placeholder = eventId ? '输入自定义回复，按 Enter 发送' : '记录本次选择，按 Enter 确认';
+        input.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' && input.value.trim()) {
+                selectOption(sessionId, eventId, input.value.trim(), container.dataset.promptId);
+            }
+        });
+        container.appendChild(input);
+        setTimeout(() => input.focus(), 80);
+    }
 
     return container;
 }
@@ -965,7 +1019,7 @@ function applyWorkflowEvent(event) {
         storeWorkflowThread(thread);
     }
 
-    if (action === 'item-append' && item) {
+    if ((!action || action === 'item-append') && item) {
         const stored = storeWorkflowItem(item);
         if (stored) refreshWorkflowConversation(getWorkflowThreadId(item));
         scheduleRenderAll();

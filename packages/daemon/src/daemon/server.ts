@@ -360,9 +360,13 @@ export function createServer(
       res.status(400).json({ error: parsed.error.message });
       return;
     }
-    const ok = sessions.injectReply(req.params.id, parsed.data.text);
-    if (!ok) {
+    const result = sessions.injectReply(req.params.id, parsed.data.text);
+    if (result === 'not-connected') {
       res.status(404).json({ error: 'session not connected' });
+      return;
+    }
+    if (result === 'invalid-reply') {
+      res.status(400).json({ error: 'reply must match a current prompt option' });
       return;
     }
     res.json({ ok: true });
