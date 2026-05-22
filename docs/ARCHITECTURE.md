@@ -285,6 +285,28 @@ enum NotificationType {
 }
 ```
 
+### 7. Workflow Template Engine (`src/workflows/`)
+
+**职责**：把"常用命令"和"跨工具任务流"沉淀为本地可重复运行的入口，覆盖 Codex / Claude Code / npm / git / `codepanion` 自身 CLI 等多种工具。
+
+**两层模型**：
+
+| 层 | 文件 | 数据位置 | 作用 |
+| --- | --- | --- | --- |
+| 单命令模板 | `templateManager.ts` | `~/.codepanion/workflow-templates.json` | 一个命令 + 占位符参数，`codepanion template run` 直接执行 |
+| 多步骤工作流 | `workflowDefinitionManager.ts` | `~/.codepanion/workflows.json` + `~/.codepanion/workflow-runs.json` | 多个步骤、依赖、checkpoint，`runWorkflow` 按依赖图执行；模板可作为步骤的 `template=` 引用 |
+
+**runWorkflow hooks**：
+
+`runWorkflow` 接受可选的 `WorkflowRunHooks`，在四个时刻回调：
+
+- `onWorkflowStart(run)` / `onWorkflowFinish(run)`
+- `onStepStart(step, run)` / `onStepFinish(step, run)`
+
+CLI 在 daemon 在线时注入 hooks，把每个步骤映射为 daemon 的 `monitor-event`（来源 `kind=cli`、name=`workflow:<name>`），GUI 因此能实时看到工作流进度而无需轮询历史文件。hooks 失败被 catch 后只打印 warning，不影响真实执行——事件总线不可用永远不应让本地命令半途夭折。
+
+**预置示例**：[`packages/daemon/examples/workflows/`](../packages/daemon/examples/workflows/) 提供 `codex-then-claude-review`、`build-test-audit` 两个开箱模板；`codepanion workflow import --file <json>` 把它们加载到本地。
+
 ## 数据流详解
 
 ### 场景 1：检测到输入提示

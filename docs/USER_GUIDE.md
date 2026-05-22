@@ -369,6 +369,7 @@ codepanion template remove review
 
 **动作**：
 - `add`: 新增或覆盖工作流
+- `import`: 从 JSON 文件批量导入（适合复用 `packages/daemon/examples/workflows/` 中的预置模板或团队约定）
 - `list`: 列出工作流
 - `show`: 查看工作流 JSON
 - `run`: 运行工作流
@@ -403,7 +404,22 @@ codepanion workflow add quality --param target=packages/daemon \
 codepanion workflow run quality --set target=packages/gui --dry-run --yes
 codepanion workflow history --query quality
 codepanion workflow replay <runId> --dry-run --yes
+
+# 从仓库内置示例批量导入（包含 codex-then-claude-review 与 build-test-audit）
+codepanion workflow import --file packages/daemon/examples/workflows/build-test-audit.json
+codepanion workflow import --file packages/daemon/examples/workflows/codex-then-claude-review.json
 ```
+
+**与 GUI 的衔接**：
+
+`workflow run` / `replay` 在 daemon 在线时会注册一个临时来源（`kind=cli`、name=`workflow:<name>`），并把每个步骤的启动 / 完成 / 失败 / checkpoint 作为 `monitor-event` 推送给 GUI 的来源活动流；运行结束自动断开。daemon 离线时退回纯 CLI 行为，不影响实际执行。
+
+**预置示例**：
+
+[`packages/daemon/examples/workflows/`](../packages/daemon/examples/workflows/) 提供两个开箱可用模板：
+
+- `codex-then-claude-review`：Codex 起草 → 人工检查点 → Claude Code 复审，演示跨工具串接
+- `build-test-audit`：build → test → audit 导出，演示本地交付前的最短闭环
 
 ---
 

@@ -1766,3 +1766,36 @@ node --test packages/adapter-sdk/test/localToolBridge.test.mjs  # 6 pass / 0 fai
 node --test packages/daemon/test/aiToolProcessAdapter.test.mjs  # 6 pass / 0 fail
 npm test                                                        # daemon 165 / adapter-sdk 13 / DTO 校验全绿
 ```
+
+## 2026-05-22 Strategy Backlog 工作流模板与跨工具转派
+
+承接 [DEVELOPMENT_TASKS.md](../DEVELOPMENT_TASKS.md#strategy-backlog) 中「工作流模板和跨工具转派的产品化」条目。daemon 端已存在完整的 `WorkflowTemplateManager` / `WorkflowDefinitionManager` / `runWorkflow` 内核与 CLI 命令，但产品化层有三个空洞：(1) GUI 完全看不到工作流运行进度（只在 CLI 输出末尾打印），(2) 没有从 JSON 文件批量导入的入口，新用户上手成本高，(3) 仓库里没有任何可直接复用的示例模板。本切片填掉前两个 + 给出两个开箱示例；GUI 模板抽屉留到 Alpha 闭环之后。
+
+### 改动
+
+- [packages/daemon/src/workflows/workflowDefinitionManager.ts](../packages/daemon/src/workflows/workflowDefinitionManager.ts)：`runWorkflow` 新增可选 `hooks: WorkflowRunHooks`（`onWorkflowStart` / `onStepStart` / `onStepFinish` / `onWorkflowFinish`）。Hook 通过 `invokeHook` 包装：失败被 catch 后只打 warning，不阻断真实执行——事件总线不可用永远不应让本地命令半途夭折。`skipped` / `checkpoint` 状态步骤也会触发 `onStepFinish`，保证 GUI 端能完整看到"为什么停在这里"。
+- [packages/daemon/src/cli/workflows.ts](../packages/daemon/src/cli/workflows.ts)：`workflowRunCommand` / `workflowReplayCommand` 新增 `createDaemonHooks(workflowName)`：daemon 在线时注册一个临时来源（`kind=cli`、name=`workflow:<name>`、`capabilityLevel=L2`），把每个步骤事件映射为 `monitor-event`（`activity` / `done` / `error` / `prompt`），运行结束自动 `disconnectSource`。daemon 离线时返回 `undefined`，CLI 退回纯本地行为。新增 `workflowImportCommand({ file })`：接受三种 JSON 形态——单个对象 / 数组 / `{ workflows: [...] }`——统一走 `WorkflowDefinitionManager.save`，所以 import 路径和 `workflow add` 命令行路径产出完全一致的存储。
+- [packages/daemon/src/cli/index.ts](../packages/daemon/src/cli/index.ts)：workflow action 列表加入 `import`，新增 `--file <path>` 选项；位置参数 `name` 在 `import` 时被当作文件路径兜底。
+- [packages/daemon/src/shared/client.ts](../packages/daemon/src/shared/client.ts)：补 `disconnectSource(id, reason?)` HTTP 客户端方法（之前 SDK / 适配器层有，但 daemon 自己的 CLI 走的内部 client 没暴露）。
+- [packages/daemon/examples/workflows/codex-then-claude-review.json](../packages/daemon/examples/workflows/codex-then-claude-review.json)（新增）：Codex 起草 → 人工 checkpoint → Claude Code 复审，示范跨工具串接。
+- [packages/daemon/examples/workflows/build-test-audit.json](../packages/daemon/examples/workflows/build-test-audit.json)（新增）：build → test → audit 导出，示范本地交付前最短闭环。
+- [packages/daemon/examples/workflows/README.md](../packages/daemon/examples/workflows/README.md)（新增）：示例集说明、用法、JSON 形态。
+- [packages/daemon/test/workflowDefinitionManager.test.mjs](../packages/daemon/test/workflowDefinitionManager.test.mjs)：新增三个 hooks 用例——成功路径调用顺序、hook throw 不阻断执行、失败路径上 `onStepFinish` / `onWorkflowFinish` 收到的状态正确。
+- [packages/daemon/test/workflowExamples.test.mjs](../packages/daemon/test/workflowExamples.test.mjs)（新增）：四个用例钉死示例模板——`examples/workflows/` 下所有 JSON 能被 `WorkflowDefinitionManager.save` 加载、`codex-then-claude-review` 含 checkpoint 且依赖正确、`build-test-audit` 串起 npm + codepanion audit、import 路径与 `parseWorkflowSteps` 命令行路径产出等价的存储结构。
+- [docs/USER_GUIDE.md](./USER_GUIDE.md)：`codepanion workflow` 段补 `import` 动作、import 示例、GUI 衔接说明、预置示例介绍。
+- [docs/ARCHITECTURE.md](./ARCHITECTURE.md)：核心模块部分新增「Workflow Template Engine」章节，介绍两层模型、`runWorkflow` hooks 与 GUI 联动方式、预置示例位置。
+
+### 不做的事
+
+- 不做 GUI 模板抽屉 / 工作流运行视图：当前 GUI 已能通过来源活动流看到步骤事件，专用工作流面板的优先级低于 Alpha 闭环验证。
+- 不在 daemon 端缓存或聚合工作流事件：`runWorkflow` 走 HTTP 把事件发给 daemon 后，由 SourceManager / WS 广播负责扇出，不在工作流层引入新的状态机。
+- 不引入新的 daemon HTTP 路由：CLI 借用现成的 `/sources/register` + `/events` + `/sources/:id/disconnect`，避免协议表面积膨胀和 C# DTO 重生。
+- 不在 import 路径上写格式探测 / 自动迁移：JSON 字段与 `WorkflowDefinitionSchema` 已经一致，让 zod 做校验即可，省去一层不确定性。
+
+### 验证
+
+```powershell
+node --test packages/daemon/test/workflowDefinitionManager.test.mjs   # 8 pass / 0 fail（含 3 个新 hooks 用例）
+node --test packages/daemon/test/workflowExamples.test.mjs            # 4 pass / 0 fail
+npm test                                                              # daemon 172 / adapter-sdk 13 / DTO 校验全绿
+```

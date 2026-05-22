@@ -1,0 +1,29 @@
+{
+  "name": "build-test-audit",
+  "description": "本地交付前的最短闭环：build → test → audit export。audit 步骤把本地事件 + 会话快照导出到工作目录，便于回看一次开发循环到底发生了什么。",
+  "params": {
+    "auditOutput": "audit-snapshot.json"
+  },
+  "steps": [
+    {
+      "id": "build",
+      "tool": "npm",
+      "command": "npm",
+      "args": ["run", "build"]
+    },
+    {
+      "id": "test",
+      "tool": "npm",
+      "command": "npm",
+      "args": ["test"],
+      "dependsOn": ["build"]
+    },
+    {
+      "id": "audit",
+      "tool": "codepanion",
+      "command": "codepanion",
+      "args": ["audit", "export", "--output", "{auditOutput}", "--redact"],
+      "dependsOn": ["test"]
+    }
+  ]
+}

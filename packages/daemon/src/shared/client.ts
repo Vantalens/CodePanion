@@ -96,6 +96,10 @@ export function listSources(): Promise<MonitorSource[]> {
   return request<MonitorSource[]>('GET', '/sources');
 }
 
+export function disconnectSource(id: string, reason?: string): Promise<unknown> {
+  return request('POST', `/sources/${encodeURIComponent(id)}/disconnect`, reason ? { reason } : {});
+}
+
 export function postOutput(id: string, chunk: string): Promise<unknown> {
   return request('POST', `/sessions/${id}/output`, { chunk });
 }

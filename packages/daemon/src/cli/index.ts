@@ -16,6 +16,7 @@ import {
 import {
   workflowAddCommand,
   workflowHistoryCommand,
+  workflowImportCommand,
   workflowListCommand,
   workflowRemoveCommand,
   workflowReplayCommand,
@@ -136,12 +137,12 @@ export async function runCli(argv: string[]): Promise<void> {
     )
     .command(
       'workflow <action> [name]',
-      '管理并运行本地多步骤工作流（add/list/show/run/remove/history/replay）',
+      '管理并运行本地多步骤工作流（add/import/list/show/run/remove/history/replay）',
       (y) =>
         y
           .positional('action', {
             type: 'string',
-            choices: ['add', 'list', 'show', 'run', 'remove', 'history', 'replay'],
+            choices: ['add', 'import', 'list', 'show', 'run', 'remove', 'history', 'replay'],
             demandOption: true,
           })
           .positional('name', { type: 'string' })
@@ -152,6 +153,7 @@ export async function runCli(argv: string[]): Promise<void> {
             string: true,
             describe: '步骤定义，例如 id=test;tool=npm;command=npm;args=test;after=build;checkpoint=true',
           })
+          .option('file', { type: 'string', describe: 'import 操作的 workflow JSON 文件路径' })
           .option('set', { type: 'array', string: true, describe: '运行时参数 name=value，可重复' })
           .option('query', { type: 'string', describe: 'history 搜索关键字' })
           .option('dry-run', { type: 'boolean', default: false, describe: '只解析步骤，不实际执行' })
@@ -161,6 +163,14 @@ export async function runCli(argv: string[]): Promise<void> {
         const name = a.name as string | undefined;
         if (action === 'list') return workflowListCommand();
         if (action === 'history') return workflowHistoryCommand({ query: a.query as string | undefined });
+        if (action === 'import') {
+          const file = (a.file as string | undefined) ?? name;
+          if (!file) {
+            console.error('usage: codepanion workflow import --file <path-to-json>');
+            process.exit(2);
+          }
+          return workflowImportCommand({ file });
+        }
         if (action === 'replay') {
           if (!name) {
             console.error('usage: codepanion workflow replay <runId>');

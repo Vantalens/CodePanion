@@ -1,0 +1,31 @@
+{
+  "name": "codex-then-claude-review",
+  "description": "用 Codex 起草改动，再让 Claude Code 复审；两个 AI 工具之间通过 CodePanion 串成一条任务流。中间放一个人工检查点，便于在 Codex 写完后停下来确认 diff 再继续。",
+  "params": {
+    "feature": "describe-the-change",
+    "repo": "."
+  },
+  "steps": [
+    {
+      "id": "draft",
+      "tool": "codex",
+      "command": "codepanion",
+      "args": ["run", "--", "codex", "--prompt", "在 {repo} 实现：{feature}。只写代码，不要 commit。"]
+    },
+    {
+      "id": "human-gate",
+      "tool": "human",
+      "command": "echo",
+      "args": ["请检查 Codex 产出的 diff，确认无误后使用 --yes 继续"],
+      "dependsOn": ["draft"],
+      "checkpoint": true
+    },
+    {
+      "id": "review",
+      "tool": "claude-code",
+      "command": "codepanion",
+      "args": ["run", "--", "claude", "review", "--scope", "uncommitted"],
+      "dependsOn": ["human-gate"]
+    }
+  ]
+}

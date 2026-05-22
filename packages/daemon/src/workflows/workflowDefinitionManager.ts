@@ -197,6 +197,13 @@ export function parseWorkflowStep(entry: string): WorkflowStep {
   });
 }
 
+export type WorkflowRunHooks = {
+  onWorkflowStart?: (run: WorkflowRun) => void | Promise<void>;
+  onStepStart?: (step: WorkflowStepRun, run: WorkflowRun) => void | Promise<void>;
+  onStepFinish?: (step: WorkflowStepRun, run: WorkflowRun) => void | Promise<void>;
+  onWorkflowFinish?: (run: WorkflowRun) => void | Promise<void>;
+};
+
 export async function runWorkflow(input: {
   workflow: WorkflowDefinition;
   values?: Record<string, string>;
@@ -204,6 +211,7 @@ export async function runWorkflow(input: {
   yes?: boolean;
   executor?: (command: string, args: string[]) => Promise<number>;
   templateManager?: WorkflowTemplateManager;
+  hooks?: WorkflowRunHooks;
 }): Promise<WorkflowRun> {
   const startedAt = Date.now();
   const run: WorkflowRun = {
@@ -218,32 +226,39 @@ export async function runWorkflow(input: {
 
   const templateManager = input.templateManager ?? new WorkflowTemplateManager();
   const executor = input.executor ?? ((command, args) => runWithPty({ command, args }));
+  const hooks = input.hooks ?? {};
   const successful = new Set<string>();
+
+  await invokeHook(hooks.onWorkflowStart, run);
   for (const step of input.workflow.steps) {
     const missing = step.dependsOn.filter((dep) => !successful.has(dep));
     if (missing.length > 0) {
       run.status = 'failed';
-      run.steps.push({
+      const skipped: WorkflowStepRun = {
         id: step.id,
         tool: step.tool,
         status: 'skipped',
         args: [],
         message: `missing dependencies: ${missing.join(', ')}`,
-      });
+      };
+      run.steps.push(skipped);
+      await invokeHook(hooks.onStepFinish, skipped, run);
       break;
     }
 
     const resolved = resolveWorkflowStep(step, run.values, templateManager);
     if (step.checkpoint && !input.yes) {
       run.status = 'paused';
-      run.steps.push({
+      const checkpointStep: WorkflowStepRun = {
         id: step.id,
         tool: step.tool,
         status: 'checkpoint',
         command: resolved.command,
         args: resolved.args,
         message: 'manual checkpoint required; rerun with --yes to continue',
-      });
+      };
+      run.steps.push(checkpointStep);
+      await invokeHook(hooks.onStepFinish, checkpointStep, run);
       break;
     }
 
@@ -256,15 +271,18 @@ export async function runWorkflow(input: {
       startedAt: Date.now(),
     };
     run.steps.push(stepRun);
+    await invokeHook(hooks.onStepStart, stepRun, run);
     if (input.dryRun) {
       stepRun.endedAt = Date.now();
       successful.add(step.id);
+      await invokeHook(hooks.onStepFinish, stepRun, run);
       continue;
     }
     const exitCode = await executor(resolved.command, resolved.args);
     stepRun.exitCode = exitCode;
     stepRun.endedAt = Date.now();
     stepRun.status = exitCode === 0 ? 'success' : 'failed';
+    await invokeHook(hooks.onStepFinish, stepRun, run);
     if (exitCode !== 0) {
       run.status = 'failed';
       break;
@@ -272,7 +290,22 @@ export async function runWorkflow(input: {
     successful.add(step.id);
   }
   run.endedAt = Date.now();
-  return WorkflowRunSchema.parse(run);
+  const finalRun = WorkflowRunSchema.parse(run);
+  await invokeHook(hooks.onWorkflowFinish, finalRun);
+  return finalRun;
+}
+
+async function invokeHook<T extends unknown[]>(
+  hook: ((...args: T) => void | Promise<void>) | undefined,
+  ...args: T
+): Promise<void> {
+  if (!hook) return;
+  try {
+    await hook(...args);
+  } catch (err) {
+    // hooks are best-effort: 不让事件总线问题阻断真实工作流执行
+    console.warn('[workflow] hook failed:', err instanceof Error ? err.message : err);
+  }
 }
 
 export function resolveWorkflowStep(
