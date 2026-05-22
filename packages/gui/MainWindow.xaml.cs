@@ -199,6 +199,16 @@ namespace CodePanion.Gui
                     return;
                 }
 
+                if (type == "task-action")
+                {
+                    var threadId = message["threadId"]?.Value<string>();
+                    if (!string.IsNullOrWhiteSpace(threadId))
+                    {
+                        HandleTaskAction(threadId, message);
+                    }
+                    return;
+                }
+
                 AddLog($"未知 WebView 消息：{type}");
             }
             catch (Exception ex)
@@ -241,6 +251,28 @@ namespace CodePanion.Gui
             catch (Exception ex)
             {
                 AddLog($"事件回复处理异常：{ex.GetType().Name} - {ex.Message}");
+            }
+        }
+
+        private async void HandleTaskAction(string threadId, JObject message)
+        {
+            try
+            {
+                var payload = new JObject();
+                if (message["pinned"] != null) payload["pinned"] = message["pinned"]!;
+                if (message["archived"] != null) payload["archived"] = message["archived"]!;
+                if (message["snoozedUntil"] != null) payload["snoozedUntil"] = message["snoozedUntil"]!;
+
+                var ok = await _daemonClient.UpdateWorkflowTaskStateAsync(threadId, payload);
+                AddLog(ok ? $"[任务状态] {threadId}" : $"[任务状态失败] {threadId}");
+                if (!ok)
+                {
+                    SendStatusMessage("error", "任务状态更新失败", $"目标任务不可用或 daemon 未连接：{threadId}");
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"任务状态更新异常：{ex.GetType().Name} - {ex.Message}");
             }
         }
 

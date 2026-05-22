@@ -238,6 +238,7 @@ function renderConversationList() {
             const priA = conversationPriority(a);
             const priB = conversationPriority(b);
             if (priA !== priB) return priA - priB;
+            if (isPinnedTask(a) !== isPinnedTask(b)) return isPinnedTask(a) ? -1 : 1;
             return b.lastAt - a.lastAt;
         });
 
@@ -247,7 +248,11 @@ function renderConversationList() {
     let conversations = allConversations.filter(item => matchesActiveView(item, activeView));
     if (activeView === 'active') {
         conversations = allConversations.filter(isCurrentConversation);
-        if (conversations.length === 0) conversations = allConversations.filter(item => isRecentConversation(item) && isUserFacingConversation(item)).slice(0, 12);
+        if (conversations.length === 0) {
+            conversations = allConversations
+                .filter(item => isRecentConversation(item) && isUserFacingConversation(item) && !isArchivedTask(item) && !isSnoozedTask(item))
+                .slice(0, 12);
+        }
     }
     conversations = conversations.slice(0, activeView === 'active' ? 24 : 60);
 
@@ -264,7 +269,11 @@ function renderConversationList() {
         const empty = document.createElement('div');
         empty.className = 'conversation-preview';
         empty.style.padding = '12px';
-        empty.textContent = activeView === 'waiting' ? '当前没有等待处理的任务' : '当前没有可显示的任务';
+        empty.textContent = activeView === 'waiting'
+            ? '当前没有等待处理的任务'
+            : activeView === 'later'
+                ? '当前没有稍后或已归档任务'
+                : '当前没有可显示的任务';
         list.appendChild(empty);
         return;
     }
@@ -278,16 +287,19 @@ function normalizeView(view) {
 }
 
 function matchesActiveView(item, activeView) {
+    if (isArchivedTask(item)) return activeView === 'later';
+    if (isSnoozedTask(item)) return activeView === 'later';
     if (!isUserFacingConversation(item)) return false;
     if (activeView === 'waiting') return item.status === 'prompt';
     if (activeView === 'running') return item.status !== 'prompt' && item.status !== 'done' && item.status !== 'error';
     if (activeView === 'error') return item.status === 'error';
+    if (activeView === 'later') return isArchivedTask(item) || isSnoozedTask(item);
     if (activeView === 'code') return state.codeBlocks.some(block => block.conversationId === item.id);
     return true;
 }
 
 function updateQueueMetrics(conversations) {
-    const visible = conversations.filter(isUserFacingConversation);
+    const visible = conversations.filter(item => isUserFacingConversation(item) && !isArchivedTask(item) && !isSnoozedTask(item));
     const setText = (id, value) => {
         const el = document.getElementById(id);
         if (el) el.textContent = String(value);
@@ -300,6 +312,7 @@ function updateQueueMetrics(conversations) {
 
 function isCurrentConversation(item) {
     if (!isUserFacingConversation(item)) return false;
+    if (isArchivedTask(item) || isSnoozedTask(item)) return false;
     if (item.status === 'done') return false;
     if (!isRecentConversation(item)) return false;
     if (isArchivedConversation(item)) return false;
@@ -310,6 +323,42 @@ function isUserFacingConversation(item) {
     if (!item) return false;
     if (isPassiveSourceKind(item.source) && !isActionableStatus(item.status)) return false;
     return true;
+}
+
+function taskStateForConversation(item) {
+    const raw = normalizeTaskStatePayload(item?.taskState || item?.TaskState);
+    const snoozedUntil = Number(raw.snoozedUntil || 0);
+    return {
+        pinned: Boolean(raw.pinned),
+        archived: Boolean(raw.archived),
+        snoozedUntil: Number.isFinite(snoozedUntil) && snoozedUntil > 0 ? snoozedUntil : 0
+    };
+}
+
+function normalizeTaskStatePayload(taskState) {
+    if (!taskState || typeof taskState !== 'object') {
+        return { pinned: false, archived: false, snoozedUntil: 0 };
+    }
+    const snoozedUntil = Number(taskState.snoozedUntil || taskState.SnoozedUntil || 0);
+    return {
+        pinned: Boolean(taskState.pinned ?? taskState.Pinned),
+        archived: Boolean(taskState.archived ?? taskState.Archived),
+        snoozedUntil: Number.isFinite(snoozedUntil) && snoozedUntil > 0 ? snoozedUntil : 0,
+        updatedAt: Number(taskState.updatedAt || taskState.UpdatedAt || 0)
+    };
+}
+
+function isArchivedTask(item) {
+    return taskStateForConversation(item).archived;
+}
+
+function isSnoozedTask(item) {
+    const snoozedUntil = taskStateForConversation(item).snoozedUntil;
+    return snoozedUntil > Date.now();
+}
+
+function isPinnedTask(item) {
+    return taskStateForConversation(item).pinned;
 }
 
 function isActionableStatus(status) {
@@ -373,6 +422,7 @@ function makeConversationButton(item) {
             <span class="conversation-chip status-chip"></span>
             <span class="conversation-chip source-chip"></span>
             <span class="conversation-chip capability-chip"></span>
+            <span class="conversation-chip management-chip" hidden></span>
         </div>
         <div class="conversation-preview"></div>
     `;
@@ -390,6 +440,18 @@ function makeConversationButton(item) {
         capChip.classList.add(capClass);
         capChip.dataset.capabilityLevel = capability.rawLevel || '';
     }
+    const managementChip = button.querySelector('.management-chip');
+    const taskState = taskStateForConversation(item);
+    if (taskState.archived) {
+        managementChip.hidden = false;
+        managementChip.textContent = '已归档';
+    } else if (taskState.snoozedUntil > Date.now()) {
+        managementChip.hidden = false;
+        managementChip.textContent = `稍后至 ${formatShortTime(taskState.snoozedUntil)}`;
+    } else if (taskState.pinned) {
+        managementChip.hidden = false;
+        managementChip.textContent = '已置顶';
+    }
     button.querySelector('.conversation-preview').textContent = display.action;
     return button;
 }
@@ -404,6 +466,13 @@ function makeConversationButton(item) {
 //   running     → 运行中（其余）
 function deriveConversationDisplay(item) {
     if (!item) return { kind: 'running', label: '运行中', action: '执行中' };
+    const taskState = taskStateForConversation(item);
+    if (taskState.archived) {
+        return { kind: 'archived', label: '已归档', action: '已从主队列移出' };
+    }
+    if (taskState.snoozedUntil > Date.now()) {
+        return { kind: 'deferred', label: '稍后处理', action: `提醒已延后到 ${formatShortTime(taskState.snoozedUntil)}` };
+    }
     const status = item.status || '';
     if (status === 'prompt') {
         return { kind: 'waiting-me', label: '等待我', action: '选择选项或输入回复' };
@@ -446,6 +515,8 @@ function conversationPriority(item) {
         case 'running': return 3;
         case 'source-online': return 4;
         case 'done': return 5;
+        case 'deferred': return 6;
+        case 'archived': return 7;
         default: return 6;
     }
 }
@@ -462,13 +533,14 @@ function renderChat() {
         ? conversation?.title || '任务'
         : '当前任务';
     updateStageMeta(conversation, messages);
+    renderTaskSpotlight(conversation, messages);
 
     if (messages.length === 0) {
         container.innerHTML = `
             <div class="empty-state">
                 <div>
-                    <strong>暂无任务</strong><br>
-                    有新的工作流事件时会显示在这里。
+                    <strong>当前暂无任务内容</strong>
+                    请从左侧任务列表中选择任务，或等待新的任务事件进入工作台。
                 </div>
             </div>
         `;
@@ -533,6 +605,7 @@ function updateStageMeta(conversation, messages) {
     const latest = messages[messages.length - 1];
     const source = latest?.source || conversation?.source || '';
     const capability = capabilityForMessage(latest || { source });
+    const display = deriveConversationDisplay(conversation || latest || {});
     const setText = (id, value) => {
         const el = document.getElementById(id);
         if (el) el.textContent = value;
@@ -542,7 +615,51 @@ function updateStageMeta(conversation, messages) {
     // P1.3：stage 顶部 capability chip 颜色与列表 chip 对齐，
     // 用户在 stage / list / drawer 三个地方看到的能力色一致。
     applyCapabilityClass('stage-capability', capability.rawLevel);
-    setText('stage-status', statusLabel(conversation?.status || latest?.type || 'idle'));
+    setText('stage-status', display.label || statusLabel(conversation?.status || latest?.type || 'idle'));
+}
+
+function renderTaskSpotlight(conversation, messages) {
+    const safeMessages = Array.isArray(messages) ? messages : [];
+    const latest = safeMessages[safeMessages.length - 1];
+    const display = deriveConversationDisplay(conversation || latest || {});
+    const taskState = taskStateForConversation(conversation);
+    const workspace = latest?.workspace || safeMessages.find(message => message.workspace)?.workspace || '';
+    const breakdown = buildSpotlightBreakdown(conversation);
+    const management = taskState.archived
+        ? '已归档'
+        : taskState.snoozedUntil > Date.now()
+            ? `稍后至 ${formatShortTime(taskState.snoozedUntil)}`
+            : taskState.pinned
+                ? '已置顶'
+                : conversation
+                    ? '主队列中'
+                    : '等待任务';
+    const updatedAt = Number(conversation?.lastAt || latest?.timestamp || 0);
+    const summaryCount = Number(conversation?.count || safeMessages.length || 0);
+    const setText = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = value;
+    };
+
+    setText('spotlight-next-action', conversation ? display.label : '请选择需要处理的任务');
+    setText('spotlight-subaction', conversation ? display.action : '可从左侧任务列表中切换，或等待新的任务进入队列。');
+    setText('spotlight-project', workspace ? shortPath(workspace) : (conversation?.title || '未绑定项目'));
+    setText('spotlight-workspace', workspace || '当前任务未提供可展示的工作区路径。');
+    setText('spotlight-management', management);
+    setText('spotlight-updated', updatedAt ? `最近更新于 ${formatShortTime(updatedAt)}` : '等待新的任务状态更新。');
+    setText('spotlight-summary', `${summaryCount} 条记录`);
+    setText('spotlight-breakdown', breakdown);
+}
+
+function buildSpotlightBreakdown(conversation) {
+    if (!conversation) return '当前尚无可展示的任务记录。';
+    const parts = [];
+    if (conversation.promptCount) parts.push(`${conversation.promptCount} 个等待`);
+    if (conversation.errorCount) parts.push(`${conversation.errorCount} 个错误`);
+    if (conversation.fileChangeCount) parts.push(`${conversation.fileChangeCount} 个文件变更`);
+    if (conversation.codeCount) parts.push(`${conversation.codeCount} 段代码`);
+    if (parts.length === 0 && conversation.messageCount) parts.push(`${conversation.messageCount} 条主消息`);
+    return parts.length > 0 ? parts.join('，') : '当前没有需要特别关注的等待、错误或代码产物。';
 }
 
 function applyCapabilityClass(elementId, rawLevel) {
@@ -575,6 +692,8 @@ function statusLabel(status) {
     if (status === 'prompt') return '等待我';
     if (status === 'error') return '失败';
     if (status === 'done') return '完成';
+    if (status === 'deferred') return '稍后处理';
+    if (status === 'archived') return '已归档';
     if (status === 'idle') return '等待事件';
     return '运行中';
 }
@@ -1022,6 +1141,8 @@ function renderContextDrawer() {
     const capability = capabilityForMessage(latest || { source });
     const prompt = latestActionablePrompt(messages);
     const workspace = latest?.workspace || messages.find(message => message.workspace)?.workspace || '';
+    const threadId = activeWorkflowThreadId();
+    const taskState = taskStateForConversation(conversation);
     updateStageMeta(conversation, messages);
 
     const setText = (id, value) => {
@@ -1034,7 +1155,7 @@ function renderContextDrawer() {
     setText('drawer-capability', capability.level);
     applyCapabilityClass('drawer-capability', capability.rawLevel);
     setText('drawer-privacy', privacyBoundaryText(latest?.privacyBoundary || metadataFromSourceId(latest?.sourceId, 'privacyBoundary') || source));
-    setText('drawer-action-note', capability.detail);
+    setText('drawer-action-note', buildTaskActionNote(capability.detail, taskState));
 
     const canReply = Boolean(prompt);
     // P1.2：复制上下文从"一行一条 compactText"升级为结构化诊断文本，
@@ -1044,7 +1165,41 @@ function renderContextDrawer() {
     wireActionButton('drawer-focus-reply', canReply, () => focusActiveReply(), { hideWhenDisabled: true });
     wireActionButton('stage-copy-context', messages.length > 0, () => copyText(stageContext));
     wireActionButton('drawer-copy-workspace', Boolean(workspace), () => copyText(workspace));
+    wireTaskActionButtons(threadId, taskState);
     wireOmnibar(prompt);
+}
+
+function buildTaskActionNote(capabilityDetail, taskState) {
+    if (taskState.archived) return `${capabilityDetail} 当前任务已归档，可恢复后重新进入主队列。`;
+    if (taskState.snoozedUntil > Date.now()) return `${capabilityDetail} 当前任务已稍后提醒，恢复时间：${formatFullTime(taskState.snoozedUntil)}。`;
+    if (taskState.pinned) return `${capabilityDetail} 当前任务已置顶，会在同优先级任务中优先显示。`;
+    return capabilityDetail;
+}
+
+function wireTaskActionButtons(threadId, taskState) {
+    const canManage = Boolean(threadId);
+    const pinLabel = taskState.pinned ? '取消置顶' : '置顶任务';
+    const snoozeLabel = taskState.snoozedUntil > Date.now() ? '恢复到当前' : '稍后 1 小时';
+    const archiveLabel = taskState.archived ? '恢复任务' : '归档任务';
+
+    setButtonText('stage-pin-task', pinLabel);
+    setButtonText('drawer-pin-task', pinLabel);
+    setButtonText('stage-snooze-task', snoozeLabel);
+    setButtonText('drawer-snooze-task', snoozeLabel);
+    setButtonText('stage-archive-task', archiveLabel);
+    setButtonText('drawer-archive-task', archiveLabel);
+
+    wireActionButton('stage-pin-task', canManage, () => togglePinnedTask(threadId, taskState));
+    wireActionButton('drawer-pin-task', canManage, () => togglePinnedTask(threadId, taskState));
+    wireActionButton('stage-snooze-task', canManage, () => toggleSnoozeTask(threadId, taskState));
+    wireActionButton('drawer-snooze-task', canManage, () => toggleSnoozeTask(threadId, taskState));
+    wireActionButton('stage-archive-task', canManage, () => toggleArchivedTask(threadId, taskState));
+    wireActionButton('drawer-archive-task', canManage, () => toggleArchivedTask(threadId, taskState));
+}
+
+function setButtonText(id, text) {
+    const button = document.getElementById(id);
+    if (button) button.textContent = text;
 }
 
 // P1.2：复制上下文走结构化诊断格式，保留来源、能力、隐私边界与最近若干条完整消息，
@@ -1054,12 +1209,16 @@ function buildStageContext(conversation, messages) {
     const latest = safeMessages[safeMessages.length - 1] || {};
     const source = conversation?.source || latest.source || '';
     const capability = capabilityForMessage(latest.source ? latest : { source });
+    const taskState = taskStateForConversation(conversation);
     const lines = [];
     lines.push('# CodePanion 任务上下文');
     lines.push(`任务：${conversation?.title || latest.conversationTitle || '当前任务'}`);
     if (source) lines.push(`来源：${sourceLabel({ source })}`);
     if (conversation?.status) lines.push(`状态：${statusLabel(conversation.status)}`);
     lines.push(`能力：${capability.level}`);
+    if (taskState.pinned) lines.push('任务管理：已置顶');
+    if (taskState.archived) lines.push('任务管理：已归档');
+    if (taskState.snoozedUntil > Date.now()) lines.push(`任务管理：稍后至 ${formatFullTime(taskState.snoozedUntil)}`);
     const privacy = privacyBoundaryText(latest.privacyBoundary || metadataFromSourceId(latest.sourceId, 'privacyBoundary') || source);
     if (privacy) lines.push(`隐私边界：${privacy}`);
 
@@ -1086,6 +1245,46 @@ function wireActionButton(id, enabled, handler, options = {}) {
     if (options.hideWhenDisabled) button.hidden = !enabled;
     button.disabled = !enabled;
     button.onclick = enabled ? handler : null;
+}
+
+function activeWorkflowThreadId() {
+    if (!String(state.activeConversation || '').startsWith('workflow:')) return '';
+    return String(state.activeConversation).slice('workflow:'.length);
+}
+
+function togglePinnedTask(threadId, taskState) {
+    sendTaskAction(threadId, { pinned: !taskState.pinned });
+}
+
+function toggleSnoozeTask(threadId, taskState) {
+    const isSnoozed = taskState.snoozedUntil > Date.now();
+    sendTaskAction(threadId, { snoozedUntil: isSnoozed ? null : Date.now() + (60 * 60 * 1000) });
+}
+
+function toggleArchivedTask(threadId, taskState) {
+    sendTaskAction(threadId, { archived: !taskState.archived });
+}
+
+function sendTaskAction(threadId, patch) {
+    if (!threadId) return;
+    sendToHost({
+        type: 'task-action',
+        threadId,
+        ...patch
+    });
+}
+
+function formatShortTime(timestamp) {
+    return new Date(timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+}
+
+function formatFullTime(timestamp) {
+    return new Date(timestamp).toLocaleString('zh-CN', {
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
 }
 
 function wireOmnibar(prompt) {
@@ -1240,7 +1439,7 @@ function applyWorkflowEvent(event) {
         scheduleRenderAll();
     } else {
         if (thread) refreshWorkflowConversation(thread.id || thread.Id);
-        renderConversationList();
+        scheduleRenderAll();
     }
 }
 
@@ -1248,6 +1447,7 @@ function storeWorkflowThread(thread) {
     const id = thread.id || thread.Id;
     if (!id) return;
     const existing = state.workflowThreads.get(id) || {};
+    const taskState = normalizeTaskStatePayload(thread.taskState || thread.TaskState || existing.taskState || existing.TaskState);
     state.workflowThreads.set(id, {
         ...existing,
         id,
@@ -1256,7 +1456,8 @@ function storeWorkflowThread(thread) {
         workspace: thread.workspace || thread.Workspace || existing.workspace || '',
         status: thread.status || thread.Status || existing.status || 'running',
         updatedAt: Number(thread.updatedAt || thread.UpdatedAt || existing.updatedAt || Date.now()),
-        itemCount: Number(thread.itemCount || thread.ItemCount || existing.itemCount || 0)
+        itemCount: Number(thread.itemCount || thread.ItemCount || existing.itemCount || 0),
+        taskState
     });
     pruneWorkflowThreads();
 }
@@ -1503,7 +1704,8 @@ function refreshWorkflowConversation(threadId) {
         fileChangeCount: summary.fileChangeCount,
         messageCount: summary.messageCount,
         toolCount: summary.toolCount,
-        commandCount: summary.commandCount
+        commandCount: summary.commandCount,
+        taskState: normalizeTaskStatePayload(thread.taskState)
     });
 }
 

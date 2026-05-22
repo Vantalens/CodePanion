@@ -13,6 +13,18 @@ function loadChat() {
   const dom = new JSDOM(
     `<!doctype html><html><body>
       <div id="app-shell"></div>
+      <button class="rail-button" data-view="active"></button>
+      <button class="rail-button" data-view="waiting"></button>
+      <button class="rail-button" data-view="running"></button>
+      <button class="rail-button" data-view="error"></button>
+      <button class="rail-button" data-view="later"></button>
+      <button class="rail-button" data-view="code"></button>
+      <button class="tool-button" data-view="active"></button>
+      <button class="tool-button" data-view="waiting"></button>
+      <button class="tool-button" data-view="running"></button>
+      <button class="tool-button" data-view="error"></button>
+      <button class="tool-button" data-view="later"></button>
+      <button class="tool-button" data-view="code"></button>
       <span class="status-dot"></span>
       <span class="status-text"></span>
       <div id="conversation-list"></div>
@@ -28,6 +40,9 @@ function loadChat() {
       <span id="stage-capability"></span>
       <span id="stage-status"></span>
       <button id="stage-focus-reply"></button>
+      <button id="stage-pin-task"></button>
+      <button id="stage-snooze-task"></button>
+      <button id="stage-archive-task"></button>
       <button id="stage-copy-context"></button>
       <strong id="drawer-source-name"></strong>
       <p id="drawer-source-detail"></p>
@@ -35,6 +50,9 @@ function loadChat() {
       <strong id="drawer-privacy"></strong>
       <p id="drawer-action-note"></p>
       <button id="drawer-focus-reply"></button>
+      <button id="drawer-pin-task"></button>
+      <button id="drawer-snooze-task"></button>
+      <button id="drawer-archive-task"></button>
       <button id="drawer-copy-workspace"></button>
       <div id="drawer-subtitle"></div>
       <div id="code-count"></div>
@@ -44,10 +62,21 @@ function loadChat() {
     </body></html>`,
     { runScripts: 'outside-only', pretendToBeVisual: true },
   );
+  const hostMessages = [];
+  dom.window.chrome = {
+    webview: {
+      postMessage(message) {
+        hostMessages.push(message);
+      },
+      addEventListener() {},
+    },
+  };
+  dom.window.CSS = dom.window.CSS || { escape: (value) => String(value) };
   dom.window.CODEPANION_TEST = true;
   dom.window.eval(vendorSource);
   dom.window.eval(chatSource);
   dom.window.document.dispatchEvent(new dom.window.Event('DOMContentLoaded'));
+  dom.window.__hostMessages = hostMessages;
   return dom.window;
 }
 
@@ -933,6 +962,86 @@ test('三个及以上并行任务同屏渲染时优先级排序稳定且不抢�
   await new Promise(resolve => win.requestAnimationFrame(resolve));
 
   assert.equal(state.activeConversation, 'workflow:run-thread', '其他任务的新事件不能抢走用户当前选中的任务');
+});
+
+test('snoozed and archived tasks are removed from the active queue and available in the later view', async () => {
+  const win = loadChat();
+  const { handleMessage, state } = win.CodePanion.__test;
+  const now = Date.now();
+
+  handleMessage({
+    type: 'workflow-snapshot',
+    snapshot: {
+      threads: [
+        {
+          id: 'later-thread',
+          source: 'cli',
+          title: '稍后任务',
+          status: 'waiting',
+          updatedAt: now,
+          itemCount: 1,
+          taskState: { snoozedUntil: now + 60 * 60 * 1000 },
+        },
+        {
+          id: 'archive-thread',
+          source: 'cli',
+          title: '归档任务',
+          status: 'done',
+          updatedAt: now - 1000,
+          itemCount: 1,
+          taskState: { archived: true },
+        },
+      ],
+      items: [
+        { id: 'later-item', threadId: 'later-thread', source: 'cli', kind: 'prompt', title: '等待输入', content: '继续？', options: ['是', '否'], status: 'waiting', timestamp: now },
+        { id: 'archive-item', threadId: 'archive-thread', source: 'cli', kind: 'message', title: 'assistant', content: '已完成', status: 'done', timestamp: now - 1000 },
+      ],
+    },
+  });
+
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+
+  state.activeView = 'active';
+  win.CodePanion.__test.renderAll();
+  assert.equal(win.document.querySelectorAll('.conversation-item').length, 0, 'active 视图不应展示稍后/归档任务');
+
+  state.activeView = 'later';
+  win.CodePanion.__test.renderAll();
+  const laterItems = Array.from(win.document.querySelectorAll('.conversation-item'));
+  assert.equal(laterItems.length, 2, 'later 视图应展示稍后与归档任务');
+  assert.ok(laterItems.some(item => /稍后处理/.test(item.textContent) && /稍后至/.test(item.textContent)));
+  assert.ok(laterItems.some(item => /已归档/.test(item.textContent)));
+});
+
+test('task action buttons post daemon task-state updates for workflow conversations', async () => {
+  const win = loadChat();
+  const { handleMessage, state } = win.CodePanion.__test;
+  const now = Date.now();
+
+  handleMessage({
+    type: 'workflow-snapshot',
+    snapshot: {
+      threads: [{ id: 'managed-thread', source: 'cli', title: '可管理任务', status: 'running', updatedAt: now, itemCount: 1 }],
+      items: [{ id: 'managed-item', threadId: 'managed-thread', source: 'cli', kind: 'message', title: 'assistant', content: '执行中', timestamp: now }],
+    },
+  });
+
+  state.activeConversation = 'workflow:managed-thread';
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+  win.CodePanion.__test.renderAll();
+
+  win.document.getElementById('stage-pin-task').click();
+  win.document.getElementById('stage-snooze-task').click();
+  win.document.getElementById('stage-archive-task').click();
+
+  const actionMessages = win.__hostMessages.filter(message => message?.type === 'task-action');
+  assert.equal(actionMessages.length, 3, '应发送三个任务动作');
+  const [pin, snooze, archive] = actionMessages;
+  assert.deepEqual({ ...pin }, { type: 'task-action', threadId: 'managed-thread', pinned: true });
+  assert.equal(snooze.type, 'task-action');
+  assert.equal(snooze.threadId, 'managed-thread');
+  assert.ok(typeof snooze.snoozedUntil === 'number' && snooze.snoozedUntil > now);
+  assert.deepEqual({ ...archive }, { type: 'task-action', threadId: 'managed-thread', archived: true });
 });
 
 test('中文文本在主视图与复制上下文中完整保留不乱码', async () => {

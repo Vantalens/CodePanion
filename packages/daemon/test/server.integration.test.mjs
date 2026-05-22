@@ -1233,3 +1233,55 @@ test('daemon 重启后 workflow snapshot 恢复并通过 WS 推送给重连的 G
     rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('workflow thread task-state updates persist and broadcast thread-upsert events', async () => {
+  await withServer(async ({ port, token }) => {
+    const observer = await openWsBuffered(`ws://127.0.0.1:${port}/ws?role=observer`, {
+      protocols: tokenSubprotocol(token),
+    });
+    const sessionCreated = await request(port, token, 'POST', '/sessions', {
+      command: 'codex',
+      args: ['review'],
+      cliPid: 65432,
+      source: 'cli',
+    });
+    assert.equal(sessionCreated.status, 200);
+    const sessionId = sessionCreated.body.id;
+    const threadId = `session:${sessionId}`;
+
+    try {
+      const threadUpdated = observer.wait((m) =>
+        m.type === 'workflow-event' &&
+        m.event?.action === 'thread-upsert' &&
+        m.event?.thread?.id === threadId &&
+        m.event?.thread?.taskState?.pinned === true,
+      );
+
+      const updated = await request(
+        port,
+        token,
+        'POST',
+        `/workflow/threads/${encodeURIComponent(threadId)}/task-state`,
+        { pinned: true, archived: true, snoozedUntil: 123456789 },
+      );
+
+      assert.equal(updated.status, 200);
+      assert.equal(updated.body.taskState.pinned, true);
+      assert.equal(updated.body.taskState.archived, true);
+      assert.equal(updated.body.taskState.snoozedUntil, 123456789);
+      assert.ok(updated.body.taskState.updatedAt > 0);
+
+      const wsEvent = await threadUpdated;
+      assert.equal(wsEvent.event.thread.taskState.archived, true);
+      assert.equal(wsEvent.event.thread.taskState.snoozedUntil, 123456789);
+
+      const thread = await request(port, token, 'GET', `/workflow/threads/${encodeURIComponent(threadId)}`);
+      assert.equal(thread.status, 200);
+      assert.equal(thread.body.threads[0].taskState.pinned, true);
+      assert.equal(thread.body.threads[0].taskState.archived, true);
+      assert.equal(thread.body.threads[0].taskState.snoozedUntil, 123456789);
+    } finally {
+      await closeWs(observer.ws);
+    }
+  });
+});

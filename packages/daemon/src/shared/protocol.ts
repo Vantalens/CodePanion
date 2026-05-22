@@ -125,6 +125,14 @@ export const WorkflowStatusSchema = z.enum([
   'paused',
 ]);
 
+export const WorkflowTaskStateSchema = z.object({
+  pinned: z.boolean().optional().default(false),
+  archived: z.boolean().optional().default(false),
+  snoozedUntil: z.number().int().positive().nullable().optional(),
+  updatedAt: z.number().int().positive().optional(),
+});
+export type WorkflowTaskState = z.infer<typeof WorkflowTaskStateSchema>;
+
 export const WorkflowItemSchema = z.object({
   id: z.string(),
   threadId: z.string(),
@@ -149,6 +157,7 @@ export const WorkflowThreadSchema = z.object({
   status: WorkflowStatusSchema.default('running'),
   updatedAt: z.number().int().positive(),
   itemCount: z.number().int().nonnegative().default(0),
+  taskState: WorkflowTaskStateSchema.optional(),
 });
 export type WorkflowThread = z.infer<typeof WorkflowThreadSchema>;
 
@@ -156,6 +165,13 @@ export type WorkflowSnapshot = {
   threads: WorkflowThread[];
   items: WorkflowItem[];
 };
+
+export const UpdateWorkflowTaskStateRequestSchema = z.object({
+  pinned: z.boolean().optional(),
+  archived: z.boolean().optional(),
+  snoozedUntil: z.number().int().positive().nullable().optional(),
+});
+export type UpdateWorkflowTaskStateRequest = z.infer<typeof UpdateWorkflowTaskStateRequestSchema>;
 
 export const RegisterSessionRequestSchema = z.object({
   command: z.string().min(1),

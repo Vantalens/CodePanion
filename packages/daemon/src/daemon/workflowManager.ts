@@ -1,4 +1,4 @@
-import type { WorkflowItem, WorkflowSnapshot, WorkflowThread, WsServerEvent } from '../shared/protocol.js';
+import type { WorkflowItem, WorkflowSnapshot, WorkflowTaskState, WorkflowThread, WsServerEvent } from '../shared/protocol.js';
 import { logger } from '../logger.js';
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { writeFile, rename, unlink } from 'node:fs/promises';
@@ -51,8 +51,33 @@ export class WorkflowManager {
       ...current,
       ...input,
       itemCount: this.items.get(input.id)?.length ?? current?.itemCount ?? input.itemCount ?? 0,
+      taskState: normalizeTaskState(input.taskState ?? current?.taskState),
     };
     this.threads.set(thread.id, thread);
+    this.broadcast({ type: 'workflow-event', event: { action: 'thread-upsert', thread } });
+    this.scheduleSnapshot();
+    return thread;
+  }
+
+  updateTaskState(threadId: string, patch: {
+    pinned?: boolean;
+    archived?: boolean;
+    snoozedUntil?: number | null;
+  }): WorkflowThread | undefined {
+    const current = this.threads.get(threadId);
+    if (!current) return undefined;
+
+    const nextTaskState = normalizeTaskState({
+      ...current.taskState,
+      ...patch,
+      updatedAt: Date.now(),
+    });
+
+    const thread: WorkflowThread = {
+      ...current,
+      taskState: nextTaskState,
+    };
+    this.threads.set(threadId, thread);
     this.broadcast({ type: 'workflow-event', event: { action: 'thread-upsert', thread } });
     this.scheduleSnapshot();
     return thread;
@@ -182,6 +207,7 @@ export class WorkflowManager {
         this.threads.set(thread.id, {
           ...thread,
           status: thread.status === 'done' || thread.status === 'error' ? thread.status : 'paused',
+          taskState: normalizeTaskState(thread.taskState),
         });
       }
 
@@ -265,4 +291,16 @@ export class WorkflowManager {
     mkdirSync(dirname(this.snapshotPath), { recursive: true });
     this.snapshotDirEnsured = true;
   }
+}
+
+function normalizeTaskState(taskState?: Partial<WorkflowTaskState> | null): WorkflowTaskState {
+  const snoozedUntil = typeof taskState?.snoozedUntil === 'number' && Number.isFinite(taskState.snoozedUntil)
+    ? taskState.snoozedUntil
+    : null;
+  return {
+    pinned: Boolean(taskState?.pinned),
+    archived: Boolean(taskState?.archived),
+    snoozedUntil,
+    updatedAt: taskState?.updatedAt,
+  };
 }

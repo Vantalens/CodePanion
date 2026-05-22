@@ -402,6 +402,27 @@ namespace CodePanion.Gui.Services
             }
         }
 
+        public async Task<bool> UpdateWorkflowTaskStateAsync(string threadId, object payload)
+        {
+            try
+            {
+                var url = $"{_daemonUrl}/workflow/threads/{Uri.EscapeDataString(threadId)}/task-state";
+                var response = await PostJsonAsync(url, payload);
+                if (!response.IsSuccessStatusCode)
+                {
+                    var error = await response.Content.ReadAsStringAsync();
+                    Log($"更新任务状态失败：{error}");
+                    return false;
+                }
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log($"更新任务状态异常：{ex.Message}");
+                return false;
+            }
+        }
+
         public async Task DisconnectAsync()
         {
             try

@@ -1,409 +1,88 @@
 # CodePanion
 
-CodePanion 是一个本地优先、供应商中立、跨软件 / 跨窗口 / 跨项目的多任务完整操作台，面向用户同时在多个工具和多个窗口里推进任务的真实场景。它不替代 Codex、Claude Code、VS Code、Trae、CodeBuddy、通义灵码 / Qoder、CodeGeeX、百度 Comate 等工具本身，也不试图成为通用个人 Agent、AI IDE、模型聊天客户端、Raycast 式启动器或 Activity Monitor 式进程监控器；它作为上层控制台，把分散在终端、IDE、独立 AI 编辑器和本地适配器中的任务状态、等待输入、审批、异常、结果与上下文统一收束到一个图形工作台中。
+CodePanion 是一个本地优先、供应商中立、面向跨软件 / 跨窗口 / 跨项目场景的多任务操作平台。
 
-当前产品不推倒重做。阶段 1 保留 Windows Alpha 形态：用户双击 `CodePanion.Gui.exe` 即可打开，自动启动本地 daemon，看到所有活跃任务、等待输入任务、审批/失败状态，并能在支持的场景中直接回复、批准、继续、终止或跳回原窗口。阶段 2 再在稳定个人控制台基础上增强历史、管理和跨工具协作能力。
+在多任务并行工作场景中，用户往往需要同时在 VS Code、多开终端、Codex、Claude Code 及其他工具之间切换。任务的等待输入、人工审批、执行失败与完成结果分散在不同窗口中，容易造成阻塞点遗漏与处理延迟。CodePanion 通过统一的图形界面汇聚这些任务，帮助用户在单一工作台中完成查看、提醒、处理与继续执行。
 
-## 🎯 核心功能
+## 核心能力
 
-- **多源任务汇聚**：统一接收 CLI/PTTY、Codex Desktop、本地 AI 工具扫描、CC Switch、VS Code 扩展和外部适配器事件
-- **六档任务队列**：所有来源的任务在主队列中按 `等待我 > 失败 > 需审阅 > 运行中 > 来源在线 > 完成` 优先级排序，等待输入永远置顶
-- **主视图分区**：助手内容、用户输入、等待输入、错误摘要走主区；命令输出、工具调用、低价值 status 折叠在"执行记录"中，避免命令片段刷屏
-- **焦点稳定**：新事件不抢走当前选中的任务，主内容区不重建，不强制滚到底部
-- **失败诊断复制**：失败任务一键复制结构化诊断（来源 / 能力 / 最近命令 / 错误文本），可直接粘给 Codex / Claude 接力
-- **来源与能力可见**：每个任务标注来源类型（CLI/PTTY、Codex Desktop、VS Code、外部适配器、CC Switch …）和能力层级（L1 进程识别 → L4 工作流编排）
-- **账号 / provider 切换兼容**：识别 CC Switch / Claude Code Switch 类工具，先切换账号或 provider，再由 CodePanion 接管实际 CLI 任务
-- **完整操作闭环**：围绕任务生命周期提供查看、提醒、管理和必要交互，而不是只做被动通知
-- **本地优先**：核心数据保留在本机，后台守护进程低资源运行
-- **能力边界透明**：不读取账号、token、cookie、插件私有数据库或全局屏幕内容
-- **实时通信**：基于 WebSocket 的实时双向通信
+- 统一汇聚来自多种来源的任务，并在单一界面中集中呈现
+- 按 `等待我 / 失败 / 需审阅 / 运行中 / 完成` 的优先级组织任务队列
+- 将等待输入、失败状态与关键上下文前置展示，降低遗漏风险
+- 折叠命令输出与低价值状态信息，减少主界面干扰
+- 支持 `置顶 / 稍后 / 归档 / 恢复` 等任务管理动作
+- 支持在图形界面中完成必要交互，例如回复、继续执行与复制诊断上下文
+- 在 daemon 或 GUI 重启后恢复最近任务状态，保持连续性
 
-## 🧭 产品保留决策
+## 使用方式
 
-CodePanion 现有产品是后续多任务操作台路线的基础，而不是需要废弃的旧版本：
+CodePanion 当前以 Windows 本地图形软件的方式提供使用。
 
-- **保留产品形态**：继续以 Windows Alpha 和 `CodePanion.Gui.exe` 双击运行作为当前普通用户入口。
-- **保留技术栈**：Alpha 阶段继续使用 Node daemon、HTTP/WebSocket、WPF/WebView2 GUI，不立即迁移 Tauri 或 Avalonia。
-- **保留核心能力**：CLI/PTTY 包装、提示检测、直接回复、系统通知、GUI 时间线、Codex Desktop 本地同步、VS Code 来源注册、外部适配器 API、本地 AI 工具进程识别。
-- **策略升级**：从“提醒 + 多源监控工具”收束为“跨软件 / 跨窗口 / 跨项目的多任务完整操作台”，优先解决“谁在运行、谁在等我、谁失败、我应该先处理谁、我能在哪里直接操作”。
-- **定位边界**：以 [产品定位契约](docs/POSITIONING.md) 为准，避免发散成通用个人 Agent、完整 AI IDE、通用启动器或系统进程监控器。
-
-## 👥 目标用户
-
-- **重度个人开发者**：同时使用 Claude Code、Codex、VS Code/Copilot、Trae、CodeBuddy 或多个终端任务。
-- **AI-native 独立开发者 / 学生**：在多模型、多工具之间切换，希望保留本地上下文、历史和任务归属。
-- **企业研发骨干**：关注私有码仓、内网环境、工具中立、任务留痕和后续审计治理，但当前阶段仍以个人本地控制台闭环为先。
-
-## 📦 项目结构
-
-```
-CodePanion/
-├── packages/
-│   ├── daemon/          # Node.js 守护进程和 CLI 工具
-│   │   ├── src/
-│   │   │   ├── cli/     # 命令行接口
-│   │   │   ├── daemon/  # 守护进程核心
-│   │   │   ├── pty/     # 伪终端管理
-│   │   │   └── shared/  # 共享模块
-│   │   └── package.json
-│   └── gui/             # C# .NET 图形界面
-│       └── CodePanion.Gui.csproj
-└── package.json
-```
-
-## 🚀 快速开始
-
-### 普通用户使用
-
-下载或生成 Windows 便携版后，打开发布目录并双击：
+下载或生成便携版后，直接运行：
 
 ```text
 dist/CodePanion-win-x64/CodePanion.Gui.exe
 ```
 
-GUI 会自动启动本地 daemon。普通使用不需要手动输入 `npm run gui:run`、`dotnet run` 或 `codepanion start`。
+图形界面会自动启动本地 daemon。正常使用不需要先打开终端，也不需要手动执行 `npm run gui:run`、`dotnet run` 或 `codepanion start`。
 
-### 开发者构建
+## 产品边界
 
-前置要求：
+CodePanion 不是：
 
-- Node.js >= 24（Windows 便携包当前固定 `node.exe` 为 v24.14.1，并校验 SHA256）
-- .NET SDK >= 8.0
-- Windows 10/11
+- 完整 AI IDE
+- 模型聊天客户端
+- 通用个人 Agent
+- 通用启动器
+- 系统级进程监控器
+
+CodePanion 当前聚焦于以下核心目标：
+
+> **将分散在多个软件、多个窗口与多个项目中的任务集中到一个图形工作台中统一管理。**
+
+## 目标用户
+
+- 同时运行多个 AI 编程任务的个人开发者
+- 同时管理多个终端、多个项目与多个窗口的重度本地用户
+- 对本地优先、工具中立与能力边界透明有明确要求的任务管理用户
+
+## 当前技术形态
+
+- Windows GUI：WPF + WebView2
+- 本地 daemon：Node.js
+- 接入方式：CLI/PTTY、Codex Desktop、本地适配器、VS Code 来源事件等
+- 数据策略：默认本地保存，不读取 token、cookie、私有插件数据库或全局屏幕内容
+
+## 开发者入口
+
+如需进行构建、开发或集成，请从以下文档进入：
+
+- [安装与构建](docs/INSTALL.md)
+- [用户指南](docs/USER_GUIDE.md)
+- [开发说明](docs/DEVELOPMENT.md)
+- [产品定位](docs/POSITIONING.md)
+- [产品路线](docs/PRODUCT_ROADMAP.md)
+- [监控来源](docs/MONITORING_SOURCES.md)
+
+最小构建流程如下：
 
 ```bash
-# 1. 克隆仓库
-git clone https://github.com/Vantalens/CodePanion.git
-cd CodePanion
-
-# 2. 安装依赖
 npm install
-
-# 3. 构建 daemon
 npm run build
-
-# 4. 构建 Windows 便携版
 npm run package:windows
-
-# 5. 双击发布目录中的 EXE
-dist/CodePanion-win-x64/CodePanion.Gui.exe
 ```
 
-### 首次使用
+## 仓库结构
 
-```bash
-# 测试通知功能（开发者 CLI 路径）
-codepanion notify "测试通知" -m "CodePanion 已就绪！"
+```text
+CodePanion/
+├── packages/
+│   ├── daemon/   # 本地 daemon、CLI、workflow 模型、接入层
+│   └── gui/      # Windows 图形界面
+├── docs/         # 产品、安装、开发、路线文档
+└── scripts/      # 打包与辅助脚本
 ```
 
-### 使用方法
-
-#### 1. 启动守护进程
-
-```bash
-# 启动后台守护进程
-codepanion start
-
-# 查看守护进程状态
-codepanion status
-
-# 停止守护进程
-codepanion stop
-
-# 重启守护进程
-codepanion restart
-```
-
-#### 2. 启动 GUI 界面
-
-```bash
-# 普通用户路径：双击便携版 EXE
-dist/CodePanion-win-x64/CodePanion.Gui.exe
-
-# 开发者路径：从源码启动
-npm run gui:run
-```
-
-#### 3. 使用 CodePanion 包装命令
-
-```bash
-# 使用 CodePanion 运行需要监控的命令
-codepanion run -- claude code
-
-# 或者运行其他需要交互的命令
-codepanion run -- npm install
-codepanion run -- git commit
-codepanion run -- python script.py
-```
-
-#### 4. 保存并重复运行工作流模板
-
-阶段 2 的第一批模板能力先从 CLI 提供。模板保存在本机 `~/.codepanion/workflow-templates.json`，可用 `{param}` 占位并在运行时覆盖。
-
-```bash
-codepanion template add review --command codex --arg review --arg "{target}" --param target=.
-codepanion template list
-codepanion template run review --set target=packages/daemon --dry-run
-codepanion template run review --set target=packages/daemon
-```
-
-#### 5. 编排多步骤本地工作流
-
-工作流保存在本机 `~/.codepanion/workflows.json`，执行历史保存在 `~/.codepanion/workflow-runs.json`。每个步骤可以标注 `tool`、依赖前置步骤、人工检查点，并支持历史搜索与重跑。
-
-```bash
-codepanion workflow add quality --param target=packages/daemon \
-  --step "id=build;tool=npm;command=npm;args=run,build" \
-  --step "id=test;tool=npm;command=npm;args=test;after=build;checkpoint=true"
-
-codepanion workflow run quality --set target=packages/gui --dry-run --yes
-codepanion workflow history --query quality
-codepanion workflow replay <runId> --dry-run --yes
-```
-
-#### 6. 发送通知
-
-```bash
-# 发送简单通知
-codepanion notify "任务完成"
-
-# 发送带消息的通知
-codepanion notify "构建完成" -m "项目已成功构建"
-
-# 指定通知级别
-codepanion notify "错误" -m "构建失败" -l error
-```
-
-## 💡 使用场景
-
-### 场景 1：统一接管多个 AI 编程任务
-
-在使用 Claude Code、GitHub Copilot CLI 等工具时，经常需要确认操作：
-
-```bash
-codepanion run -- claude code
-```
-
-当 Claude 需要确认文件修改、执行命令等操作时，CodePanion 会：
-1. 检测到提示信息
-2. 发送桌面通知
-3. 在 GUI 中显示提示内容
-4. 等待你的响应（yes/no 或自定义输入）
-5. 将响应发送回命令行工具
-
-### 场景 2：长时间运行的命令
-
-```bash
-codepanion run -- npm run build
-```
-
-构建完成或需要输入时，立即收到通知，无需一直盯着终端。
-
-### 场景 3：批量操作确认
-
-```bash
-codepanion run -- git push --force
-```
-
-在执行危险操作前，通过 GUI 界面仔细确认。
-
-### 场景 4：多窗口 AI 工作流总览
-
-VS Code 扩展和 CLI 会话会分别注册为监控源。多个 VS Code 窗口、多个 Codex/Claude Code 终端同时工作时，CodePanion 会在 GUI 中按来源显示事件，帮助你从一个界面掌握本机 AI 工作流全局状态。
-
-### CC Switch 账号 / Provider 切换
-
-如果你使用 CC Switch 或 Claude Code Switch 管理多个 Claude Code、Codex、Gemini CLI 等账号 / provider，推荐流程是：
-
-```bash
-# 先用 CC Switch 切换目标账号或 provider
-ccs switch
-# 或
-cc-switch
-
-# 再用 CodePanion 接管实际 AI CLI 任务
-codepanion run -- claude code
-```
-
-CodePanion 会把常见 CC Switch 进程或命令识别为独立来源，并在 GUI 中标注为 L1/L2 配置切换能力。真实账号切换仍由 CC Switch 完成；CodePanion 不读取或保存 `~/.claude`、`~/.codex`、账号 token、cookie 或供应商认证文件。
-
-## 🧭 产品路线
-
-### 阶段 1：Windows Alpha 个人本地多任务控制台
-
-- 围绕 Claude Code、Codex、VS Code/Copilot、CLI/PTTY、Codex Desktop 形成最小可用闭环
-- 汇总任务状态、提醒、审批和等待输入
-- 提供上下文查看与统一交互
-- 目标：让一个人能够稳定掌控多个并行任务，而不是反复切换窗口找阻塞点
-
-### 阶段 2：多任务完整操作台增强
-
-- 在统一控制基础上加强任务管理、历史和来源控制
-- 支持更丰富的任务动作与更清晰的项目 / 窗口维度管理
-- 逐步探索跨工具协作和转派，但不让自动编排主导产品定义
-- 目标：让一个人不只“看住任务”，还能在一个控制台里完成大部分任务级操作
-
-### 明确边界
-
-- 不做团队版或多用户协作
-- 不把 CodePanion 做成完整 AI IDE 或模型聊天客户端
-- 不默认 OCR 或读取全局屏幕内容
-- 不读取 token、cookie、私有插件数据库或上游工具私有 API
-- 不做 token 二次分销，不把 CodePanion 变成模型平台
-- Pro / Enterprise 的本地审计、治理和规则能力放入中后期路线，不用企业平台复杂度换取当前阶段的可用性
-
-## 🔧 CLI 命令
-
-| 命令 | 说明 | 示例 |
-|------|------|------|
-| `codepanion start` | 启动守护进程 | `codepanion start` |
-| `codepanion stop` | 停止守护进程 | `codepanion stop` |
-| `codepanion restart` | 重启守护进程 | `codepanion restart` |
-| `codepanion status` | 查看守护进程状态 | `codepanion status` |
-| `codepanion run -- <command>` | 使用 CodePanion 运行命令 | `codepanion run -- npm test` |
-| `codepanion template <action>` | 管理并运行本地工作流模板 | `codepanion template run review --set target=src --dry-run` |
-| `codepanion workflow <action>` | 管理、运行、搜索和重放多步骤工作流 | `codepanion workflow run quality --dry-run --yes` |
-| `codepanion notify <title>` | 发送通知 | `codepanion notify "完成" -m "任务已完成"` |
-| `codepanion sessions` | 查看活动会话 | `codepanion sessions` |
-| `codepanion reply <sessionId> <input>` | 向会话发送响应 | `codepanion reply abc123 "yes"` |
-| `codepanion --version` | 查看版本 | `codepanion --version` |
-| `codepanion --help` | 查看帮助 | `codepanion --help` |
-
-## 🔌 多源监控
-
-- CLI/PTTY：使用 `codepanion run -- <command>`。
-- Codex Desktop：只读同步 `~\.codex\sessions\**\*.jsonl`，镜像所有 Codex 线程的消息、工具调用、输出和代码块。
-- VS Code：加载 `packages/vscode-extension/` 扩展，每个 VS Code 窗口独立上报。
-- 外部工具：调用 `POST /sources/register` 和 `POST /events`。
-
-详细说明见 [docs/MONITORING_SOURCES.md](docs/MONITORING_SOURCES.md)。
-
-### 常见问题
-
-**Q: 提示 `codepanion` 命令未找到？**
-
-A: 需要先执行 `npm link` 来全局安装 CLI：
-```bash
-cd packages/daemon
-npm link
-```
-
-**Q: daemon 启动失败？**
-
-A: 检查端口是否被占用，或查看日志：
-```bash
-codepanion status
-# 查看配置文件：~/.codepanion/config.json
-```
-
-**Q: GUI 无法连接到 daemon？**
-
-A: 确保 daemon 正在运行，并检查配置文件中的端口设置是否一致。
-
-## 🏗️ 架构设计
-
-### 核心组件
-
-1. **PTY Runner**
-   - 使用伪终端（PTY）包装命令执行
-   - 捕获所有输入输出
-   - 检测提示模式（prompt detection）
-
-2. **Prompt Detector**
-   - 识别常见的输入提示模式
-   - 支持 yes/no 问题
-   - 支持自定义输入请求
-   - 可扩展的模式匹配
-
-3. **Daemon Server**
-   - HTTP + WebSocket 服务器
-   - 管理多个命令会话
-   - 路由通知和响应
-
-4. **Notifier**
-   - 本地桌面通知
-   - 当前 Alpha 仅在 Windows 10/11 上验证
-
-5. **GUI Client**
-   - .NET WPF + WebView2 界面
-   - 实时显示提示信息
-   - 输入响应界面
-
-### 通信流程
-
-```
-命令执行 → PTY → Prompt Detector → Daemon Server → WebSocket → GUI
-                                                              ↓
-                                                          用户输入
-                                                              ↓
-命令继续 ← PTY ← Session Manager ← Daemon Server ← WebSocket ← GUI
-```
-
-## 📝 配置
-
-配置文件位置：`~/.codepanion/config.json`
-
-```json
-{
-  "port": 7777,
-  "token": "generated-token",
-  "promptIdleMs": 800,
-  "toast": {
-    "enabled": true,
-    "soundOnPrompt": true,
-    "soundOnDone": true
-  },
-  "monitors": {
-    "cli": true,
-    "vscode": true
-  }
-}
-```
-
-## 🔍 提示检测模式
-
-CodePanion 可以识别以下常见提示模式：
-
-- `(y/n)` - 是/否确认
-- `[Y/n]` - 默认为 Yes 的确认
-- `[y/N]` - 默认为 No 的确认
-- `Press Enter to continue` - 按键继续
-- `Enter your choice:` - 自定义输入
-- 自定义正则表达式模式
-
-## 🛠️ 开发
-
-### 开发环境设置
-
-```bash
-# 安装依赖
-npm install
-
-# 开发模式运行 daemon
-npm run dev:daemon
-
-# 构建
-npm run build
-
-# 构建 GUI
-npm run gui:build
-```
-
-### 项目技术栈
-
-- **Daemon**: TypeScript, Node.js, Express, WebSocket, node-pty
-- **GUI**: C#, .NET, WPF
-- **通信**: WebSocket, HTTP REST API
-- **日志**: Pino
-
-## 📄 许可证
+## 许可证
 
 MIT
-
-## 🤝 贡献
-
-欢迎提交 Issue 和 Pull Request！
-
-## 📮 联系方式
-
-如有问题或建议，请提交 Issue。

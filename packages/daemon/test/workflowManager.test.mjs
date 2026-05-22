@@ -260,3 +260,39 @@ test('WorkflowManager debounces async snapshot writes and flushes on demand', as
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('WorkflowManager updates and persists task-state metadata', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'codepanion-workflow-'));
+  const snapshotPath = join(dir, 'workflow-snapshot.json');
+  try {
+    const manager = new WorkflowManager({ snapshotPath, snapshotDebounceMs: 0 });
+    manager.upsertThread({
+      id: 'thread:task-state',
+      source: 'cli',
+      title: 'task-state',
+      status: 'running',
+      updatedAt: 1,
+      itemCount: 0,
+    });
+
+    const updated = manager.updateTaskState('thread:task-state', {
+      pinned: true,
+      archived: true,
+      snoozedUntil: 123456789,
+    });
+    assert.ok(updated);
+    assert.equal(updated.taskState.pinned, true);
+    assert.equal(updated.taskState.archived, true);
+    assert.equal(updated.taskState.snoozedUntil, 123456789);
+    assert.ok(updated.taskState.updatedAt > 0);
+
+    const restored = new WorkflowManager({ snapshotPath, snapshotDebounceMs: 0 });
+    const snapshot = restored.threadSnapshot('thread:task-state');
+    assert.ok(snapshot);
+    assert.equal(snapshot.threads[0].taskState.pinned, true);
+    assert.equal(snapshot.threads[0].taskState.archived, true);
+    assert.equal(snapshot.threads[0].taskState.snoozedUntil, 123456789);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

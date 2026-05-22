@@ -10,6 +10,7 @@
     --muted-2: #9aa5b1;
     --accent: #2563eb;
     --accent-soft: #eaf1ff;
+    --teal: #0f766e;
     --green: #059669;
     --orange: #d97706;
     --red: #dc2626;
@@ -70,8 +71,9 @@ button {
     flex-direction: column;
     align-items: center;
     gap: 8px;
-    background: #111827;
-    color: #e5e7eb;
+    background: #eaf0f7;
+    color: #3b4755;
+    border-right: 1px solid var(--line);
 }
 
 .rail-brand {
@@ -80,8 +82,9 @@ button {
     display: grid;
     place-items: center;
     border-radius: var(--radius);
-    background: #f8fafc;
-    color: #111827;
+    background: #ffffff;
+    color: #1f2937;
+    border: 1px solid var(--line);
     font-weight: 800;
     letter-spacing: 0;
 }
@@ -93,7 +96,7 @@ button {
     place-items: center;
     border-radius: var(--radius);
     background: transparent;
-    color: #a7b0bd;
+    color: #6b7786;
     cursor: pointer;
     font-size: 15px;
     font-weight: 700;
@@ -101,8 +104,9 @@ button {
 
 .rail-button:hover,
 .rail-button.active {
-    background: #263241;
-    color: #ffffff;
+    background: #ffffff;
+    color: var(--accent);
+    border: 1px solid var(--line-strong);
 }
 
 .rail-spacer {
@@ -115,7 +119,8 @@ button {
     display: grid;
     place-items: center;
     border-radius: var(--radius);
-    background: #1f2937;
+    background: #ffffff;
+    border: 1px solid var(--line);
 }
 
 #conversation-sidebar,
@@ -168,6 +173,7 @@ button {
 .code-header p,
 .context-header p,
 .crumb,
+.spotlight-card p,
 .context-section p,
 #drawer-action-note {
     margin-top: 3px;
@@ -234,7 +240,7 @@ button {
 .sidebar-tools {
     padding: 10px 12px;
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
     gap: 4px;
     border-bottom: 1px solid var(--line);
 }
@@ -320,6 +326,8 @@ button {
 .conversation-dot.review { background: #8b5cf6; }
 .conversation-dot.source-online { background: var(--muted-2); }
 .conversation-dot.running { background: var(--accent); }
+.conversation-dot.deferred { background: #7c8aa1; }
+.conversation-dot.archived { background: #94a3b8; }
 
 /* P0.3：等待我高亮提示用户需要处理 */
 .conversation-item:has(.conversation-dot.waiting-me) {
@@ -342,6 +350,11 @@ button {
 
 .conversation-item:has(.conversation-dot.review) {
     background: #f5f0ff;
+}
+
+.conversation-item:has(.conversation-dot.deferred),
+.conversation-item:has(.conversation-dot.archived) {
+    background: #f8fafc;
 }
 
 .conversation-chip.status-chip {
@@ -369,6 +382,12 @@ button {
     color: #fff;
 }
 
+.conversation-item:has(.conversation-dot.deferred) .status-chip,
+.conversation-item:has(.conversation-dot.archived) .status-chip {
+    background: #cbd5e1;
+    color: #334155;
+}
+
 .conversation-meta {
     margin-top: 7px;
     flex-wrap: wrap;
@@ -382,6 +401,11 @@ button {
     color: var(--muted);
     font-size: 11px;
     font-weight: 650;
+}
+
+.conversation-chip.management-chip {
+    background: #e2e8f0;
+    color: #475569;
 }
 
 .conversation-chip.capability-l1,
@@ -458,6 +482,53 @@ button {
     background: rgba(255, 255, 255, 0.96);
 }
 
+#task-spotlight {
+    padding: 14px 18px 6px;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(to bottom, #f8fbff, #ffffff);
+}
+
+.spotlight-card {
+    min-width: 0;
+    padding: 12px 13px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: rgba(255, 255, 255, 0.88);
+}
+
+.spotlight-card.emphasis {
+    border-color: #bfd4ff;
+    background: linear-gradient(135deg, #eef5ff, #ffffff);
+}
+
+.spotlight-label {
+    display: block;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.spotlight-card strong {
+    display: block;
+    margin-top: 6px;
+    color: var(--text);
+    font-size: 15px;
+    line-height: 1.35;
+    font-weight: 720;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.spotlight-card p {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .stage-title {
     min-width: 0;
 }
@@ -524,7 +595,7 @@ button {
     min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
-    padding: 22px 24px 30px;
+    padding: 20px 24px 30px;
     background:
         linear-gradient(to bottom, rgba(234, 241, 255, 0.55), rgba(255, 255, 255, 0) 150px),
         var(--panel);
@@ -572,6 +643,13 @@ button {
     border: 1px solid var(--line);
     border-radius: var(--radius);
     background: rgba(255, 255, 255, 0.86);
+}
+
+.empty-state strong {
+    display: block;
+    margin-bottom: 6px;
+    color: var(--text);
+    font-size: 15px;
 }
 
 .empty-code {
@@ -1213,6 +1291,10 @@ button {
     #omnibar {
         grid-column: 2 / 4;
     }
+
+    #task-spotlight {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
 }
 
 @media (max-width: 900px) {
@@ -1254,6 +1336,11 @@ button {
     .conversation-list {
         max-height: 112px;
     }
+
+    #task-spotlight {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        padding: 12px 14px 4px;
+    }
 }
 
 @media (max-width: 680px) {
@@ -1274,6 +1361,10 @@ button {
     #conversation-header {
         align-items: flex-start;
         flex-direction: column;
+    }
+
+    #task-spotlight {
+        grid-template-columns: 1fr;
     }
 
     .stage-actions {

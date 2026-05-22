@@ -18,6 +18,7 @@ import {
   SessionExitRequestSchema,
   SessionOutputRequestSchema,
   SessionPromptRequestSchema,
+  UpdateWorkflowTaskStateRequestSchema,
 } from '../shared/protocol.js';
 import { logger, maskString } from '../logger.js';
 import { VERSION } from '../shared/version.js';
@@ -269,6 +270,21 @@ export function createServer(
 
   app.get('/workflow/snapshot', (_req, res) => {
     res.json(workflows.snapshot());
+  });
+
+  app.post('/workflow/threads/:id/task-state', (req, res) => {
+    const parsed = UpdateWorkflowTaskStateRequestSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.message });
+      return;
+    }
+
+    const thread = workflows.updateTaskState(req.params.id, parsed.data);
+    if (!thread) {
+      res.status(404).json({ error: 'thread not found' });
+      return;
+    }
+    res.json(thread);
   });
 
   app.post('/events', (req, res) => {
