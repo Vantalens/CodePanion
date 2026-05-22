@@ -45,7 +45,8 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
     <!-- 只复制运行所需的图标，剔除 Assets/README.md 与 *-source.png 之类的开发资产。 -->
-    <None Update="Assets\**\*" Condition="!('%(Filename)%(Extension)' == 'README.md' Or $([System.Text.RegularExpressions.Regex]::IsMatch('%(Filename)', '-source$')))">
+    <!-- 使用 Exclude 而不是在 Condition 中引用 %(Filename) 元数据，避免 MSBuild MSB4190 错误 -->
+    <None Include="Assets\**\*" Exclude="Assets\**\README.md;Assets\**\*-source.*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
     <None Include="..\daemon\bundle\daemon.cjs" Link="daemon\daemon.cjs" CopyToOutputDirectory="PreserveNewest" />
