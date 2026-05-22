@@ -141,3 +141,30 @@
 - P0-A / P0-B / P0-E 是 P0 验收（「界面不再被刷屏」「主内容刷新不会清空重建」）能否通过的关键。
 - P0-D 一旦触发会导致用户在 GUI 看见选项点了无反应，配合 spinner / 心跳输出时复现路径明确，建议先补单测再修。
 - P0-C 是单字符修复但影响面大，可单独拆出一个最小修复 PR。
+
+---
+
+## 状态汇总（2026-05-22 复核）
+
+16 项全部已修复并落地代码：
+
+| 编号 | 状态 | 验证锚点 |
+| --- | --- | --- |
+| P0-A | 已修复 | [MainWindow.xaml.cs:245-263](../packages/gui/MainWindow.xaml.cs#L245-L263) 移除主流写入 |
+| P0-B | 已修复 | [chat.js:256-258](../packages/gui/wwwroot/chat.js#L256-L258) 仅在彻底缺失时重置 |
+| P0-C | 已修复 | [extension.js:158](../packages/vscode-extension/extension.js#L158) 已用 `codepanion` namespace |
+| P0-D | 已修复 | [runner.ts:179-188](../packages/daemon/src/pty/runner.ts#L179-L188) clear 由 detector 状态驱动 |
+| P0-E | 已修复 | [server.ts:595-597](../packages/daemon/src/daemon/server.ts#L595-L597) hello 后追发 sessions/sources snapshot |
+| P1-A | 已修复 | `MainWindow.PruneExitedSessions` 按 retention 裁剪 |
+| P1-B | 已修复 | `DaemonClient` 改 per-request `HttpRequestMessage` |
+| P1-C | 已修复 | `async void` 全部包 try/catch |
+| P1-D | 已修复 | `GuiLogWriter` 使用 `Channel<string>` + 大小滚动 |
+| P1-E | 已修复 | extension.js JSON.parse 包 try/catch |
+| P1-F | 已修复 | 2s → 30s 指数退避，仅首次调 `EnsureStartedAsync` |
+| P2-A | 已修复 | 跟踪修复 M1 删除重复键 |
+| P2-B | 已修复 | [chat.js:1341-1366](../packages/gui/wwwroot/chat.js#L1341-L1366) 同步过滤 codeBlocks |
+| P2-C | 已修复 | runner CLI 单点换行，GUI/server 不再拼接 `\n` |
+| P2-D | 已修复 | server 50ms 合并 PTY 输出 chunk |
+| P2-E | 已修复 | [chat.js:921-952](../packages/gui/wwwroot/chat.js#L921-L952) 批量识别后一次性 splice |
+
+新进入的隐患在新一轮审计文档里归档，本文件保留作为 2026-05-21 时间点的快照。

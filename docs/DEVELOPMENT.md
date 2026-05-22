@@ -416,133 +416,101 @@ npm test
 
 ### 测试组织方式
 
+仓库使用 Node 内置 `node:test` + `node:assert/strict`，没有 Jest / Mocha / Supertest 依赖。测试文件统一放在每个包的 `test/` 目录下，以 `.test.mjs` 结尾。
+
 ```
-packages/daemon/
-├── src/
-│   ├── pty/
-│   │   ├── promptDetector.ts
-│   │   └── promptDetector.test.ts  # 测试文件与源文件同目录
-│   └── daemon/
-│       ├── sessionManager.ts
-│       ├── sourceManager.ts
-│       ├── workflowManager.ts
-│       └── *.test.ts
-└── test/
-    ├── integration/               # 集成测试
-    │   └── api.test.ts
-    └── fixtures/                  # 测试数据
-        └── sample-output.txt
+packages/daemon/test/
+├── promptDetector.test.mjs            # 单元：状态机迁移
+├── sessionManager.test.mjs            # 单元：retention 裁剪
+├── sourceManager.test.mjs             # 单元：事件 / 来源裁剪
+├── workflowDefinitionManager.test.mjs # 单元：runWorkflow hooks
+├── server.integration.test.mjs        # 集成：真 daemon HTTP/WS 鉴权 + 重连 snapshot
+├── codexDesktopAdapter.test.mjs       # 适配器：Codex Desktop 同步
+├── aiToolProcessAdapter.test.mjs      # 适配器:Qoder/lingma profile 归属
+└── generateCsharpDtos.test.mjs        # 协议契约：C# DTO 与 TS protocol.ts 一致
+
+packages/adapter-sdk/test/
+├── adapter.test.mjs                   # SDK 注册 / 事件 / 回复闭环
+└── localToolBridge.test.mjs           # bridge classify 规则
 ```
 
 ### 单元测试示例
 
-```typescript
-// promptDetector.test.ts
-import { PromptDetector } from './promptDetector.js';
+```javascript
+// packages/daemon/test/promptDetector.test.mjs
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { PromptDetector } from '../dist/pty/promptDetector.js';
 
-describe('PromptDetector', () => {
-  let detector: PromptDetector;
+test('PromptDetector 检出 (y/n) 提示', () => {
+  const detector = new PromptDetector();
+  const result = detector.feed('Continue? (y/n)');
+  assert.ok(result, '应返回匹配结果');
+  assert.equal(result.type, 'yesno');
+  assert.match(result.text, /\(y\/n\)/);
+});
 
-  beforeEach(() => {
-    detector = new PromptDetector();
-  });
-
-  describe('yesno pattern', () => {
-    it('should detect (y/n) pattern', () => {
-      const result = detector.feed('Continue? (y/n)');
-      
-      expect(result).not.toBeNull();
-      expect(result?.type).toBe('yesno');
-      expect(result?.text).toContain('(y/n)');
-    });
-
-    it('should detect [Y/n] pattern', () => {
-      const result = detector.feed('Proceed? [Y/n]');
-      
-      expect(result).not.toBeNull();
-      expect(result?.type).toBe('yesno');
-    });
-
-    it('should not detect false positives', () => {
-      const result = detector.feed('This is just text');
-      
-      expect(result).toBeNull();
-    });
-  });
-
-  describe('buffer management', () => {
-    it('should handle large output', () => {
-      const largeText = 'x'.repeat(10000);
-      detector.feed(largeText);
-      
-      // 应该不会内存溢出
-      expect(detector.getBufferSize()).toBeLessThan(5000);
-    });
-  });
+test('PromptDetector 处理大缓冲不溢出', () => {
+  const detector = new PromptDetector();
+  detector.feed('x'.repeat(10_000));
+  assert.ok(detector.getBufferSize() < 5_000, '缓冲应被裁剪');
 });
 ```
 
 ### 集成测试示例
 
-```typescript
-// api.test.ts
-import request from 'supertest';
-import { createServer } from '../src/daemon/server.js';
+```javascript
+// packages/daemon/test/server.integration.test.mjs（节选）
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { startTestDaemon } from './helpers/startTestDaemon.mjs';
 
-describe('API Integration', () => {
-  let server: any;
+test('POST /notify 鉴权失败回 401', async (t) => {
+  const daemon = await startTestDaemon();
+  t.after(() => daemon.stop());
 
-  beforeAll(async () => {
-    server = await createServer({ port: 0 });  // 随机端口
+  const res = await fetch(`${daemon.baseUrl}/notify`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ message: 'hi' }),
   });
-
-  afterAll(async () => {
-    await server.close();
-  });
-
-  describe('POST /notify', () => {
-    it('should send notification', async () => {
-      const response = await request(server)
-        .post('/notify')
-        .send({ message: 'Test notification' })
-        .expect(200);
-
-      expect(response.body.success).toBe(true);
-      expect(response.body.notificationId).toBeDefined();
-    });
-
-    it('should validate request body', async () => {
-      await request(server)
-        .post('/notify')
-        .send({})  // 缺少 message
-        .expect(400);
-    });
-  });
+  assert.equal(res.status, 401);
 });
 ```
 
+集成测试直接启动真 daemon（监听 `127.0.0.1` 随机端口），不使用 supertest。`helpers/startTestDaemon.mjs` 负责注入临时 token 与隔离 `~/.codepanion` 目录。
+
 ### Mock 和 Stub
 
-```typescript
-// 通知逻辑现在通过系统命令适配，测试时优先 mock Notifier 或命令执行边界。
+`node:test` 自带 `t.mock`，但 daemon 测试更偏向"用真实组件 + 隔离 IO"。回调 / 钩子接口（如 `WorkflowRunHooks`）允许直接传入闭包断言被调用：
 
-test('should send notification', async () => {
-  await sendNotification('Test');
-  
-  expect(notifier.notify).toHaveBeenCalledWith(
-    expect.objectContaining({
-      message: 'Test'
-    })
-  );
+```javascript
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { runWorkflow } from '../dist/workflows/workflowDefinitionManager.js';
+
+test('runWorkflow 触发 hooks', async () => {
+  const calls = [];
+  await runWorkflow({
+    workflow: stubDefinition(),
+    dryRun: true,
+    hooks: {
+      onWorkflowStart: () => calls.push('start'),
+      onStepFinish: (step) => calls.push(`step:${step.id}`),
+      onWorkflowFinish: () => calls.push('finish'),
+    },
+  });
+  assert.deepEqual(calls, ['start', 'step:s1', 'finish']);
 });
 ```
 
 ### 运行测试
 
 ```bash
-npm test
-npm run build
-npm run validate:extensions
+npm test                    # 顺序跑 daemon + adapter-sdk + DTO 一致性校验
+npm run build               # 编译 daemon + 生成 bundle（daemon test 依赖 dist/）
+npm run validate:dtos       # 校验 C# DTO 与 TS protocol.ts 一致
+npm run validate:extensions # VS Code 扩展规则校验
 dotnet build packages/gui/CodePanion.Gui.csproj -c Release
 git diff --check
 ```
@@ -835,7 +803,7 @@ app.post('/api/myendpoint', async (req, res) => {
 
 - [TypeScript 官方文档](https://www.typescriptlang.org/docs/)
 - [Node.js API 文档](https://nodejs.org/api/)
-- [Jest 测试框架](https://jestjs.io/)
+- [node:test 文档](https://nodejs.org/api/test.html)
 - [Express.js 文档](https://expressjs.com/)
 
 ### 相关项目
