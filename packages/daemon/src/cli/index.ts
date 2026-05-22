@@ -22,6 +22,7 @@ import {
   workflowRunCommand,
   workflowShowCommand,
 } from './workflows.js';
+import { auditExportCommand } from './audit.js';
 
 export async function runCli(argv: string[]): Promise<void> {
   await yargs(hideBin(argv))
@@ -192,6 +193,27 @@ export async function runCli(argv: string[]): Promise<void> {
           param: a.param as string[] | undefined,
           step: a.step as string[] | undefined,
         });
+      },
+    )
+    .command(
+      'audit <action>',
+      '本地审计与归档（action=export）',
+      (y) =>
+        y
+          .positional('action', { type: 'string', choices: ['export'], demandOption: true })
+          .option('output', { type: 'string', alias: 'o', describe: '写入文件路径；省略或 - 输出到 stdout' })
+          .option('format', { type: 'string', choices: ['json', 'jsonl'], default: 'json' })
+          .option('since', { type: 'string', describe: 'ISO 8601 字符串或 epoch ms，只导出该时刻之后的数据' })
+          .option('redact', { type: 'boolean', default: false, describe: '对事件内容、回复、路径做最小脱敏' }),
+      async (a) => {
+        if (a.action === 'export') {
+          await auditExportCommand({
+            output: a.output as string | undefined,
+            format: a.format as 'json' | 'jsonl',
+            since: a.since as string | undefined,
+            redact: a.redact as boolean,
+          });
+        }
       },
     )
     .demandCommand(1)

@@ -120,6 +120,24 @@ export function getSessionOutput(id: string): Promise<{ fullOutput: string; chun
   return request<{ fullOutput: string; chunks: any[] }>('GET', `/sessions/${id}/output`);
 }
 
+export type AuditSnapshot = {
+  schemaVersion: number;
+  generatedAt: number;
+  since: number | null;
+  daemonVersion: string;
+  sources: MonitorSource[];
+  events: Array<MonitorEvent & { id: string; timestamp: number }>;
+  eventReplies: Array<{ eventId: string; sourceId?: string; text: string; timestamp: number }>;
+  sessions: SessionInfo[];
+  workflowThreads: unknown[];
+  workflowItems: unknown[];
+};
+
+export function getAuditSnapshot(options: { since?: number } = {}): Promise<AuditSnapshot> {
+  const query = options.since !== undefined ? `?since=${encodeURIComponent(String(options.since))}` : '';
+  return request<AuditSnapshot>('GET', `/audit/snapshot${query}`);
+}
+
 export function wsUrl(role: 'observer' | 'cli', sessionId?: string): string {
   const cfg = loadConfig();
   const params = new URLSearchParams({ role });

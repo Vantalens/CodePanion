@@ -130,6 +130,30 @@ export class SourceManager {
     return this.replies.get(eventId) ?? [];
   }
 
+  exportSnapshot(options: { since?: number } = {}): {
+    sources: MonitorSource[];
+    events: StoredMonitorEvent[];
+    replies: MonitorEventReply[];
+  } {
+    const since = options.since ?? 0;
+    const events = Array.from(this.events.values())
+      .filter((event) => event.timestamp >= since)
+      .sort((a, b) => a.timestamp - b.timestamp);
+    const keptIds = new Set(events.map((event) => event.id));
+    const replies: MonitorEventReply[] = [];
+    for (const [eventId, list] of this.replies.entries()) {
+      if (!keptIds.has(eventId)) continue;
+      for (const reply of list) {
+        if (reply.timestamp >= since) replies.push(reply);
+      }
+    }
+    replies.sort((a, b) => a.timestamp - b.timestamp);
+    const sources = Array.from(this.sources.values())
+      .filter((source) => (source.lastSeenAt ?? source.registeredAt ?? 0) >= since)
+      .sort((a, b) => (a.registeredAt ?? 0) - (b.registeredAt ?? 0));
+    return { sources, events, replies };
+  }
+
   list(): MonitorSource[] {
     return Array.from(this.sources.values()).sort((a, b) => b.lastSeenAt - a.lastSeenAt);
   }

@@ -236,12 +236,40 @@ CLI 会话事件：
 
 - `inject-input`
 
+## 审计 API
+
+### `GET /audit/snapshot`
+
+返回当前 daemon 内存中（按 `retention` 滚动窗口保留的）来源、事件、回复、会话、工作流线程与条目的合并快照。供 `codepanion audit export` CLI 与本地分析脚本使用，不读取上游工具私有数据库。
+
+**Query 参数**：
+
+- `since`：可选，epoch 毫秒数字字符串。仅返回时间戳 ≥ `since` 的事件、回复、会话和工作流条目。非法值返回 `400`。
+
+**响应**（`schemaVersion=1`）：
+
+```jsonc
+{
+  "schemaVersion": 1,
+  "generatedAt": 1779410536204,
+  "since": null,
+  "daemonVersion": "0.x.y",
+  "sources": [ /* MonitorSource[] */ ],
+  "events": [ /* MonitorEvent + { id, timestamp }[] */ ],
+  "eventReplies": [ /* { eventId, sourceId?, text, timestamp }[] */ ],
+  "sessions": [ /* SessionInfo[] */ ],
+  "workflowThreads": [ /* WorkflowThread[] */ ],
+  "workflowItems": [ /* WorkflowItem[] */ ]
+}
+```
+
+详细使用方式与脱敏选项见 [docs/LOCAL_AUDIT.md](LOCAL_AUDIT.md)。
+
 ## 后续扩展方向
 
 以下方向会建立在现有 API 语义上，不在当前 Alpha 中引入破坏性改动：
 
 - **适配器 SDK**：围绕 `/sources/register`、`/events`、事件回复和 workflow snapshot 提供更稳定的外部接入规范。
-- **审计快照**：基于 `workflow` 与来源事件生成本地导出，不读取上游私有数据库。
 - **Provider adapter**：为 Qwen、DeepSeek、GLM、腾讯混元等模型或网关预留路由语义，但 CodePanion 当前不做模型平台或 token 二次分销。
 - **跨平台通道**：在 Beta 前评估 Tauri/Avalonia 和 Named Pipe / Unix Domain Socket 等本地通道增强。
 

@@ -440,6 +440,30 @@ codepanion reply abc123 "yes"
 
 ---
 
+### `codepanion audit <action>`
+
+把 daemon 内存中的事件、回复、会话和工作流条目一次性导出到本地，便于排错、合规归档或离线分析。**不联网，文件权限 0o600。**
+
+**动作**：
+- `export`: 导出当前活跃窗口里的审计快照
+
+**常用选项**：
+- `-o, --output <path>`: 写入文件路径，省略或 `-` 输出到 stdout
+- `--format <json|jsonl>`: 默认 `json`，`jsonl` 适合 `jq` 流式处理
+- `--since <iso|ms>`: 仅导出该时刻之后的数据，支持 ISO 8601 或 epoch ms
+- `--redact`: 对事件文本、回复、家目录路径做最小脱敏
+
+**示例**：
+```bash
+codepanion audit export -o C:\Users\me\.codepanion\audit.json
+codepanion audit export --since "2026-05-22T08:00:00+08:00" --format jsonl -o today.jsonl
+codepanion audit export --redact -o audit-redacted.json
+```
+
+详细字段定义、保留窗口、脱敏规则见 [docs/LOCAL_AUDIT.md](LOCAL_AUDIT.md)。
+
+---
+
 ## 配置
 
 ### 配置文件位置

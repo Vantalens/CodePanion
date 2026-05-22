@@ -335,6 +335,36 @@ export function createServer(
     res.json({ eventId: req.params.id, replies });
   });
 
+  app.get('/audit/snapshot', (req, res) => {
+    const sinceRaw = typeof req.query.since === 'string' ? req.query.since : undefined;
+    const since = sinceRaw ? Number(sinceRaw) : undefined;
+    if (sinceRaw !== undefined && (!Number.isFinite(since) || since! < 0)) {
+      res.status(400).json({ error: 'since must be a non-negative epoch milliseconds value' });
+      return;
+    }
+    const sourceSnapshot = sources.exportSnapshot({ since });
+    const sessionList = sessions.list().filter((s) => (s.startedAt ?? 0) >= (since ?? 0));
+    const workflowSnapshot = workflows.snapshot();
+    const filteredThreads = since
+      ? workflowSnapshot.threads.filter((t) => (t.updatedAt ?? 0) >= since)
+      : workflowSnapshot.threads;
+    const filteredItems = since
+      ? workflowSnapshot.items.filter((i) => (i.timestamp ?? 0) >= since)
+      : workflowSnapshot.items;
+    res.json({
+      schemaVersion: 1,
+      generatedAt: Date.now(),
+      since: since ?? null,
+      daemonVersion: VERSION,
+      sources: sourceSnapshot.sources,
+      events: sourceSnapshot.events,
+      eventReplies: sourceSnapshot.replies,
+      sessions: sessionList,
+      workflowThreads: filteredThreads,
+      workflowItems: filteredItems,
+    });
+  });
+
   app.post('/sessions', (req, res) => {
     const parsed = RegisterSessionRequestSchema.safeParse(req.body);
     if (!parsed.success) {
