@@ -1728,3 +1728,41 @@ Strategy Backlog 中的"本地审计导出和结果归档"。daemon 已经把 pr
 node --test packages/daemon/test/auditExport.test.mjs   # 5 pass / 0 fail
 npm test                                                # daemon + adapter-sdk + validate:dtos 一并通过
 ```
+
+## 2026-05-22 Strategy Backlog 国产工具深度适配
+
+承接 [DEVELOPMENT_TASKS.md](../DEVELOPMENT_TASKS.md#strategy-backlog) 中「国产工具深度适配」条目的第一步：从"识别更多进程"升级为"识别更准、能上报更真的事件"。
+
+### 范围
+
+只做不需要新签约 / 不需要插件私有 API 的两件事：
+
+1. **Qoder 拆为独立 first 梯队 `kind`**。原本被打成 `lingma` profile 的 `tongyi` / `通义灵码` 兼容路径，但 Qoder 实际上是阿里独立 IDE（VS Code/Code OSS 系），进程名 `Qoder.exe` 和命令行特征都与 lingma 插件完全不同；继续共用会让 GUI 来源徽章把两类工具串到一起。
+2. **Adapter SDK 增加 `local-tool-bridge.mjs` 模板**。让任意国产工具（已被 process-scan 识别为 L1，但 daemon 看不到具体事件）通过本地日志 / 状态文件接出 `error` / `prompt` / `done` / `activity` 真事件，把来源能力等级显式从 L1 抬到 L2。
+
+### 改动
+
+- [packages/daemon/src/shared/protocol.ts](../packages/daemon/src/shared/protocol.ts)：`SourceKindSchema` 新增 `'qoder'`（位列 `lingma` 与 `marscode` 之间，符合 `kind` 既有排序习惯）。
+- [packages/adapter-sdk/src/index.d.ts](../packages/adapter-sdk/src/index.d.ts)：`SourceKind` 类型联合同步新增 `'qoder'`，SDK 调用方在 TypeScript 端拿到 IDE 自动补全。
+- [packages/daemon/src/adapters/aiToolProcessAdapter.ts](../packages/daemon/src/adapters/aiToolProcessAdapter.ts)：新增独立 `qoder` profile（`tier: 'first'`、`group: 'Code OSS / VS Code 系'`、`processPatterns: [/^qoder/i]`、`commandPatterns: [/\\Qoder(\\|$)/i, /(^|[\s"'])qoder(\.exe)?([\s"']|$)/i]`、能力 `['process-detected', 'window', 'code-oss-family', 'ai-ide']`），`inferWorkspace` IDE 排除名单中加入 `Qoder` 避免把 Qoder 主程序路径误判成 workspace。lingma profile 仅保留 `/lingma/i`、`/tongyi/i` 模式不变，两者正则不重叠。
+- [packages/daemon/test/aiToolProcessAdapter.test.mjs](../packages/daemon/test/aiToolProcessAdapter.test.mjs)：tier 收敛用例把 `first` 列表更新为 `['codebuddy', 'codegeex', 'comate', 'lingma', 'qoder', 'trae']`；新增「Qoder 独立 IDE 进程被识别为 qoder kind 而不是被吞进 lingma profile」覆盖 `Qoder.exe`、`Qoder Helper (Renderer).exe`、纯 lingma 插件路径三类输入，钉死 profile 命中归属。
+- [packages/adapter-sdk/examples/local-tool-bridge.mjs](../packages/adapter-sdk/examples/local-tool-bridge.mjs)（新增）：CLI 桥接进程。`--kind`/`--name`/`--watch`/`--workspace` 四参，`fs.watch` + 末尾偏移读增量，不回放历史；`classify` 把 `ERROR/FAIL/EXCEPTION/TRACEBACK/失败/错误/\bERR\b/\bFATAL\b` 升级为 `error`，`?` 结尾 / `请选择` / `是否` / `Continue?` / `(y/n)` 升级为 `prompt`，`完成/done/success/✓` 升级为 `done`，其它落 `activity`；注册来源时 `capabilityLevel: 'L2'`、`capabilities` 含 `tool:<kind>`，事件能直接挂到对应国产工具维度。`KNOWN_KINDS` 集合限制 `--kind` 合法值，避免错串其它来源。
+- [packages/adapter-sdk/test/localToolBridge.test.mjs](../packages/adapter-sdk/test/localToolBridge.test.mjs)（新增）：6 用例覆盖 classify 四个分支、parseArgs 四参解析、`KNOWN_KINDS` 必须含 first 梯队 + `external`。导出表面纯函数化，不依赖 daemon。
+- [docs/MONITORING_SOURCES.md](./MONITORING_SOURCES.md)：first 梯队表格新增 `qoder` 行，删除原来「Qoder 共用 lingma profile」的临时备注；新增「把工具从 L1 升到 L2 的最短路径」小节指引 vendor 用 bridge 示例接出真事件。
+- [docs/ADAPTER_SDK.md](./ADAPTER_SDK.md)：示例适配器列表新增 `local-tool-bridge.mjs`，明确它就是国产工具厂商把 L1 推到 L2 的标准模板。
+- [DEVELOPMENT_TASKS.md](../DEVELOPMENT_TASKS.md)：「国产工具深度适配」条目下加两个子勾选，已落地 L1→L2 路径打勾，L3 写回链路仍开放。
+
+### 不做的事
+
+- 不为任何具体国产工具写死"读 `~/.lingma/...`"、"读 IDE 插件 SQLite"之类的私有数据源接入：与 [MONITORING_SOURCES.md](./MONITORING_SOURCES.md#不读取的数据) 隐私边界冲突。
+- 不在 daemon 里内置具体工具的事件解析：行级分类规则放进可被各家厂商 fork 的 bridge 示例里，daemon 只负责把 SDK 上来的事件挂到对应 `kind`。
+- 不强行替每个国产工具补 L3：L3 需要工具本身有公开的"继续 / 回复 / 中止"通道，没拿到该通道前不假装支持。
+- 不在 GUI 端做"工具维度大盘"：当前 GUI 已能按 `kind` 渲染来源徽章，扩面留给后续 Strategy Backlog 工作流模板 / 跨工具转派条目。
+
+### 验证
+
+```powershell
+node --test packages/adapter-sdk/test/localToolBridge.test.mjs  # 6 pass / 0 fail
+node --test packages/daemon/test/aiToolProcessAdapter.test.mjs  # 6 pass / 0 fail
+npm test                                                        # daemon 165 / adapter-sdk 13 / DTO 校验全绿
+```

@@ -24,6 +24,7 @@ export const SourceKindSchema = z.enum([
   'trae',
   'codebuddy',
   'lingma',
+  'qoder',
   'marscode',
   'codegeex',
   'comate',

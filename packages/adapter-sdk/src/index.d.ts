@@ -10,6 +10,7 @@ export type SourceKind =
   | 'trae'
   | 'codebuddy'
   | 'lingma'
+  | 'qoder'
   | 'marscode'
   | 'codegeex'
   | 'comate'

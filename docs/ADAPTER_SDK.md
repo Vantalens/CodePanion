@@ -141,8 +141,9 @@ await adapter.emitEvent({
 
 - [examples/file-watcher.mjs](../packages/adapter-sdk/examples/file-watcher.mjs)：用 `fs.watch` 监控本地目录变更，上报 `activity` 事件。
 - [examples/git-hook.mjs](../packages/adapter-sdk/examples/git-hook.mjs)：作为 git `post-commit` / `pre-push` hook 上报关键节点。
+- [examples/local-tool-bridge.mjs](../packages/adapter-sdk/examples/local-tool-bridge.mjs)：监控任意"国产 AI 编程工具"的本地日志 / 状态文件，把行级输出分类为 `error`/`prompt`/`done`/`activity`，把来源从 L1（进程在不在）升级到 L2（真事件级）。适配通义灵码 / Qoder / CodeBuddy / Trae / Comate / CodeGeeX 等已被 process-scan 识别但还缺事件价值的工具。
 
-两个示例都使用 `kind: 'external'` + `integrationKind: 'adapter'`，与 GUI 的来源徽章和能力层级显示完全一致。
+三个示例都使用 `integrationKind: 'adapter'`，与 GUI 的来源徽章和能力层级显示完全一致；`local-tool-bridge.mjs` 支持 `--kind` 把来源映射到对应国产工具 `kind`，事件能直接落到工具维度的统计上。
 
 ## 错误处理
 

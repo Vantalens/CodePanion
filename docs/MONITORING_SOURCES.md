@@ -43,7 +43,8 @@ CodePanion 采用多源工作流事件中心模型。作为本地优先、供应
 
 | `kind` | 工具 | 当前状态 |
 | --- | --- | --- |
-| `lingma` | 通义灵码（含 Qoder 共用进程 / 命令行别名） | L1 进程识别 |
+| `lingma` | 通义灵码（插件型 IDE 助手） | L1 进程识别 |
+| `qoder` | Qoder（阿里独立 IDE，VS Code 系） | L1 进程识别，独立 profile |
 | `codebuddy` | CodeBuddy IDE / CodeBuddy Code | L1 进程识别 + CLI 命令行识别 |
 | `trae` | Trae | L1 进程识别 |
 | `comate` | 百度 Comate | L1 进程识别 |
@@ -59,8 +60,17 @@ CodePanion 采用多源工作流事件中心模型。作为本地优先、供应
 不在 `TOOL_PROFILES` 内但保留观察的工具：
 
 - CodeArts / CodeArts Snap：尚无可靠的本地进程 / 命令行特征，等待样本前不写死正则。
-- Qoder 独立 IDE：当前以 `lingma` profile 的 `tongyi` / `通义灵码` 模式覆盖共享进程；如果出现独立可识别的 `qoder` 进程或 CLI，再扩展 `lingma` 的 `processPatterns`，避免在没有样本前堆砌正则。
 - 其他有稳定 CLI、公开扩展 API 或本地适配能力的工具：通过外部适配器 `/sources/register` 接入即可，无需进入 `TOOL_PROFILES`。
+
+### 把工具从 L1 升到 L2 的最短路径
+
+进程级识别只能回答“工具是否在跑”，无法回答“这次任务做完了没 / 在等谁”。如果工具本身能输出本地日志、状态文件或 CLI 包装产物，推荐用 `packages/adapter-sdk/examples/local-tool-bridge.mjs` 作为模板桥接到 CodePanion：
+
+- 读取增量行（`fs.watch` + 末尾偏移），不回放历史；
+- 把含 `ERROR/FAIL/失败/错误` 的行升级为 `error`，含 `?/请选择/是否/Continue?/(y/n)` 的行升级为 `prompt`，含 `完成/done/success/✓` 的行升级为 `done`，其余作为 `activity`；
+- 注册来源时 `capabilityLevel: 'L2'`，表明已从“进程在不在”升为“真事件级”。
+
+桥接进程的隐私边界与本仓一致：只看公开的本地产物，不读账号 / token / cookie / 插件私有 DB。
 
 ### 切换器（tier=switcher）
 

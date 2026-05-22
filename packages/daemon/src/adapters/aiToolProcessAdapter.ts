@@ -79,6 +79,17 @@ export const TOOL_PROFILES: ToolProfile[] = [
     capabilities: ['process-detected', 'plugin-family'],
   },
   {
+    kind: 'qoder',
+    name: 'Qoder',
+    group: 'Code OSS / VS Code 系',
+    tier: 'first',
+    // Qoder 当前以独立 IDE 形态发布，进程名通常是 Qoder.exe（含 Qoder Helper / GPU 子进程）；
+    // 仍兼容旧路径上把 Qoder 视作 lingma 别名的样本——一旦该路径出现，由更具体的 Qoder profile 命中。
+    processPatterns: [/^qoder/i],
+    commandPatterns: [/\\Qoder(\\|$)/i, /(^|[\s"'])qoder(\.exe)?([\s"']|$)/i],
+    capabilities: ['process-detected', 'window', 'code-oss-family', 'ai-ide'],
+  },
+  {
     kind: 'codegeex',
     name: 'CodeGeeX',
     group: '插件型 IDE 助手',
@@ -219,7 +230,7 @@ function normalizeProcessIdentity(value?: string): string {
 function inferWorkspace(process: ProcessInfo): string | undefined {
   const command = process.commandLine ?? '';
   const quotedPath = command.match(/"([A-Za-z]:\\[^"]+)"/g)?.map((item) => item.slice(1, -1)) ?? [];
-  const candidate = quotedPath.find((item) => !/\\(node\.exe|CodeBuddy|Trae|MarsCode|CodeGeeX|Comate)/i.test(item));
+  const candidate = quotedPath.find((item) => !/\\(node\.exe|CodeBuddy|Trae|MarsCode|CodeGeeX|Comate|Qoder)/i.test(item));
   if (candidate) return candidate;
   return process.path;
 }
