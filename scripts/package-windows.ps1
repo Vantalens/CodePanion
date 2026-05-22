@@ -147,11 +147,14 @@ Write-Host "[package] Node runtime: $($nodeInfo.Version), SHA256=$($nodeInfo.Sha
 
 $readmePath = Join-Path $distDir "README_START.txt"
 @(
-    "CodePanion portable package",
+    "CodePanion 便携版（Windows Alpha）",
     "",
-    "Start: double-click CodePanion.Gui.exe",
-    "The GUI will start the local daemon automatically.",
-    "Do not move files out of this folder individually."
+    "启动方式：双击 CodePanion.Gui.exe。",
+    "GUI 启动时会自动拉起本地 daemon，无需额外安装 Node.js 或 npm。",
+    "请勿单独把文件移出此目录，daemon、Node 运行时与 GUI 需要同处一个目录树。",
+    "",
+    "日志与配置默认写入 %USERPROFILE%\.codepanion\（仅当前 Windows 用户可读）。",
+    "卸载：关闭 GUI 后整体删除本目录即可，所有运行时都在此目录内。"
 ) | Set-Content -LiteralPath $readmePath -Encoding UTF8
 
 Write-Host "[4/4] Done."

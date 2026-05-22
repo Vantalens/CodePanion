@@ -81,11 +81,27 @@ export function redactSnapshot(snapshot: AuditSnapshot): AuditSnapshot {
     })),
     sessions: snapshot.sessions.map((session) => ({
       ...session,
+      command: session.command ? redactPath(session.command) : session.command,
+      args: Array.isArray(session.args) ? session.args.map(redactText) : session.args,
+      cwd: session.cwd ? redactPath(session.cwd) : session.cwd,
       windowTitle: session.windowTitle ? redactText(session.windowTitle) : session.windowTitle,
       workspace: session.workspace ? redactPath(session.workspace) : session.workspace,
+      lastPrompt: session.lastPrompt ? redactText(session.lastPrompt) : session.lastPrompt,
+      lastPromptOptions: Array.isArray(session.lastPromptOptions)
+        ? session.lastPromptOptions.map(redactText)
+        : session.lastPromptOptions,
     })),
+    workflowThreads: snapshot.workflowThreads.map((thread) => redactWorkflowThread(thread)),
     workflowItems: snapshot.workflowItems.map((item) => redactWorkflowItem(item)),
   };
+}
+
+function redactWorkflowThread(thread: unknown): unknown {
+  if (!thread || typeof thread !== 'object') return thread;
+  const copy: Record<string, unknown> = { ...(thread as Record<string, unknown>) };
+  if (typeof copy.title === 'string') copy.title = redactText(copy.title);
+  if (typeof copy.workspace === 'string') copy.workspace = redactPath(copy.workspace);
+  return copy;
 }
 
 function redactWorkflowItem(item: unknown): unknown {
@@ -93,6 +109,10 @@ function redactWorkflowItem(item: unknown): unknown {
   const copy: Record<string, unknown> = { ...(item as Record<string, unknown>) };
   for (const field of ['content', 'preview', 'rawText', 'title']) {
     if (typeof copy[field] === 'string') copy[field] = redactText(copy[field] as string);
+  }
+  if (typeof copy.filePath === 'string') copy.filePath = redactPath(copy.filePath as string);
+  if (Array.isArray(copy.options)) {
+    copy.options = (copy.options as unknown[]).map((entry) => (typeof entry === 'string' ? redactText(entry) : entry));
   }
   return copy;
 }
@@ -106,7 +126,8 @@ function redactText(value: string): string {
 
 function redactPath(value: string): string {
   if (!value) return value;
-  return value.replace(/[A-Za-z]:\\Users\\[^\\]+/g, 'C:\\Users\\***')
+  return value
+    .replace(/[A-Za-z]:\\Users\\[^\\]+/g, 'C:\\Users\\***')
     .replace(/\/Users\/[^/]+/g, '/Users/***')
     .replace(/\/home\/[^/]+/g, '/home/***');
 }

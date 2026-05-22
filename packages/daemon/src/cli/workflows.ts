@@ -79,13 +79,19 @@ export async function workflowRunCommand(args: { name: string; set?: string[]; d
   }
   const history = new WorkflowRunHistory();
   const hooks = args.dryRun ? undefined : await createDaemonHooks(workflow.name);
-  const run = await runWorkflow({
-    workflow,
-    values: parseWorkflowParams(args.set ?? []),
-    dryRun: args.dryRun,
-    yes: args.yes,
-    hooks: hooks?.handlers,
-  });
+  let run: WorkflowRun;
+  try {
+    run = await runWorkflow({
+      workflow,
+      values: parseWorkflowParams(args.set ?? []),
+      dryRun: args.dryRun,
+      yes: args.yes,
+      hooks: hooks?.handlers,
+    });
+  } catch (err) {
+    await hooks?.abort((err as Error).message ?? String(err));
+    throw err;
+  }
   history.append(run);
   await hooks?.finalize(run);
   printRun(run);
@@ -111,29 +117,45 @@ export async function workflowImportCommand(args: { file: string }) {
 
   const manager = new WorkflowDefinitionManager();
   let imported = 0;
+  let failed = 0;
+  const failures: string[] = [];
   for (const candidate of candidates) {
     if (!candidate || typeof candidate !== 'object') {
+      failed += 1;
+      failures.push('non-object entry');
       console.error('[codepanion] skipped non-object workflow entry');
       continue;
     }
     const entry = candidate as { name?: string; description?: string; params?: Record<string, string>; steps?: WorkflowStep[] };
     if (!entry.name || !Array.isArray(entry.steps) || entry.steps.length === 0) {
-      console.error('[codepanion] workflow entry missing name or steps; skipping');
+      failed += 1;
+      const label = entry.name ?? '<unnamed>';
+      failures.push(`${label}: missing name or steps`);
+      console.error(`[codepanion] workflow entry ${label} missing name or steps; skipping`);
       continue;
     }
-    const saved = manager.save({
-      name: entry.name,
-      description: entry.description,
-      params: entry.params,
-      steps: entry.steps,
-    });
-    console.log(`[codepanion] imported workflow: ${saved.name} (${saved.steps.length} steps)`);
-    imported += 1;
+    try {
+      const saved = manager.save({
+        name: entry.name,
+        description: entry.description,
+        params: entry.params,
+        steps: entry.steps,
+      });
+      console.log(`[codepanion] imported workflow: ${saved.name} (${saved.steps.length} steps)`);
+      imported += 1;
+    } catch (err) {
+      failed += 1;
+      const reason = (err as Error).message ?? String(err);
+      failures.push(`${entry.name}: ${reason}`);
+      console.error(`[codepanion] failed to import ${entry.name}: ${reason}`);
+    }
   }
+  console.log(`[codepanion] import summary: imported=${imported} failed=${failed}`);
   if (imported === 0) {
     console.error(`[codepanion] no workflows imported from ${absolute}`);
     process.exit(1);
   }
+  if (failed > 0) process.exit(2);
 }
 
 export async function workflowHistoryCommand(args: { query?: string }) {
@@ -161,13 +183,19 @@ export async function workflowReplayCommand(args: { id: string; set?: string[]; 
   }
   const history = new WorkflowRunHistory();
   const hooks = args.dryRun ? undefined : await createDaemonHooks(workflow.name);
-  const run = await runWorkflow({
-    workflow,
-    values: { ...previous.values, ...parseWorkflowParams(args.set ?? []) },
-    dryRun: args.dryRun,
-    yes: args.yes,
-    hooks: hooks?.handlers,
-  });
+  let run: WorkflowRun;
+  try {
+    run = await runWorkflow({
+      workflow,
+      values: { ...previous.values, ...parseWorkflowParams(args.set ?? []) },
+      dryRun: args.dryRun,
+      yes: args.yes,
+      hooks: hooks?.handlers,
+    });
+  } catch (err) {
+    await hooks?.abort((err as Error).message ?? String(err));
+    throw err;
+  }
   history.append(run);
   await hooks?.finalize(run);
   printRun(run);
@@ -179,6 +207,7 @@ export async function workflowReplayCommand(args: { id: string; set?: string[]; 
 type DaemonHookBundle = {
   handlers: WorkflowRunHooks;
   finalize: (run: WorkflowRun) => Promise<void>;
+  abort: (reason: string) => Promise<void>;
 };
 
 async function createDaemonHooks(workflowName: string): Promise<DaemonHookBundle | undefined> {
@@ -243,7 +272,18 @@ async function createDaemonHooks(workflowName: string): Promise<DaemonHookBundle
     }
   };
 
-  return { handlers, finalize };
+  const abort = async (reason: string) => {
+    // runWorkflow 抛异常时（模板缺失 / executor 透传错误 / schema 校验失败）走这里，
+    // 保证 daemon 端注册过的 workflow source 不会一直停在 online 而被 GUI 误读为活任务。
+    await emit('error', 'error', `工作流 ${workflowName} 异常中止`, reason || 'unknown error');
+    try {
+      await disconnectSource(sourceId, 'workflow-aborted');
+    } catch (err) {
+      void err;
+    }
+  };
+
+  return { handlers, finalize, abort };
 }
 
 function formatCommand(step: WorkflowStepRun): string {

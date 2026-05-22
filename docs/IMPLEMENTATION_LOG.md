@@ -1799,3 +1799,100 @@ node --test packages/daemon/test/workflowDefinitionManager.test.mjs   # 8 pass /
 node --test packages/daemon/test/workflowExamples.test.mjs            # 4 pass / 0 fail
 npm test                                                              # daemon 172 / adapter-sdk 13 / DTO 校验全绿
 ```
+
+---
+
+## 2026-05-22 文档与定位对齐
+
+承接「进行研究，进行代码审核，确定现阶段的情况和后期开发方向 → 更新文档，然后修复发现的问题」这一对话产出。代码审计结论：2026-05-21 的 16 项隐患（P0-A~E、P1-A~F、P2-A~E）全部已在源码中收口；Strategy Backlog 中 Adapter SDK / 本地审计导出 / Qoder 拆分 / 工作流模板已落地。剩余的 Alpha 阻塞项只属于真机产物范畴（便携版双击录屏、打包入口审查、8h 稳态曲线）。问题主要落在文档侧：[ARCHITECTURE.md](./ARCHITECTURE.md) / [DEVELOPMENT.md](./DEVELOPMENT.md) 仍保留与现行架构和产品定位冲突的描述，需要清理。
+
+### 改动
+
+- [docs/ARCHITECTURE.md](./ARCHITECTURE.md)：
+  - 整体架构图重画，明确 daemon 内核四个 Manager（SessionMgr / SourceMgr / WorkflowMgr / AuditExport）以及 PromptDetector / 进程适配器 / Adapter SDK 的位置，去掉旧图里只剩 CLI + PTY + Notifier 的窄视角。
+  - 「错误处理」章节删除虚构的 `CodePanionError` / `ErrorCode` 枚举，改为引用真实的 `DaemonHttpError`（[shared/client.ts](../packages/daemon/src/shared/client.ts)）与 `CodePanionAdapterError`（[adapter-sdk/src/index.js](../packages/adapter-sdk/src/index.js)），并列举 PTY / daemon 不可达 / WebSocket 断开 / daemon 崩溃四种真实路径的恢复策略。
+  - 「性能优化」换为「资源监管」，统一指向 [docs/RETENTION.md](./RETENTION.md) 与各 manager 实际的 retention 字段，避免再出现「无限滚动 buffer」「无界 chunk」之类的过时表述。
+  - 「扩展性」改写为 L1 / L2 / L3 三层接入路径，删除 Slack 通知 / 邮箱通道这类与 [POSITIONING.md](./POSITIONING.md)「不做通用个人 Agent」直接冲突的示例。
+  - 「测试策略」从 Jest / Supertest / ws 改为 `node:test` 真实分布表，把 7 个测试维度与现仓库实际 test 文件路径绑死，方便新增功能时直接对号入座。
+  - 「部署」收敛为「开发环境」+「Windows Alpha 用户路径」两段，移除 NSSM / launchd / systemd 章节——Alpha 的普通用户路径就是双击 `CodePanion.Gui.exe`，服务化部署属于未来评估。
+  - 删除「未来规划」章节（远程会话 SSH / 插件系统 / 云同步 / 移动端通知 / AI 辅助提示识别——这五项每一条都和 POSITIONING.md 的「不做」边界冲突），改为「路线衔接」指向 PRODUCT_ROADMAP / POSITIONING / DEVELOPMENT_TASKS / IMPLEMENTATION_LOG，避免「未来规划」与产品定位双口径。
+- [docs/DEVELOPMENT.md](./DEVELOPMENT.md)：测试章节从 Jest（`describe` / `it` / `expect` / `beforeEach`）+ Supertest 全部替换为 `node:test` + `node:assert/strict`，给出单元（PromptDetector）、集成（真 daemon，无 supertest）、hooks 闭包断言（runWorkflow）三种范式；测试组织目录改为 `packages/daemon/test/*.test.mjs` 的真实分布；运行命令补 `npm run validate:dtos` 与 `validate:extensions`。资源链接里 Jest 改为 [node:test 文档](https://nodejs.org/api/test.html)。
+- [docs/CODE_REVIEW_2026-05-21.md](./CODE_REVIEW_2026-05-21.md)：末尾新增「状态汇总（2026-05-22 复核）」表，把 16 项隐患逐条标注代码锚点（修复对应的文件 + 行号），作为下一轮审计的起点。
+- [DEVELOPMENT_TASKS.md](../DEVELOPMENT_TASKS.md)：
+  - P3 新增「ARCHITECTURE.md / DEVELOPMENT.md 与现行架构 / 测试栈对齐」勾选项，指向本日志条目。
+  - 新增「当前阻塞 Alpha 收口的真机项」一节，明列三件必须用真机产物完成的事：便携版双击启动录屏、打包入口审查、8h 稳态运行。8h 项遵循 `feedback_long_validation_last` 的「长时间稳态验证放最后」约束。
+
+### 不做的事
+
+- 不在 ARCHITECTURE.md 里保留任何「未来规划」式的展望条目：路线在 PRODUCT_ROADMAP.md / POSITIONING.md / DEVELOPMENT_TASKS.md 中维护，架构文档只描述当前架构，避免双源真相。
+- 不引入 Mocha / Vitest / Jest 替代品：仓库已经统一在 `node:test`，文档与现状对齐即可。
+- 不为本次纯文档变更新增自动化测试：变更内容是 markdown 描述，`npm test` 等回归只用来确认文档变更未误改测试断言或代码示例的引用。
+
+### 验证
+
+```powershell
+npm test                    # daemon + adapter-sdk + DTO 校验全绿（用于回归，确认文档变更未触发任何代码侧失败）
+npm run validate:dtos       # 协议契约一致性
+```
+
+---
+
+## 2026-05-22 第二轮审计修复（N-1 ~ N-5 + 打包卫生）
+
+承接「继续进行开发……把项目做完」对话产出。审计窗口：2026-05-21 主审计完成 → 2026-05-22 文档对齐之后新落地的 Strategy Backlog 改动 + 打包脚本。完整审计记录见 [CODE_REVIEW_2026-05-22.md](./CODE_REVIEW_2026-05-22.md)。
+
+### N-1 audit --redact 补 session / workflowThread 元数据脱敏
+
+- 路径：[packages/daemon/src/cli/audit.ts](../packages/daemon/src/cli/audit.ts)
+- 原 `redactSnapshot` 漏盖：`sessions[].lastPrompt / lastPromptOptions / args / command / cwd / windowTitle`、`workflowThreads[].title / workspace`、`workflowItems[].filePath / options`。修复后这些字段统一走 `redactText` / `redactPath`。
+- 新增 `redactWorkflowThread` 把 thread + 内联 items 一并脱敏；`redactWorkflowItem` 扩展处理 filePath / options 数组。
+- 测试：[packages/daemon/test/auditExport.test.mjs](../packages/daemon/test/auditExport.test.mjs) 新增 `'redactSnapshot 覆盖 session 的 lastPrompt / args / cwd 与 workflowThread 元数据'`，对所有新字段断言。
+
+### N-2 workflow import 部分失败容错
+
+- 路径：[packages/daemon/src/cli/workflows.ts](../packages/daemon/src/cli/workflows.ts) `workflowImportCommand`
+- 每条 entry 用 try/catch 隔离，统计 `imported` / `failed`，最末打印 `[codepanion] import summary: imported=X failed=Y`。
+- 退出码语义：全失败 → 1，部分失败 → 2，全成功 → 0。
+- 支持顶层 `[...]` 和 `{ workflows: [...] }` 两种包装。
+- 测试：[packages/daemon/test/workflowImport.test.mjs](../packages/daemon/test/workflowImport.test.mjs) 4 条覆盖 4 个分支。
+
+### N-3 runWorkflow 异常时 daemon source 不泄露
+
+- 路径：[packages/daemon/src/cli/workflows.ts](../packages/daemon/src/cli/workflows.ts) `createDaemonHooks` / `workflowRunCommand` / `workflowReplayCommand`
+- 新增 `DaemonHookBundle.abort(reason)`：emit error 事件 + `disconnectSource('workflow-aborted')`，吞掉自身的 disconnect 失败。
+- `workflowRunCommand` / `workflowReplayCommand` 把 runWorkflow 包 try/catch，catch 分支 `hooks?.abort(err.message)` 后 rethrow，确保 schema 校验失败 / 未知 template 等抛错路径不会留下 `online` 状态的幽灵 workflow source。
+
+### N-4 file-watcher 示例加默认忽略 + 200ms 去抖
+
+- 路径：[packages/adapter-sdk/examples/file-watcher.mjs](../packages/adapter-sdk/examples/file-watcher.mjs)
+- `DEFAULT_IGNORE` Set：node_modules / .git / .svn / .hg / dist / build / out / target / .next / .cache / .turbo / .parcel-cache / coverage。
+- 同一相对路径 200ms 去抖（pending Map + flushTimer），后到的 eventType 覆盖前一次。
+- 头部注释更新使用建议。
+- 测试：[packages/adapter-sdk/test/fileWatcher.test.mjs](../packages/adapter-sdk/test/fileWatcher.test.mjs) 6 条覆盖正斜杠 / 反斜杠 / 普通源码不误伤 / 空路径 / DEFAULT_IGNORE 完备性 / DEBOUNCE_MS 阈值。
+
+### N-5 local-tool-bridge readTail 单飞
+
+- 路径：[packages/adapter-sdk/examples/local-tool-bridge.mjs](../packages/adapter-sdk/examples/local-tool-bridge.mjs)
+- 新增 `reading` 标志 + `pendingRescan` 标记。同一时刻只允许一个 createReadStream，stream `close` 时释放锁 + 检查 pendingRescan 触发下一轮。
+- 用 `readUntil = stat.size` 锁住读取范围，避免 TOCTOU 把刚 append 的新增量切到下一次。
+- 用注释固化"为什么需要单飞"，防止后续优化误删。
+
+### Windows 便携版打包卫生（README + Assets 过滤）
+
+- 路径：[scripts/package-windows.ps1](../scripts/package-windows.ps1)、[packages/gui/CodePanion.Gui.csproj](../packages/gui/CodePanion.Gui.csproj)
+- `README_START.txt` 从英文改为 8 行中文：双击启动、自动拉 daemon、目录整体性、`%USERPROFILE%\.codepanion\` 落盘位置、卸载方式。
+- csproj 给 `Assets\**\*` 加 Condition：`Filename Extension == 'README.md'` 或 `Filename` 以 `-source` 结尾的资产不再复制到 publish 目录，发布产物不再混入 Assets/README.md 与 `app-icon-source.png/svg`。
+- 这一条只关闭打包脚本侧的卫生问题，真机产物双击启动录屏与 8h 稳态运行仍挂在「当前阻塞 Alpha 收口的真机项」。
+
+### 验证
+
+```powershell
+npm run build       # daemon TS 重编译产生新 audit / workflows dist 产物
+npm test            # daemon 175 + adapter-sdk 19 全绿
+npm run validate:dtos
+```
+
+### 不做的事
+
+- N-3 未单独写集成测试：daemon client 模块边界 mock 成本与 abort 单行 catch 改动的可见性不成比例；abort 与 finalize 共用同一个 `disconnectSource` API，原 finalize 路径已有间接覆盖。
+- N-5 未单独写并发读 stream 测试：异步 I/O 时序难复现，靠代码注释 + 评审固化。

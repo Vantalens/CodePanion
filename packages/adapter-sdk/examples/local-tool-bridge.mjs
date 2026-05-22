@@ -99,6 +99,11 @@ async function main() {
 
   let offset = fs.statSync(absoluteWatch).size;
   let pending = '';
+  // 单飞标志：fs.watch 在一次写入里可能连发多次 change，readTail 又是异步流；
+  // 没有这个锁两路同时 createReadStream 会让同一段日志被拆到两个 stream，
+  // pending 拼接出来的行顺序错乱，进而被 classify 错判 prompt/error。
+  let reading = false;
+  let pendingRescan = false;
 
   function drainChunk(chunk) {
     pending += chunk;
@@ -121,6 +126,11 @@ async function main() {
   }
 
   function readTail() {
+    if (reading) {
+      // 已经在读：标记一次重扫，等当前 stream 结束后再跑一遍把新增量吃掉。
+      pendingRescan = true;
+      return;
+    }
     let stat;
     try {
       stat = fs.statSync(absoluteWatch);
@@ -132,14 +142,25 @@ async function main() {
     if (stat.size < offset) offset = 0;
     if (stat.size === offset) return;
 
+    reading = true;
+    const readUntil = stat.size;
     const stream = fs.createReadStream(absoluteWatch, {
       start: offset,
-      end: stat.size - 1,
+      end: readUntil - 1,
       encoding: 'utf8',
     });
-    offset = stat.size;
+    offset = readUntil;
     stream.on('data', drainChunk);
-    stream.on('error', (err) => console.warn('[bridge] 读取失败:', err.message));
+    stream.on('error', (err) => {
+      console.warn('[bridge] 读取失败:', err.message);
+    });
+    stream.on('close', () => {
+      reading = false;
+      if (pendingRescan) {
+        pendingRescan = false;
+        readTail();
+      }
+    });
   }
 
   const watcher = fs.watch(absoluteWatch, () => readTail());

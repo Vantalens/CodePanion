@@ -219,3 +219,60 @@ test('redactSnapshot 保留结构但对文本与路径做最小脱敏', async ()
   assert.equal(redacted.schemaVersion, 1);
   assert.equal(redacted.daemonVersion, '0.0.0-test');
 });
+
+test('redactSnapshot 覆盖 session 的 lastPrompt / args / cwd 与 workflowThread 元数据', () => {
+  const snapshot = {
+    schemaVersion: 1,
+    generatedAt: 0,
+    since: null,
+    daemonVersion: '0.0.0-test',
+    sources: [],
+    events: [],
+    eventReplies: [],
+    sessions: [
+      {
+        id: 'sess-1',
+        command: 'C:\\Users\\alice\\AppData\\Local\\codex\\codex.exe',
+        args: ['--workspace', '/Users/alice/projects/private'],
+        cwd: '/home/alice/code/secret',
+        workspace: '/Users/alice/projects/demo',
+        startedAt: 0,
+        status: 'waiting',
+        lastPrompt: '是否覆盖文件 /Users/alice/.config/api-key.json？(y/N)',
+        lastPromptOptions: ['y', '允许写入此文件', 'N'],
+      },
+    ],
+    workflowThreads: [
+      { id: 't-1', source: 'codex-desktop', title: 'Codex 工作流示例标题', workspace: 'C:\\Users\\bob\\repo' },
+    ],
+    workflowItems: [
+      { id: 'w-1', threadId: 't-1', kind: 'tool_call', options: ['选项 A', 'B'], filePath: '/home/alice/file.ts' },
+    ],
+  };
+
+  const out = redactSnapshot(snapshot);
+
+  // session.command 是绝对路径 → redactPath 把用户名打码
+  assert.match(out.sessions[0].command, /C:\\Users\\\*\*\*/);
+  // session.args 内每个元素都过 redactText（包括 path 形态）
+  assert.equal(out.sessions[0].args.length, 2);
+  assert.notEqual(out.sessions[0].args[1], '/Users/alice/projects/private');
+  // cwd 走 redactPath
+  assert.match(out.sessions[0].cwd, /\/home\/\*\*\*/);
+  // lastPrompt 整体走 redactText（保留首尾 + 中段星号）
+  assert.notEqual(out.sessions[0].lastPrompt, snapshot.sessions[0].lastPrompt);
+  assert.match(out.sessions[0].lastPrompt, /chars/);
+  // lastPromptOptions 每项过 redactText：单字符全打码，长项打码后含 chars
+  assert.equal(out.sessions[0].lastPromptOptions[0], '*');
+  assert.match(out.sessions[0].lastPromptOptions[1], /chars/);
+  // workflowThreads 的 title 与 workspace 都脱敏
+  const thread = out.workflowThreads[0];
+  assert.notEqual(thread.title, 'Codex 工作流示例标题');
+  assert.match(thread.workspace, /Users\\\*\*\*/);
+  assert.equal(thread.id, 't-1'); // 非敏感字段透传
+  // workflowItems.options 每项脱敏；filePath 走 redactPath
+  const w = out.workflowItems[0];
+  assert.notEqual(w.options[0], '选项 A');
+  assert.equal(w.options[1], '*'); // 长度 1，全部打码
+  assert.match(w.filePath, /\/home\/\*\*\*/);
+});

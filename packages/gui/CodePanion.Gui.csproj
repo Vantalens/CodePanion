@@ -44,7 +44,8 @@
     <None Update="wwwroot\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Update="Assets\**\*">
+    <!-- 只复制运行所需的图标，剔除 Assets/README.md 与 *-source.png 之类的开发资产。 -->
+    <None Update="Assets\**\*" Condition="!('%(Filename)%(Extension)' == 'README.md' Or $([System.Text.RegularExpressions.Regex]::IsMatch('%(Filename)', '-source$')))">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
     <None Include="..\daemon\bundle\daemon.cjs" Link="daemon\daemon.cjs" CopyToOutputDirectory="PreserveNewest" />
