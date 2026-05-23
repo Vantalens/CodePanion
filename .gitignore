@@ -42,6 +42,7 @@ Desktop.ini
 test-results/
 coverage/
 output/
+.artifacts/
 
 # Temporary files
 *.tmp

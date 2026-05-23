@@ -1,11 +1,20 @@
 param(
-    [string]$RuntimeIdentifier = "win-x64"
+    [string]$RuntimeIdentifier = "win-x64",
+    [string]$BuildRoot = ""
 )
 
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
-$publishDir = Join-Path $root "packages\gui\bin\Release\net8.0-windows\$RuntimeIdentifier\publish"
+$buildArtifactsRoot = if ($BuildRoot) {
+    $BuildRoot
+} elseif ($env:CODEPANION_GUI_BUILD_ROOT) {
+    $env:CODEPANION_GUI_BUILD_ROOT
+} else {
+    Join-Path $root ".artifacts\gui-build"
+}
+$publishRoot = Join-Path $buildArtifactsRoot "publish\$RuntimeIdentifier"
+$publishDir = Join-Path $publishRoot "publish"
 $distRoot = Join-Path $root "dist"
 $distDir = Join-Path $distRoot "CodePanion-$RuntimeIdentifier"
 $project = Join-Path $root "packages\gui\CodePanion.Gui.csproj"
@@ -123,7 +132,8 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "[2/4] Publishing GUI ($RuntimeIdentifier)..."
-dotnet publish $project -c Release -r $RuntimeIdentifier --self-contained true -p:PublishSingleFile=false
+New-Item -ItemType Directory -Path $publishRoot -Force | Out-Null
+dotnet publish $project -c Release -r $RuntimeIdentifier --self-contained true -p:PublishSingleFile=false -m:1 "-p:BaseIntermediateOutputPath=$(Join-Path $publishRoot 'obj\')" "-p:MSBuildProjectExtensionsPath=$(Join-Path $publishRoot 'obj\')" "-p:BaseOutputPath=$(Join-Path $publishRoot 'bin\')" "-p:PublishDir=$publishDir\"
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
