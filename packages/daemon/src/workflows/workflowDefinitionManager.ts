@@ -1,9 +1,30 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname } from 'node:path';
 import { z } from 'zod';
 import { HOME_DIR } from '../config.js';
+import { logger } from '../logger.js';
 import { runWithPty } from '../pty/runner.js';
 import { WorkflowTemplateManager, parseTemplateValues } from './templateManager.js';
+
+// N-9：daemon 启动时 load 这些文件，如果用户在外部编辑器写坏（trailing comma、半截写入、BOM）
+// 不能让一次单文件损坏阻塞整个 daemon。统一隔离损坏文件后返回空 store，让 daemon 继续启动。
+function quarantineBrokenStore(path: string, err: unknown, kind: string): void {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const target = `${path}.broken-${stamp}.json`;
+  try {
+    renameSync(path, target);
+    logger.warn({ err, kind, path, quarantined: target }, '损坏的存储文件已隔离，daemon 继续启动');
+  } catch (renameErr) {
+    logger.error({ err, renameErr, kind, path }, '损坏的存储文件解析失败，且隔离也失败');
+  }
+}
 
 export const WORKFLOW_DEFINITIONS_PATH = `${HOME_DIR}/workflows.json`;
 export const WORKFLOW_RUN_HISTORY_PATH = `${HOME_DIR}/workflow-runs.json`;
@@ -119,8 +140,13 @@ export class WorkflowDefinitionManager {
 
   private load(): DefinitionStore {
     if (!existsSync(this.path)) return { version: 1, workflows: [] };
-    const raw = JSON.parse(readFileSync(this.path, 'utf8'));
-    return DefinitionStoreSchema.parse(raw);
+    try {
+      const raw = JSON.parse(readFileSync(this.path, 'utf8'));
+      return DefinitionStoreSchema.parse(raw);
+    } catch (err) {
+      quarantineBrokenStore(this.path, err, 'workflow-definitions');
+      return { version: 1, workflows: [] };
+    }
   }
 
   private write(store: DefinitionStore): void {
@@ -129,37 +155,131 @@ export class WorkflowDefinitionManager {
   }
 }
 
+// N-16：旧实现把 history 当成单个 JSON 对象（`{ version, runs:[] }`），append = 读全文件 + 校验整段 schema +
+// 追加 + 全量写回。中间任何一条历史 schema 失败 → catch 里就把整个文件隔离为 broken-* 重置为空，
+// 几百条 workflow run 一次坏 entry 全丢。改为 NDJSON：append 不读旧文件、坏行只跳过不 truncate、
+// 周期性 compaction 维护 maxRuns 上限。第一次遇到旧版 JSON 文件时自动迁移到 NDJSON。
+const HISTORY_COMPACTION_RATIO = 1.5;
+
 export class WorkflowRunHistory {
   constructor(private readonly path = historyPath(), private readonly maxRuns = 200) {}
 
   list(query?: string): WorkflowRun[] {
-    const runs = this.load().runs.sort((a, b) => b.startedAt - a.startedAt);
+    const runs = this.load().sort((a, b) => b.startedAt - a.startedAt);
     if (!query) return runs;
     const needle = query.toLowerCase();
     return runs.filter((run) => JSON.stringify(run).toLowerCase().includes(needle));
   }
 
   get(id: string): WorkflowRun | undefined {
-    return this.load().runs.find((run) => run.id === id);
+    return this.load().find((run) => run.id === id);
   }
 
   append(run: WorkflowRun): WorkflowRun {
-    const store = this.load();
-    store.runs = [WorkflowRunSchema.parse(run), ...store.runs.filter((item) => item.id !== run.id)].slice(0, this.maxRuns);
-    this.write(store);
-    return run;
-  }
-
-  private load(): HistoryStore {
-    if (!existsSync(this.path)) return { version: 1, runs: [] };
-    const raw = JSON.parse(readFileSync(this.path, 'utf8'));
-    return HistoryStoreSchema.parse(raw);
-  }
-
-  private write(store: HistoryStore): void {
+    const parsed = WorkflowRunSchema.parse(run);
     mkdirSync(dirname(this.path), { recursive: true });
-    writeFileSync(this.path, JSON.stringify(HistoryStoreSchema.parse(store), null, 2), 'utf8');
+    // 关键：appendFileSync 单行追加，不再 load + 全量 rewrite —— 不读旧文件意味着哪怕旧文件里有
+    // 坏行也不会影响这次写入，新 run 永远落得下来。
+    appendFileSync(this.path, JSON.stringify(parsed) + '\n', 'utf8');
+    this.maybeCompact();
+    return parsed;
   }
+
+  private load(): WorkflowRun[] {
+    if (!existsSync(this.path)) return [];
+    let raw: string;
+    try {
+      raw = readFileSync(this.path, 'utf8');
+    } catch (err) {
+      logger.warn({ err, path: this.path }, 'workflow-run-history 读取失败，返回空列表');
+      return [];
+    }
+    if (!raw.trim()) return [];
+    // 关键：NDJSON 每行也以 `{` 开头，所以不能光看首字符判断「旧版整体 JSON」，否则 NDJSON 文件
+    // 会被误判成损坏的 legacy 容器，触发 quarantine 后整个文件被改名 —— append 还能写但 list 永远空。
+    // 改成尝试 JSON.parse 整段：NDJSON 第二条 JSON 一开始就会破坏 parse，因此 parse 成功 ≈ 真的是
+    // 单个 JSON 容器；再校验是否带 `runs` 字段才走 legacy 迁移分支。
+    const legacy = this.tryLoadLegacy(raw);
+    if (legacy !== null) return legacy;
+    return parseNdjsonRuns(raw, this.path);
+  }
+
+  private tryLoadLegacy(raw: string): WorkflowRun[] | null {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      // 多行 NDJSON 文件在第二条 JSON 处 parse 必败 —— 视为 NDJSON，交给 parseNdjsonRuns 兜底。
+      return null;
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || !('runs' in (parsed as object))) {
+      // parse 成功但不是 `{ version, runs }` 容器；交给 NDJSON 单行解析（也覆盖只写了一条 run 的极端情况）。
+      return null;
+    }
+    try {
+      const result = HistoryStoreSchema.parse(parsed);
+      this.rewriteNdjson(result.runs);
+      logger.info({ path: this.path, runs: result.runs.length }, 'workflow-run-history 已从旧版 JSON 迁移为 NDJSON');
+      return result.runs;
+    } catch (err) {
+      // 确认是 legacy 容器形状但 schema 不过：保留隔离语义，避免把可疑文件直接当成空 NDJSON 用。
+      quarantineBrokenStore(this.path, err, 'workflow-run-history');
+      return [];
+    }
+  }
+
+  private rewriteNdjson(runs: WorkflowRun[]): void {
+    mkdirSync(dirname(this.path), { recursive: true });
+    const body = runs.map((run) => JSON.stringify(WorkflowRunSchema.parse(run))).join('\n') + (runs.length ? '\n' : '');
+    // tmp + rename：避免 compaction 中 daemon 崩溃留下半段文件。
+    const tmp = `${this.path}.tmp-${process.pid}-${Date.now()}`;
+    writeFileSync(tmp, body, 'utf8');
+    renameSync(tmp, this.path);
+  }
+
+  private maybeCompact(): void {
+    // 用文件大小做廉价启发：单条 run 通常几 KB，maxRuns=200 时 ~1MB 量级。
+    // 超过 maxRuns × 1.5 行就 compact 一次，把 dedup / 排序成本摊到很多次 append 上。
+    let lineCount = 0;
+    try {
+      const raw = readFileSync(this.path, 'utf8');
+      for (let i = 0; i < raw.length; i++) if (raw.charCodeAt(i) === 10) lineCount++;
+    } catch {
+      return;
+    }
+    if (lineCount <= this.maxRuns * HISTORY_COMPACTION_RATIO) return;
+    try {
+      const all = this.load();
+      const recent = all.sort((a, b) => b.startedAt - a.startedAt).slice(0, this.maxRuns);
+      this.rewriteNdjson(recent);
+    } catch (err) {
+      logger.warn({ err, path: this.path }, 'workflow-run-history compaction 失败，下次 append 时重试');
+    }
+  }
+}
+
+function parseNdjsonRuns(raw: string, path: string): WorkflowRun[] {
+  const seen = new Map<string, WorkflowRun>();
+  let badLineCount = 0;
+  let firstBadSample: string | undefined;
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    try {
+      const parsed = WorkflowRunSchema.parse(JSON.parse(line));
+      // 同 id 重复（同一 run 被多次 append）时保留后写入的，便于 dry-run 后真实跑覆盖旧记录。
+      seen.set(parsed.id, parsed);
+    } catch (err) {
+      badLineCount++;
+      if (!firstBadSample) firstBadSample = line.slice(0, 200);
+    }
+  }
+  if (badLineCount > 0) {
+    logger.warn(
+      { path, badLineCount, sample: firstBadSample },
+      'workflow-run-history 跳过损坏行（其余历史保留）',
+    );
+  }
+  return Array.from(seen.values());
 }
 
 export function parseWorkflowParams(values: string[] = []): Record<string, string> {
@@ -278,7 +398,21 @@ export async function runWorkflow(input: {
       await invokeHook(hooks.onStepFinish, stepRun, run);
       continue;
     }
-    const exitCode = await executor(resolved.command, resolved.args);
+    // N-14：原来直接 await executor(...)，pty.spawn 抛错会把异常一路 reject 到 daemon，
+    // onStepFinish 不会触发，GUI 看到 step 一直 running。把同步 / 异步抛错都归一化成
+    // failed step，让事件总线和上层调用方拿到完整的失败语义。
+    let exitCode: number;
+    try {
+      exitCode = await executor(resolved.command, resolved.args);
+    } catch (err) {
+      stepRun.exitCode = -1;
+      stepRun.endedAt = Date.now();
+      stepRun.status = 'failed';
+      stepRun.message = `executor threw: ${err instanceof Error ? err.message : String(err)}`;
+      await invokeHook(hooks.onStepFinish, stepRun, run);
+      run.status = 'failed';
+      break;
+    }
     stepRun.exitCode = exitCode;
     stepRun.endedAt = Date.now();
     stepRun.status = exitCode === 0 ? 'success' : 'failed';

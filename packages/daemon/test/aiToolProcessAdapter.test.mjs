@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { TOOL_PROFILES, matchToolProfile, sourceKeyForProcess } from '../dist/adapters/aiToolProcessAdapter.js';
+import { TOOL_PROFILES, matchToolProfile, sanitizeReportField, sourceKeyForProcess } from '../dist/adapters/aiToolProcessAdapter.js';
 
 test('AI tool scanner detects CC Switch by process name', () => {
   const profile = matchToolProfile({
@@ -63,6 +63,16 @@ test('TOOL_PROFILES tier 收敛与 MONITORING_SOURCES.md 一致', () => {
   for (const profile of TOOL_PROFILES) {
     assert.ok(['first', 'second', 'switcher'].includes(profile.tier), `${profile.kind} 需要显式 tier`);
   }
+});
+
+test('sanitizeReportField 把 HOME 替换为 ~ 并截断到 80 字符（N-6）', () => {
+  // 这里不能直接断言 HOME 替换（运行环境不一定有 HOME 命中），但能验证截断与空值处理。
+  assert.equal(sanitizeReportField(''), undefined);
+  assert.equal(sanitizeReportField(undefined), undefined);
+  const long = 'workspace - ' + '中'.repeat(200);
+  const clipped = sanitizeReportField(long);
+  assert.ok(clipped && clipped.length <= 80, `should be clipped to <= 80 chars, got ${clipped?.length}`);
+  assert.ok(clipped?.endsWith('…'), 'should end with ellipsis when clipped');
 });
 
 test('Qoder 独立 IDE 进程被识别为 qoder kind 而不是被吞进 lingma profile', () => {

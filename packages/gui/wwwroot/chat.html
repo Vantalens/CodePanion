@@ -13,10 +13,11 @@
     <div id="app-shell">
         <nav id="source-rail" aria-label="全局导航">
             <div class="rail-brand" title="CodePanion">CP</div>
-            <button class="rail-button active" type="button" data-view="active" title="任务台" aria-label="任务台">⌂</button>
+            <button class="rail-button active" type="button" data-view="active" title="我的待处理" aria-label="我的待处理">⌂</button>
             <button class="rail-button" type="button" data-view="waiting" title="等待我" aria-label="等待我">!</button>
             <button class="rail-button" type="button" data-view="running" title="运行中" aria-label="运行中">▶</button>
             <button class="rail-button" type="button" data-view="error" title="失败" aria-label="失败">×</button>
+            <button class="rail-button" type="button" data-view="done" title="已完成" aria-label="已完成">✓</button>
             <button class="rail-button" type="button" data-view="later" title="稍后 / 归档" aria-label="稍后 / 归档">◷</button>
             <button class="rail-button" type="button" data-view="code" title="代码产物" aria-label="代码产物">{}</button>
             <div class="rail-spacer"></div>
@@ -57,12 +58,40 @@
             </section>
 
             <div class="sidebar-tools">
-                <button class="tool-button active" type="button" data-view="active">全部</button>
+                <button class="tool-button active" type="button" data-view="active">待处理</button>
                 <button class="tool-button" type="button" data-view="waiting">等待</button>
                 <button class="tool-button" type="button" data-view="running">运行中</button>
                 <button class="tool-button" type="button" data-view="error">失败</button>
+                <button class="tool-button" type="button" data-view="done">已完成</button>
                 <button class="tool-button" type="button" data-view="later">稍后</button>
                 <button class="tool-button" type="button" data-view="code">产物</button>
+            </div>
+            <div class="list-grouping" aria-label="任务分组方式">
+                <span class="list-grouping-label">分组</span>
+                <div class="list-grouping-buttons">
+                    <button class="group-button active" type="button" data-group-mode="workspace">项目</button>
+                    <button class="group-button" type="button" data-group-mode="source">来源</button>
+                    <button class="group-button" type="button" data-group-mode="none">队列</button>
+                </div>
+            </div>
+            <div id="batch-toolbar" class="batch-toolbar" hidden>
+                <div class="batch-toolbar-row">
+                    <button id="batch-toggle" class="action-button" type="button">批量选择</button>
+                    <span id="batch-selection-count" class="batch-selection-count">未选择任务</span>
+                </div>
+                <div class="batch-toolbar-row">
+                    <button id="batch-restore" class="action-button" type="button" disabled>批量恢复</button>
+                    <button id="batch-archive" class="action-button" type="button" disabled>批量归档</button>
+                    <button id="batch-snooze" class="action-button" type="button" disabled>稍后 30 分钟</button>
+                    <button id="batch-pin" class="action-button" type="button" disabled>批量置顶</button>
+                    <button id="batch-clear" class="action-button" type="button" disabled>清空</button>
+                </div>
+                <div class="batch-toolbar-row">
+                    <span class="batch-selection-count">批量优先级</span>
+                    <button id="batch-priority-high" class="priority-button priority-high" type="button" disabled>高</button>
+                    <button id="batch-priority-normal" class="priority-button priority-normal" type="button" disabled>中</button>
+                    <button id="batch-priority-low" class="priority-button priority-low" type="button" disabled>低</button>
+                </div>
             </div>
             <div id="conversation-list" class="conversation-list" aria-label="任务收件箱"></div>
         </aside>
@@ -80,11 +109,29 @@
                 </div>
                 <div class="stage-actions">
                     <button id="stage-focus-reply" class="action-button primary" type="button" disabled>处理任务</button>
+                    <button id="stage-suggested-action" class="action-button primary" type="button" disabled hidden>建议动作</button>
+                    <button id="stage-suggested-secondary" class="action-button" type="button" disabled hidden>后续动作</button>
                     <button id="stage-pin-task" class="action-button" type="button" disabled>置顶任务</button>
                     <button id="stage-snooze-task" class="action-button" type="button" disabled>稍后 1 小时</button>
                     <button id="stage-archive-task" class="action-button" type="button" disabled>归档任务</button>
                     <button id="stage-copy-context" class="action-button" type="button" disabled>复制上下文</button>
                 </div>
+                <div class="priority-strip" aria-label="任务优先级">
+                    <span class="priority-strip-label">优先级</span>
+                    <div class="priority-strip-buttons">
+                        <button id="stage-priority-high" class="priority-button" type="button">高</button>
+                        <button id="stage-priority-normal" class="priority-button" type="button">中</button>
+                        <button id="stage-priority-low" class="priority-button" type="button">低</button>
+                    </div>
+                </div>
+                <div class="priority-strip" aria-label="任务排序">
+                    <span class="priority-strip-label">排序</span>
+                    <div class="priority-strip-buttons">
+                        <button id="stage-move-up" class="priority-button" type="button">上移</button>
+                        <button id="stage-move-down" class="priority-button" type="button">下移</button>
+                    </div>
+                </div>
+                <div id="stage-snooze-menu" class="task-action-menu" hidden></div>
             </header>
             <section id="task-spotlight" aria-label="当前任务聚焦">
                 <div class="spotlight-card emphasis">
@@ -138,12 +185,78 @@
                     <span class="context-label">动作</span>
                     <div class="drawer-actions">
                         <button id="drawer-focus-reply" class="action-button primary" type="button" disabled>处理任务</button>
+                        <button id="drawer-suggested-action" class="action-button primary" type="button" disabled hidden>建议动作</button>
+                        <button id="drawer-suggested-secondary" class="action-button" type="button" disabled hidden>后续动作</button>
                         <button id="drawer-pin-task" class="action-button" type="button" disabled>置顶任务</button>
                         <button id="drawer-snooze-task" class="action-button" type="button" disabled>稍后 1 小时</button>
                         <button id="drawer-archive-task" class="action-button" type="button" disabled>归档任务</button>
                         <button id="drawer-copy-workspace" class="action-button" type="button" disabled>复制工作区</button>
                     </div>
+                    <div id="drawer-snooze-menu" class="task-action-menu" hidden></div>
                     <p id="drawer-action-note">CodePanion 只展示真实可用动作；弱接入来源不会伪装成可接管。</p>
+                </div>
+                <div class="context-section">
+                    <span class="context-label">优先级</span>
+                    <div class="priority-strip drawer-priority" aria-label="任务优先级">
+                        <div class="priority-strip-buttons">
+                            <button id="drawer-priority-high" class="priority-button" type="button">高</button>
+                            <button id="drawer-priority-normal" class="priority-button" type="button">中</button>
+                            <button id="drawer-priority-low" class="priority-button" type="button">低</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="context-section">
+                    <span class="context-label">排序</span>
+                    <div class="priority-strip drawer-priority" aria-label="任务排序">
+                        <div class="priority-strip-buttons">
+                            <button id="drawer-move-up" class="priority-button" type="button">上移</button>
+                            <button id="drawer-move-down" class="priority-button" type="button">下移</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="context-section">
+                    <span class="context-label">接力导航</span>
+                    <div class="linked-task-panel">
+                        <div id="drawer-linked-session-panel" class="linked-task-card" hidden>
+                            <span class="linked-task-label">当前接力会话</span>
+                            <strong id="drawer-linked-session-title">未建立接力会话</strong>
+                            <p id="drawer-linked-session-note">转交建立后，可直接跳转到接力会话继续跟进。</p>
+                            <button id="drawer-jump-linked-session" class="action-button" type="button" disabled>打开接力会话</button>
+                        </div>
+                        <div id="drawer-parent-task-panel" class="linked-task-card" hidden>
+                            <span class="linked-task-label">来源任务</span>
+                            <strong id="drawer-parent-task-title">未关联来源任务</strong>
+                            <p id="drawer-parent-task-note">当前会话来自某个上游任务时，可直接返回原任务。</p>
+                            <button id="drawer-jump-parent-task" class="action-button" type="button" disabled>返回来源任务</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="context-section">
+                    <span class="context-label">任务转交</span>
+                    <div class="handoff-panel">
+                        <div class="handoff-controls">
+                            <label class="handoff-target">
+                                <span>目标</span>
+                                <select id="drawer-handoff-target">
+                                    <option value="generic">通用</option>
+                                    <option value="codex">Codex</option>
+                                    <option value="claude-code">Claude Code</option>
+                                    <option value="opencode">OpenCode</option>
+                                </select>
+                            </label>
+                            <div class="drawer-actions handoff-actions">
+                                <button id="drawer-copy-handoff" class="action-button" type="button" disabled>复制交接包</button>
+                                <button id="drawer-copy-handoff-prompt" class="action-button" type="button" disabled>复制转交指令</button>
+                            </div>
+                            <div class="drawer-actions handoff-actions">
+                                <button id="drawer-start-handoff" class="action-button" type="button" disabled>启动并转交</button>
+                                <button id="drawer-mark-handoff-active" class="action-button" type="button" disabled>确认接手</button>
+                                <button id="drawer-return-handoff" class="action-button" type="button" disabled>回收到当前</button>
+                                <button id="drawer-clear-handoff" class="action-button" type="button" disabled>清除转交</button>
+                            </div>
+                        </div>
+                        <pre id="drawer-handoff-preview" class="handoff-preview">选择任务后显示标准化交接内容。</pre>
+                    </div>
                 </div>
             </section>
 

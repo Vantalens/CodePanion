@@ -427,6 +427,52 @@ test('user_message does NOT overwrite a meaningful workspace-derived title from 
   }
 });
 
+test('CodexDesktopAdapter caps trackedFiles to maxTrackedFiles via LRU eviction（N-13）', async () => {
+  // 模拟 8h 长跑里产出大量历史 jsonl 的情况：构造 6 个 session 文件，但 cap=4，
+  // scan 完成后 trackedFiles 必须 ≤ cap，且最旧的两个应被淘汰。
+  const root = mkdtempSync(join(tmpdir(), 'codex-adapter-lru-'));
+  try {
+    for (let i = 0; i < 6; i += 1) {
+      const path = join(root, `rollout-2026-01-15T12-00-0${i}-019lru0-000${i}.jsonl`);
+      writeJsonl(path, [
+        { timestamp: freshIso(i * 10), type: 'session_meta', payload: { cwd: `/repo/lru-${i}` } },
+      ]);
+    }
+    const workflows = new WorkflowManager();
+    const adapter = new CodexDesktopAdapter(workflows, { root, maxTrackedFiles: 4 });
+    await adapter.scanOnce();
+    assert.ok(
+      adapter.trackedFileCountForTests() <= 4,
+      `tracked files should be capped to 4, got ${adapter.trackedFileCountForTests()}`,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('CodexDesktopAdapter evicts entries whose backing files were removed by Codex GC（N-13）', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'codex-adapter-evict-'));
+  try {
+    const path = join(root, 'rollout-2026-01-15T12-00-00-019gone-0001.jsonl');
+    writeJsonl(path, [
+      { timestamp: freshIso(), type: 'session_meta', payload: { cwd: '/repo/gone' } },
+    ]);
+    const workflows = new WorkflowManager();
+    const adapter = new CodexDesktopAdapter(workflows, { root });
+    await adapter.scanOnce();
+    assert.equal(adapter.trackedFileCountForTests(), 1);
+    rmSync(path, { force: true });
+    await adapter.scanOnce();
+    assert.equal(
+      adapter.trackedFileCountForTests(),
+      0,
+      'tracked entry should be evicted once its file disappears',
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('second scan only consumes newly appended lines (offset tracking)', async () => {
   const root = mkdtempSync(join(tmpdir(), 'codex-adapter-offset-'));
   const sessionPath = join(root, 'rollout-2026-01-15T12-00-00-019offset-1234.jsonl');

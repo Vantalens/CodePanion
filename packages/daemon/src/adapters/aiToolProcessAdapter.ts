@@ -2,8 +2,13 @@ import { execFile } from 'node:child_process';
 import { platform } from 'node:os';
 import { promisify } from 'node:util';
 import type { MonitorSource, RegisterSourceRequest } from '../shared/protocol.js';
-import { logger } from '../logger.js';
+import { logger, maskString } from '../logger.js';
 import { SourceManager } from '../daemon/sourceManager.js';
+
+// N-6：进程级 L1 探测时，CommandLine / 可执行路径 / 窗口标题都可能含用户名 / API key /
+// prompt 片段。仅用于本地匹配 profile，不直接上报；上报字段 workspace / windowTitle
+// 一律走 maskString（HOME → ~、Bearer / 长 hex → [Redacted]）+ 80 字符截断。
+const REPORT_FIELD_MAX = 80;
 
 const execFileAsync = promisify(execFile);
 
@@ -173,7 +178,7 @@ export class AiToolProcessAdapter {
         const source = this.sources.register({
           kind: profile.kind,
           name: profile.name,
-          windowTitle: process.windowTitle || profile.group,
+          windowTitle: sanitizeReportField(process.windowTitle || profile.group),
           workspace: inferWorkspace(process),
           pid: process.processId,
           capabilities: profile.capabilities,
@@ -199,10 +204,18 @@ export class AiToolProcessAdapter {
       source: profile.kind,
       title: `${profile.name} 已识别`,
       content: `${profile.name} 正在运行，CodePanion 已将其纳入本地 AI 工具来源监控。当前能力：${profile.capabilities.join(', ')}。`,
-      windowTitle: process.windowTitle || profile.group,
+      windowTitle: sanitizeReportField(process.windowTitle || profile.group),
       workspace: inferWorkspace(process),
     });
   }
+}
+
+export function sanitizeReportField(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const masked = maskString(String(value)).trim();
+  if (!masked) return undefined;
+  if (masked.length <= REPORT_FIELD_MAX) return masked;
+  return masked.slice(0, REPORT_FIELD_MAX - 1) + '…';
 }
 
 export function matchToolProfile(process: ProcessInfo): ToolProfile | undefined {
@@ -228,11 +241,14 @@ function normalizeProcessIdentity(value?: string): string {
 }
 
 function inferWorkspace(process: ProcessInfo): string | undefined {
+  // N-6：不再用 process.path（可执行文件路径，常含 C:\Users\<name>\）作为 workspace 兜底，
+  // 仅识别 commandLine 里第一个明显属于工程目录的引号路径，并把 HOME 段替换为 ~。
+  // 命令行本身永不上报，只用作匹配 / 解析输入。
   const command = process.commandLine ?? '';
   const quotedPath = command.match(/"([A-Za-z]:\\[^"]+)"/g)?.map((item) => item.slice(1, -1)) ?? [];
   const candidate = quotedPath.find((item) => !/\\(node\.exe|CodeBuddy|Trae|MarsCode|CodeGeeX|Comate|Qoder)/i.test(item));
-  if (candidate) return candidate;
-  return process.path;
+  if (!candidate) return undefined;
+  return sanitizeReportField(candidate);
 }
 
 async function listWindowsProcesses(): Promise<ProcessInfo[]> {

@@ -60,7 +60,12 @@ export class SourceManager {
 
     this.sources.set(source.id, source);
     this.broadcast({ type: 'source-registered', source });
-    logger.info({ source }, 'monitor source registered');
+    // N-12：日志只留路由字段，windowTitle / workspace / url 等可能含用户内容的字段走 trace。
+    logger.info(
+      { sourceId: source.id, kind: source.kind, capabilityLevel: source.capabilityLevel, integrationKind: source.integrationKind },
+      'monitor source registered',
+    );
+    logger.trace({ source }, 'monitor source registered detail');
     return source;
   }
 
@@ -96,7 +101,20 @@ export class SourceManager {
     this.events.set(event.id, event);
     this.pruneEvents();
     this.broadcast({ type: 'monitor-event', event });
-    logger.info({ event }, 'monitor event');
+    // N-12：默认仅打路由字段；title / content / windowTitle 等可能携带用户内容，转 trace 等级。
+    logger.info(
+      {
+        eventId: event.id,
+        eventKind: event.type,
+        sourceId: event.sourceId,
+        sessionId: event.sessionId,
+        level: event.level,
+        contentBytes: event.content ? Buffer.byteLength(event.content, 'utf8') : 0,
+        hasOptions: Array.isArray(event.options) && event.options.length > 0,
+      },
+      'monitor event',
+    );
+    logger.trace({ event }, 'monitor event detail');
     return event;
   }
 
@@ -121,7 +139,12 @@ export class SourceManager {
       type: 'monitor-event-reply',
       ...reply,
     });
-    logger.info({ eventId, sourceId: event.sourceId, text }, 'monitor event reply');
+    // N-12：回复正文可能是用户敲下的指令，默认不写日志正文，只写大小；正文走 trace。
+    logger.info(
+      { eventId, sourceId: event.sourceId, textBytes: Buffer.byteLength(text ?? '', 'utf8') },
+      'monitor event reply',
+    );
+    logger.trace({ eventId, sourceId: event.sourceId, text }, 'monitor event reply detail');
     return true;
   }
 

@@ -237,6 +237,7 @@ namespace CodePanion.Gui.Services
                                 Title = data["title"]?.Value<string>() ?? "",
                                 Message = data["message"]?.Value<string>() ?? data["content"]?.Value<string>() ?? "",
                                 Source = data["source"]?.Value<string>() ?? "",
+                                ThreadId = data["threadId"]?.Value<string>() ?? "",
                                 SourceId = data["sourceId"]?.Value<string>() ?? "",
                                 SessionId = data["sessionId"]?.Value<string>() ?? "",
                                 Level = data["level"]?.Value<string>() ?? "",
@@ -423,6 +424,27 @@ namespace CodePanion.Gui.Services
             }
         }
 
+        public async Task<bool> LaunchHandoffAsync(string threadId, object payload)
+        {
+            try
+            {
+                var url = $"{_daemonUrl}/workflow/threads/{Uri.EscapeDataString(threadId)}/handoff";
+                var response = await PostJsonAsync(url, payload);
+                if (!response.IsSuccessStatusCode)
+                {
+                    var error = await response.Content.ReadAsStringAsync();
+                    Log($"启动任务转交失败：{error}");
+                    return false;
+                }
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log($"启动任务转交异常：{ex.Message}");
+                return false;
+            }
+        }
+
         public async Task DisconnectAsync()
         {
             try
@@ -476,6 +498,7 @@ namespace CodePanion.Gui.Services
         public string Title { get; set; } = "";
         public string Message { get; set; } = "";
         public string Source { get; set; } = "";
+        public string ThreadId { get; set; } = "";
         public string SourceId { get; set; } = "";
         public string SessionId { get; set; } = "";
         public string Level { get; set; } = "";

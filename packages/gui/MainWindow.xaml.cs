@@ -22,6 +22,15 @@ namespace CodePanion.Gui
         // P1-F：重连退避上限，与 SessionManager 60s 删除窗口同量级。
         private const int ReconnectMinSeconds = 2;
         private const int ReconnectMaxSeconds = 30;
+        // N-20：WebView2 → native 消息白名单，未列入的 type 一律 warn 并丢弃。
+        private static readonly HashSet<string> AllowedWebMessageTypes = new HashSet<string>
+        {
+            "ready",
+            "reply",
+            "event-reply",
+            "task-action",
+            "handoff-launch",
+        };
 
         private readonly DaemonClient _daemonClient;
         private readonly ObservableCollection<SessionViewModel> _sessions;
@@ -115,6 +124,9 @@ namespace CodePanion.Gui
                 ChatWebView.CoreWebView2.Settings.AreDefaultScriptDialogsEnabled = false;
                 ChatWebView.CoreWebView2.Settings.AreDevToolsEnabled = false;
                 ChatWebView.CoreWebView2.WebMessageReceived += OnWebMessageReceived;
+                // N-19：拦截导航与新窗口，markdown / 助手输出里的链接不能让 WebView2 直接跳走。
+                ChatWebView.CoreWebView2.NavigationStarting += OnWebViewNavigationStarting;
+                ChatWebView.CoreWebView2.NewWindowRequested += OnWebViewNewWindowRequested;
 
                 var wwwrootPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "wwwroot");
                 ChatWebView.CoreWebView2.SetVirtualHostNameToFolderMapping(
@@ -169,51 +181,157 @@ namespace CodePanion.Gui
         {
             try
             {
-                var message = JObject.Parse(e.WebMessageAsJson);
+                // N-20：先解析顶层 type；只有命中白名单的 type 才会进入对应 handler。
+                JObject message;
+                try
+                {
+                    message = JObject.Parse(e.WebMessageAsJson);
+                }
+                catch (Exception parseEx)
+                {
+                    AddLog($"WebView 消息 JSON 解析失败：{parseEx.Message}");
+                    return;
+                }
+
                 var type = message["type"]?.Value<string>();
-                if (type == "ready")
+                if (string.IsNullOrWhiteSpace(type) || !AllowedWebMessageTypes.Contains(type))
                 {
-                    SendMessageToWeb(new { type = "connection-status", connected = _isConnected });
+                    AddLog($"丢弃未知 WebView 消息 type：{type ?? "<empty>"}");
                     return;
                 }
 
-                if (type == "reply")
+                switch (type)
                 {
-                    var sessionId = message["sessionId"]?.Value<string>();
-                    var value = message["value"]?.Value<string>();
-                    if (!string.IsNullOrWhiteSpace(sessionId) && !string.IsNullOrWhiteSpace(value))
+                    case "ready":
+                        SendMessageToWeb(new { type = "connection-status", connected = _isConnected });
+                        break;
+
+                    case "reply":
                     {
-                        HandleUserReply(sessionId, value);
+                        var sessionId = message["sessionId"]?.Value<string>();
+                        var value = message["value"]?.Value<string>();
+                        if (!string.IsNullOrWhiteSpace(sessionId) && !string.IsNullOrWhiteSpace(value))
+                        {
+                            HandleUserReply(sessionId!, value!);
+                        }
+                        break;
                     }
-                    return;
-                }
 
-                if (type == "event-reply")
-                {
-                    var eventId = message["eventId"]?.Value<string>();
-                    var value = message["value"]?.Value<string>();
-                    if (!string.IsNullOrWhiteSpace(eventId) && !string.IsNullOrWhiteSpace(value))
+                    case "event-reply":
                     {
-                        HandleMonitorEventReply(eventId, value);
+                        var eventId = message["eventId"]?.Value<string>();
+                        var value = message["value"]?.Value<string>();
+                        if (!string.IsNullOrWhiteSpace(eventId) && !string.IsNullOrWhiteSpace(value))
+                        {
+                            HandleMonitorEventReply(eventId!, value!);
+                        }
+                        break;
                     }
-                    return;
-                }
 
-                if (type == "task-action")
-                {
-                    var threadId = message["threadId"]?.Value<string>();
-                    if (!string.IsNullOrWhiteSpace(threadId))
+                    case "task-action":
                     {
-                        HandleTaskAction(threadId, message);
+                        var threadId = message["threadId"]?.Value<string>();
+                        if (!string.IsNullOrWhiteSpace(threadId))
+                        {
+                            HandleTaskAction(threadId!, message);
+                        }
+                        break;
                     }
-                    return;
-                }
 
-                AddLog($"未知 WebView 消息：{type}");
+                    case "handoff-launch":
+                    {
+                        var threadId = message["threadId"]?.Value<string>();
+                        if (!string.IsNullOrWhiteSpace(threadId))
+                        {
+                            HandleHandoffLaunch(threadId!, message);
+                        }
+                        break;
+                    }
+                }
             }
             catch (Exception ex)
             {
                 AddLog($"处理 WebView 消息失败：{ex.Message}");
+            }
+        }
+
+        // N-19：除 wwwroot 内部页面外，其余链接一律不让 WebView2 自己导航；
+        // http(s) 链接交给系统默认浏览器（且只在 codepanion.local 之外触发），其它协议直接拒绝。
+        private void OnWebViewNavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs e)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(e.Uri)) return;
+                if (!Uri.TryCreate(e.Uri, UriKind.Absolute, out var uri)) return;
+
+                if (uri.IsAbsoluteUri && uri.Host.Equals("codepanion.local", StringComparison.OrdinalIgnoreCase))
+                {
+                    return; // 应用自身静态资源
+                }
+
+                if (uri.Scheme == "about" || uri.Scheme == "data")
+                {
+                    return; // about:blank / data: 占位允许
+                }
+
+                e.Cancel = true;
+                OpenExternalLink(uri);
+            }
+            catch (Exception ex)
+            {
+                AddLog($"NavigationStarting 处理失败：{ex.Message}");
+            }
+        }
+
+        private void OnWebViewNewWindowRequested(object? sender, CoreWebView2NewWindowRequestedEventArgs e)
+        {
+            try
+            {
+                e.Handled = true;
+                if (!string.IsNullOrEmpty(e.Uri) && Uri.TryCreate(e.Uri, UriKind.Absolute, out var uri))
+                {
+                    OpenExternalLink(uri);
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"NewWindowRequested 处理失败：{ex.Message}");
+            }
+        }
+
+        private void OpenExternalLink(Uri uri)
+        {
+            if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+            {
+                AddLog($"拒绝非 http(s) 外链：{uri.Scheme}");
+                return;
+            }
+
+            var confirm = MessageBox.Show(
+                this,
+                $"是否在系统默认浏览器打开：\n{uri}",
+                "CodePanion 外链确认",
+                MessageBoxButton.OKCancel,
+                MessageBoxImage.Question,
+                MessageBoxResult.Cancel);
+            if (confirm != MessageBoxResult.OK)
+            {
+                AddLog($"已拒绝外链：{uri}");
+                return;
+            }
+
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = uri.ToString(),
+                    UseShellExecute = true,
+                });
+                AddLog($"已通过系统浏览器打开外链：{uri}");
+            }
+            catch (Exception ex)
+            {
+                AddLog($"打开外链失败：{ex.Message}");
             }
         }
 
@@ -262,6 +380,11 @@ namespace CodePanion.Gui
                 if (message["pinned"] != null) payload["pinned"] = message["pinned"]!;
                 if (message["archived"] != null) payload["archived"] = message["archived"]!;
                 if (message["snoozedUntil"] != null) payload["snoozedUntil"] = message["snoozedUntil"]!;
+                if (message["priority"] != null) payload["priority"] = message["priority"]!;
+                if (message["sortOrder"] != null) payload["sortOrder"] = message["sortOrder"]!;
+                if (message["handoffStatus"] != null) payload["handoffStatus"] = message["handoffStatus"]!;
+                if (message["handoffTarget"] != null) payload["handoffTarget"] = message["handoffTarget"]!;
+                if (message["handoffSessionId"] != null) payload["handoffSessionId"] = message["handoffSessionId"]!;
 
                 var ok = await _daemonClient.UpdateWorkflowTaskStateAsync(threadId, payload);
                 AddLog(ok ? $"[任务状态] {threadId}" : $"[任务状态失败] {threadId}");
@@ -273,6 +396,31 @@ namespace CodePanion.Gui
             catch (Exception ex)
             {
                 AddLog($"任务状态更新异常：{ex.GetType().Name} - {ex.Message}");
+            }
+        }
+
+        private async void HandleHandoffLaunch(string threadId, JObject message)
+        {
+            try
+            {
+                var payload = new JObject
+                {
+                    ["target"] = message["target"]?.Value<string>() ?? "generic",
+                    ["prompt"] = message["prompt"]?.Value<string>() ?? "",
+                    ["preview"] = message["preview"]?.Value<string>() ?? ""
+                };
+
+                var ok = await _daemonClient.LaunchHandoffAsync(threadId, payload);
+                AddLog(ok ? $"[任务转交] {threadId}" : $"[任务转交失败] {threadId}");
+                if (!ok)
+                {
+                    SendStatusMessage("error", "任务转交启动失败", $"目标任务无法创建接力会话：{threadId}");
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"处理任务转交失败：{ex.Message}");
+                SendStatusMessage("error", "任务转交启动失败", ex.Message);
             }
         }
 
@@ -487,6 +635,7 @@ namespace CodePanion.Gui
                         id = Guid.NewGuid().ToString(),
                         type = "notification",
                         source = string.IsNullOrWhiteSpace(e.Source) ? "daemon" : e.Source,
+                        threadId = e.ThreadId,
                         sourceId = e.SourceId,
                         sessionId = e.SessionId,
                         windowTitle = e.WindowTitle,

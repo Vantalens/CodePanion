@@ -17,17 +17,33 @@ function loadChat() {
       <button class="rail-button" data-view="waiting"></button>
       <button class="rail-button" data-view="running"></button>
       <button class="rail-button" data-view="error"></button>
+      <button class="rail-button" data-view="done"></button>
       <button class="rail-button" data-view="later"></button>
       <button class="rail-button" data-view="code"></button>
       <button class="tool-button" data-view="active"></button>
       <button class="tool-button" data-view="waiting"></button>
       <button class="tool-button" data-view="running"></button>
       <button class="tool-button" data-view="error"></button>
+      <button class="tool-button" data-view="done"></button>
       <button class="tool-button" data-view="later"></button>
       <button class="tool-button" data-view="code"></button>
+      <button class="group-button" data-group-mode="workspace"></button>
+      <button class="group-button" data-group-mode="source"></button>
+      <button class="group-button" data-group-mode="none"></button>
       <span class="status-dot"></span>
       <span class="status-text"></span>
       <div id="conversation-list"></div>
+      <div id="batch-toolbar"></div>
+      <button id="batch-toggle"></button>
+      <span id="batch-selection-count"></span>
+      <button id="batch-restore"></button>
+      <button id="batch-archive"></button>
+      <button id="batch-snooze"></button>
+      <button id="batch-pin"></button>
+      <button id="batch-priority-high"></button>
+      <button id="batch-priority-normal"></button>
+      <button id="batch-priority-low"></button>
+      <button id="batch-clear"></button>
       <strong id="queue-total"></strong>
       <strong id="queue-waiting"></strong>
       <strong id="queue-running"></strong>
@@ -40,20 +56,65 @@ function loadChat() {
       <span id="stage-capability"></span>
       <span id="stage-status"></span>
       <button id="stage-focus-reply"></button>
+      <button id="stage-suggested-action"></button>
+      <button id="stage-suggested-secondary"></button>
       <button id="stage-pin-task"></button>
       <button id="stage-snooze-task"></button>
       <button id="stage-archive-task"></button>
       <button id="stage-copy-context"></button>
+      <button id="stage-priority-high"></button>
+      <button id="stage-priority-normal"></button>
+      <button id="stage-priority-low"></button>
+      <button id="stage-move-up"></button>
+      <button id="stage-move-down"></button>
+      <div id="stage-snooze-menu"></div>
+      <strong id="spotlight-next-action"></strong>
+      <p id="spotlight-subaction"></p>
+      <strong id="spotlight-project"></strong>
+      <p id="spotlight-workspace"></p>
+      <strong id="spotlight-management"></strong>
+      <p id="spotlight-updated"></p>
+      <strong id="spotlight-summary"></strong>
+      <p id="spotlight-breakdown"></p>
       <strong id="drawer-source-name"></strong>
       <p id="drawer-source-detail"></p>
       <strong id="drawer-capability"></strong>
       <strong id="drawer-privacy"></strong>
       <p id="drawer-action-note"></p>
       <button id="drawer-focus-reply"></button>
+      <button id="drawer-suggested-action"></button>
+      <button id="drawer-suggested-secondary"></button>
       <button id="drawer-pin-task"></button>
       <button id="drawer-snooze-task"></button>
       <button id="drawer-archive-task"></button>
       <button id="drawer-copy-workspace"></button>
+      <select id="drawer-handoff-target">
+        <option value="generic">通用</option>
+        <option value="codex">Codex</option>
+        <option value="claude-code">Claude Code</option>
+        <option value="opencode">OpenCode</option>
+      </select>
+      <button id="drawer-copy-handoff"></button>
+      <button id="drawer-copy-handoff-prompt"></button>
+      <button id="drawer-start-handoff"></button>
+      <button id="drawer-mark-handoff-active"></button>
+      <button id="drawer-return-handoff"></button>
+      <button id="drawer-clear-handoff"></button>
+      <pre id="drawer-handoff-preview"></pre>
+      <button id="drawer-priority-high"></button>
+      <button id="drawer-priority-normal"></button>
+      <button id="drawer-priority-low"></button>
+      <button id="drawer-move-up"></button>
+      <button id="drawer-move-down"></button>
+      <div id="drawer-snooze-menu"></div>
+      <div id="drawer-linked-session-panel"></div>
+      <strong id="drawer-linked-session-title"></strong>
+      <p id="drawer-linked-session-note"></p>
+      <button id="drawer-jump-linked-session"></button>
+      <div id="drawer-parent-task-panel"></div>
+      <strong id="drawer-parent-task-title"></strong>
+      <p id="drawer-parent-task-note"></p>
+      <button id="drawer-jump-parent-task"></button>
       <div id="drawer-subtitle"></div>
       <div id="code-count"></div>
       <footer id="omnibar"></footer>
@@ -156,7 +217,7 @@ test('passive config switcher workflow activity is not shown as a task', async (
   assert.equal(state.conversations.has('workflow:cc-thread'), false);
   assert.equal(state.activeConversation, '');
   assert.equal(win.document.querySelectorAll('.conversation-item').length, 0);
-  assert.match(win.document.getElementById('conversation-list').textContent, /当前没有可显示的任务/);
+  assert.match(win.document.getElementById('conversation-list').textContent, /当前没有待处理任务/);
 });
 
 test('omnibar is hidden when the selected task has no actionable reply target', async () => {
@@ -545,9 +606,29 @@ test('conversation list shows fixed 6-state status labels with next-step action 
   assert.equal(review.label, '需审阅');
   assert.match(review.action, /产物|查看/);
 
+  const returnedSuccess = deriveConversationDisplay({
+    id: 't3b',
+    status: 'prompt',
+    source: 'cli',
+    taskState: { handoffStatus: 'returned', handoffTarget: 'codex' },
+  });
+  assert.equal(returnedSuccess.kind, 'waiting-me');
+  assert.equal(returnedSuccess.label, '等待我');
+  assert.match(returnedSuccess.action, /审阅接力结果并决定下一步/);
+
   const done = deriveConversationDisplay({ id: 't4', status: 'done', source: 'cli' });
   assert.equal(done.kind, 'done');
   assert.equal(done.label, '完成');
+
+  const returnedFailure = deriveConversationDisplay({
+    id: 't4b',
+    status: 'error',
+    source: 'cli',
+    taskState: { handoffStatus: 'returned', handoffTarget: 'codex' },
+  });
+  assert.equal(returnedFailure.kind, 'error');
+  assert.equal(returnedFailure.label, '失败');
+  assert.match(returnedFailure.action, /查看接力失败摘要并决定是否重试/);
 
   const sourceOnline = deriveConversationDisplay({ id: 't5', status: 'activity', source: 'cc-switch' });
   assert.equal(sourceOnline.kind, 'source-online');
@@ -1013,6 +1094,40 @@ test('snoozed and archived tasks are removed from the active queue and available
   assert.ok(laterItems.some(item => /已归档/.test(item.textContent)));
 });
 
+test('done view isolates completed tasks away from the pending queue', async () => {
+  const win = loadChat();
+  const { handleMessage, state } = win.CodePanion.__test;
+  const now = Date.now();
+
+  handleMessage({
+    type: 'workflow-snapshot',
+    snapshot: {
+      threads: [
+        { id: 'pending-thread', source: 'cli', title: '进行中任务', status: 'running', updatedAt: now, itemCount: 1 },
+        { id: 'done-thread', source: 'cli', title: '完成任务', status: 'done', updatedAt: now - 1000, itemCount: 1 },
+      ],
+      items: [
+        { id: 'pending-item', threadId: 'pending-thread', source: 'cli', kind: 'message', title: 'assistant', content: '仍在处理', status: 'running', timestamp: now },
+        { id: 'done-item', threadId: 'done-thread', source: 'cli', kind: 'message', title: 'assistant', content: '执行完成', status: 'done', timestamp: now - 1000 },
+      ],
+    },
+  });
+
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+
+  state.activeView = 'active';
+  win.CodePanion.__test.renderAll();
+  assert.equal(win.document.querySelectorAll('.conversation-item').length, 1, '待处理看板不应混入完成任务');
+  assert.match(win.document.getElementById('conversation-list').textContent, /仍在处理/);
+  assert.doesNotMatch(win.document.getElementById('conversation-list').textContent, /执行完成/);
+
+  state.activeView = 'done';
+  win.CodePanion.__test.renderAll();
+  assert.equal(win.document.querySelectorAll('.conversation-item').length, 1, '已完成看板只应展示完成任务');
+  assert.match(win.document.getElementById('conversation-list').textContent, /执行完成/);
+  assert.doesNotMatch(win.document.getElementById('conversation-list').textContent, /仍在处理/);
+});
+
 test('task action buttons post daemon task-state updates for workflow conversations', async () => {
   const win = loadChat();
   const { handleMessage, state } = win.CodePanion.__test;
@@ -1031,17 +1146,545 @@ test('task action buttons post daemon task-state updates for workflow conversati
   win.CodePanion.__test.renderAll();
 
   win.document.getElementById('stage-pin-task').click();
+  win.document.getElementById('stage-priority-high').click();
   win.document.getElementById('stage-snooze-task').click();
+  win.document.querySelector('#stage-snooze-menu [data-snooze-preset="30m"]').click();
   win.document.getElementById('stage-archive-task').click();
 
   const actionMessages = win.__hostMessages.filter(message => message?.type === 'task-action');
-  assert.equal(actionMessages.length, 3, '应发送三个任务动作');
-  const [pin, snooze, archive] = actionMessages;
+  assert.equal(actionMessages.length, 4, '应发送四个任务动作');
+  const [pin, priority, snooze, archive] = actionMessages;
   assert.deepEqual({ ...pin }, { type: 'task-action', threadId: 'managed-thread', pinned: true });
+  assert.deepEqual({ ...priority }, { type: 'task-action', threadId: 'managed-thread', priority: 'high' });
   assert.equal(snooze.type, 'task-action');
   assert.equal(snooze.threadId, 'managed-thread');
   assert.ok(typeof snooze.snoozedUntil === 'number' && snooze.snoozedUntil > now);
   assert.deepEqual({ ...archive }, { type: 'task-action', threadId: 'managed-thread', archived: true });
+});
+
+test('conversation list groups tasks by workspace and can switch to source grouping', async () => {
+  const win = loadChat();
+  const { handleMessage, state } = win.CodePanion.__test;
+  const now = Date.now();
+
+  handleMessage({
+    type: 'workflow-snapshot',
+    snapshot: {
+      threads: [
+        { id: 'alpha-1', source: 'cli', title: 'Alpha A', workspace: 'D:\\alpha', status: 'running', updatedAt: now, itemCount: 1, taskState: { priority: 'high' } },
+        { id: 'alpha-2', source: 'codex-desktop', title: 'Alpha B', workspace: 'D:\\alpha', status: 'waiting', updatedAt: now - 1000, itemCount: 1 },
+        { id: 'beta-1', source: 'cli', title: 'Beta A', workspace: 'D:\\beta', status: 'error', updatedAt: now - 2000, itemCount: 1, taskState: { priority: 'low' } },
+      ],
+      items: [
+        { id: 'alpha-1-item', threadId: 'alpha-1', source: 'cli', kind: 'message', title: 'assistant', content: 'alpha run', timestamp: now },
+        { id: 'alpha-2-item', threadId: 'alpha-2', source: 'codex-desktop', kind: 'prompt', title: '等待输入', content: 'continue?', options: ['yes', 'no'], status: 'waiting', timestamp: now - 1000 },
+        { id: 'beta-1-item', threadId: 'beta-1', source: 'cli', kind: 'status', title: '失败', content: 'exit 1', status: 'error', timestamp: now - 2000 },
+      ],
+    },
+  });
+
+  state.activeView = 'active';
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+  win.CodePanion.__test.renderAll();
+
+  const workspaceHeaders = Array.from(win.document.querySelectorAll('.conversation-group-title')).map(node => node.textContent.trim());
+  assert.ok(workspaceHeaders.includes('alpha'));
+  assert.ok(workspaceHeaders.includes('beta'));
+  assert.ok(Array.from(win.document.querySelectorAll('.priority-chip')).some(node => /高优先级/.test(node.textContent)));
+  assert.ok(Array.from(win.document.querySelectorAll('.priority-chip')).some(node => /低优先级/.test(node.textContent)));
+
+  win.document.querySelector('[data-group-mode="source"]').click();
+  const sourceHeaders = Array.from(win.document.querySelectorAll('.conversation-group-title')).map(node => node.textContent.trim());
+  assert.ok(sourceHeaders.includes('终端'));
+  assert.ok(sourceHeaders.includes('Codex'));
+});
+
+test('manual sort order is respected for conversations in the same task band', async () => {
+  const win = loadChat();
+  const { handleMessage, state } = win.CodePanion.__test;
+  const now = Date.now();
+
+  handleMessage({
+    type: 'workflow-snapshot',
+    snapshot: {
+      threads: [
+        { id: 'sort-a', source: 'cli', title: '排序 A', workspace: 'D:\\alpha', status: 'running', updatedAt: now, itemCount: 1, taskState: { sortOrder: 200 } },
+        { id: 'sort-b', source: 'cli', title: '排序 B', workspace: 'D:\\alpha', status: 'running', updatedAt: now - 1000, itemCount: 1, taskState: { sortOrder: 100 } },
+      ],
+      items: [
+        { id: 'sort-a-item', threadId: 'sort-a', source: 'cli', kind: 'message', title: 'assistant', content: '排序 A 说明', timestamp: now },
+        { id: 'sort-b-item', threadId: 'sort-b', source: 'cli', kind: 'message', title: 'assistant', content: '排序 B 说明', timestamp: now - 1000 },
+      ],
+    },
+  });
+
+  state.activeView = 'active';
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+  win.CodePanion.__test.renderAll();
+
+  const titles = Array.from(win.document.querySelectorAll('.conversation-title-text')).map(node => node.textContent.trim());
+  assert.equal(titles[0], '排序 B 说明');
+  assert.equal(titles[1], '排序 A 说明');
+});
+
+test('snooze menu sends preset and custom task-state updates', async () => {
+  const win = loadChat();
+  const { handleMessage, state } = win.CodePanion.__test;
+  const now = Date.now();
+
+  handleMessage({
+    type: 'workflow-snapshot',
+    snapshot: {
+      threads: [{ id: 'snooze-thread', source: 'cli', title: '稍后测试', status: 'running', updatedAt: now, itemCount: 1 }],
+      items: [{ id: 'snooze-item', threadId: 'snooze-thread', source: 'cli', kind: 'message', title: 'assistant', content: '等待处理', timestamp: now }],
+    },
+  });
+
+  state.activeConversation = 'workflow:snooze-thread';
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+  win.CodePanion.__test.renderAll();
+
+  win.document.getElementById('stage-snooze-task').click();
+  const halfHour = win.document.querySelector('[data-snooze-preset="30m"]');
+  assert.ok(halfHour, '稍后菜单应提供 30 分钟预设');
+  halfHour.click();
+
+  win.document.getElementById('stage-snooze-task').click();
+  const customInput = win.document.querySelector('#stage-snooze-menu input[type="datetime-local"]');
+  const customApply = win.document.querySelector('#stage-snooze-menu [data-snooze-action="apply-custom"]');
+  assert.ok(customInput, '稍后菜单应提供自定义时间输入');
+  assert.ok(customApply, '稍后菜单应提供自定义时间确认按钮');
+  customInput.value = '2026-05-24T09:30';
+  customInput.dispatchEvent(new win.Event('input', { bubbles: true }));
+  customApply.click();
+
+  const actionMessages = win.__hostMessages.filter(message => message?.type === 'task-action');
+  assert.equal(actionMessages.length, 2, '应发送两次稍后任务动作');
+  assert.equal(actionMessages[0].threadId, 'snooze-thread');
+  assert.ok(actionMessages[0].snoozedUntil >= now + (30 * 60 * 1000) - 1000, '30 分钟预设应写入正确的稍后时间');
+  assert.equal(actionMessages[1].threadId, 'snooze-thread');
+  assert.equal(actionMessages[1].snoozedUntil, new Date('2026-05-24T09:30').getTime());
+});
+
+test('batch task actions send restore, archive, and snooze updates for selected conversations', async () => {
+  const win = loadChat();
+  const { handleMessage, state } = win.CodePanion.__test;
+  const now = Date.now();
+
+  handleMessage({
+    type: 'workflow-snapshot',
+    snapshot: {
+      threads: [
+        {
+          id: 'later-a',
+          source: 'cli',
+          title: '稍后任务 A',
+          status: 'waiting',
+          updatedAt: now,
+          itemCount: 1,
+          taskState: { snoozedUntil: now + (60 * 60 * 1000) },
+        },
+        {
+          id: 'later-b',
+          source: 'cli',
+          title: '归档任务 B',
+          status: 'done',
+          updatedAt: now - 1000,
+          itemCount: 1,
+          taskState: { archived: true },
+        },
+      ],
+      items: [
+        { id: 'later-a-item', threadId: 'later-a', source: 'cli', kind: 'prompt', title: '等待输入', content: '继续？', status: 'waiting', timestamp: now },
+        { id: 'later-b-item', threadId: 'later-b', source: 'cli', kind: 'message', title: 'assistant', content: '已完成', status: 'done', timestamp: now - 1000 },
+      ],
+    },
+  });
+
+  state.activeView = 'later';
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+  win.CodePanion.__test.renderAll();
+
+  const selectAllLaterTasks = () => {
+    win.document.getElementById('batch-toggle').click();
+    const boxes = Array.from(win.document.querySelectorAll('.conversation-select input[type="checkbox"]'));
+    boxes.forEach(box => box.click());
+    return boxes;
+  };
+
+  const checkboxes = selectAllLaterTasks();
+  assert.equal(checkboxes.length, 2, '批量模式应为 later 视图中的任务提供选择框');
+  win.document.getElementById('batch-restore').click();
+
+  selectAllLaterTasks();
+  win.document.getElementById('batch-archive').click();
+
+  selectAllLaterTasks();
+  win.document.getElementById('batch-snooze').click();
+
+  const actionMessages = win.__hostMessages.filter(message => message?.type === 'task-action');
+  assert.equal(actionMessages.length, 6, '两项任务执行三种批量动作应产生 6 条 task-action');
+
+  const restoreMessages = actionMessages.slice(0, 2);
+  assert.ok(restoreMessages.every(message => message.archived === false && message.snoozedUntil === null));
+
+  const archiveMessages = actionMessages.slice(2, 4);
+  assert.ok(archiveMessages.every(message => message.archived === true));
+
+  const snoozeMessages = actionMessages.slice(4, 6);
+  assert.ok(snoozeMessages.every(message => typeof message.snoozedUntil === 'number' && message.snoozedUntil > now));
+});
+
+test('batch task actions also support pin and priority updates', async () => {
+  const win = loadChat();
+  const { handleMessage, state } = win.CodePanion.__test;
+  const now = Date.now();
+
+  handleMessage({
+    type: 'workflow-snapshot',
+    snapshot: {
+      threads: [
+        { id: 'batch-a', source: 'cli', title: '批量 A', status: 'running', updatedAt: now, itemCount: 1 },
+        { id: 'batch-b', source: 'codex-desktop', title: '批量 B', status: 'waiting', updatedAt: now - 1000, itemCount: 1 },
+      ],
+      items: [
+        { id: 'batch-a-item', threadId: 'batch-a', source: 'cli', kind: 'message', title: 'assistant', content: '批量 A 内容', timestamp: now },
+        { id: 'batch-b-item', threadId: 'batch-b', source: 'codex-desktop', kind: 'prompt', title: '等待输入', content: '继续？', options: ['yes', 'no'], status: 'waiting', timestamp: now - 1000 },
+      ],
+    },
+  });
+
+  state.activeView = 'active';
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+  win.CodePanion.__test.renderAll();
+
+  win.document.getElementById('batch-toggle').click();
+  const boxes = Array.from(win.document.querySelectorAll('.conversation-select input[type="checkbox"]'));
+  boxes.forEach(box => box.click());
+
+  win.document.getElementById('batch-pin').click();
+
+  win.document.getElementById('batch-toggle').click();
+  const boxes2 = Array.from(win.document.querySelectorAll('.conversation-select input[type="checkbox"]'));
+  boxes2.forEach(box => box.click());
+  win.document.getElementById('batch-priority-high').click();
+
+  const actionMessages = win.__hostMessages.filter(message => message?.type === 'task-action');
+  assert.equal(actionMessages.length, 4, '两项任务执行置顶和高优先级应产生 4 条 task-action');
+  const pinMessages = actionMessages.slice(0, 2);
+  assert.ok(pinMessages.every(message => message.pinned === true));
+  const priorityMessages = actionMessages.slice(2, 4);
+  assert.ok(priorityMessages.every(message => message.priority === 'high'));
+});
+
+test('move up and move down issue sortOrder task actions for visible workflow tasks', async () => {
+  const win = loadChat();
+  const { handleMessage, state } = win.CodePanion.__test;
+  const now = Date.now();
+
+  handleMessage({
+    type: 'workflow-snapshot',
+    snapshot: {
+      threads: [
+        { id: 'move-a', source: 'cli', title: '移动 A', status: 'running', updatedAt: now, itemCount: 1 },
+        { id: 'move-b', source: 'cli', title: '移动 B', status: 'running', updatedAt: now - 1000, itemCount: 1 },
+        { id: 'move-c', source: 'cli', title: '移动 C', status: 'running', updatedAt: now - 2000, itemCount: 1 },
+      ],
+      items: [
+        { id: 'move-a-item', threadId: 'move-a', source: 'cli', kind: 'message', title: 'assistant', content: '移动 A 内容', timestamp: now },
+        { id: 'move-b-item', threadId: 'move-b', source: 'cli', kind: 'message', title: 'assistant', content: '移动 B 内容', timestamp: now - 1000 },
+        { id: 'move-c-item', threadId: 'move-c', source: 'cli', kind: 'message', title: 'assistant', content: '移动 C 内容', timestamp: now - 2000 },
+      ],
+    },
+  });
+
+  state.activeConversation = 'workflow:move-b';
+  state.activeView = 'active';
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+  win.CodePanion.__test.renderAll();
+
+  win.document.getElementById('stage-move-up').click();
+  win.document.getElementById('stage-move-down').click();
+
+  const actionMessages = win.__hostMessages.filter(message => message?.type === 'task-action' && typeof message.sortOrder === 'number');
+  assert.ok(actionMessages.length >= 4, '上下移动至少应产生多条 sortOrder 更新');
+  assert.ok(actionMessages.some(message => message.threadId === 'move-b' && message.sortOrder === 100));
+  assert.ok(actionMessages.some(message => message.threadId === 'move-a' && message.sortOrder === 200));
+});
+
+test('handoff package exports target-specific transfer context for the selected task', async () => {
+  const win = loadChat();
+  const { handleMessage, state, buildHandoffPackage } = win.CodePanion.__test;
+  const now = Date.now();
+
+  handleMessage({
+    type: 'workflow-snapshot',
+    snapshot: {
+      threads: [
+        { id: 'handoff-task', source: 'codex-desktop', title: '接力任务', workspace: 'D:\\Projects\\handoff', status: 'waiting', updatedAt: now, itemCount: 3, taskState: { priority: 'high', pinned: true } },
+      ],
+      items: [
+        { id: 'handoff-user', threadId: 'handoff-task', source: 'codex-desktop', kind: 'message', title: 'user', role: 'user', content: '修复构建失败并补测试。', timestamp: now - 1000 },
+        { id: 'handoff-prompt', threadId: 'handoff-task', source: 'codex-desktop', kind: 'prompt', title: '等待输入', content: '是否继续执行迁移？', options: ['yes', 'no'], status: 'waiting', timestamp: now },
+        { id: 'handoff-return', threadId: 'handoff-task', source: 'codepanion', kind: 'message', title: 'assistant', role: 'assistant', content: '**接力结果摘要**\n\n- 工具：Codex\n- 会话：Codex · previous handoff\n- 回流结论：待审阅\n- 结果：成功\n- 人工处理：建议\n- 退出码：0\n- 建议重试：否\n- 处理建议：先审阅涉及文件与最近进展，再决定是否继续处理\n- 后续动作：审阅接力结果并决定下一步\n\n## 涉及文件\n- packages/gui/wwwroot/chat.js\n- scripts/package-windows.ps1\n\n## 最近进展\nUpdated packages/gui/wwwroot/chat.js and scripts/package-windows.ps1.', timestamp: now + 1 },
+      ],
+    },
+  });
+
+  state.activeConversation = 'workflow:handoff-task';
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+  win.CodePanion.__test.renderAll();
+
+  const conversation = win.CodePanion.__test.state.conversations.get('workflow:handoff-task');
+  const messages = Array.from(win.CodePanion.__test.state.workflowItemsByThread.get('handoff-task') || []).map(item => ({
+    source: item.source,
+    type: item.status === 'waiting' || item.kind === 'prompt' ? 'prompt' : 'activity',
+    role: item.role,
+    content: item.content,
+    timestamp: item.timestamp,
+    workspace: conversation.workspace,
+    sourceId: '',
+    privacyBoundary: 'explicit-session'
+  }));
+
+  const codexPackage = buildHandoffPackage(conversation, messages, 'codex');
+  assert.match(codexPackage.preview, /目标工具：Codex/);
+  assert.match(codexPackage.preview, /D:\\Projects\\handoff/);
+  assert.match(codexPackage.preview, /修复构建失败并补测试/);
+  assert.match(codexPackage.preview, /是否继续执行迁移/);
+  assert.match(codexPackage.preview, /最近接力回流/);
+  assert.match(codexPackage.preview, /回流结论：待审阅/);
+  assert.match(codexPackage.preview, /人工处理：建议/);
+  assert.match(codexPackage.preview, /建议重试：否/);
+  assert.match(codexPackage.preview, /处理建议：先审阅涉及文件与最近进展，再决定是否继续处理/);
+  assert.match(codexPackage.preview, /后续动作：审阅接力结果并决定下一步/);
+  assert.match(codexPackage.preview, /packages\/gui\/wwwroot\/chat\.js/);
+  assert.match(codexPackage.preview, /scripts\/package-windows\.ps1/);
+  assert.match(codexPackage.preview, /Updated packages\/gui\/wwwroot\/chat\.js and scripts\/package-windows\.ps1/);
+  assert.match(codexPackage.prompt, /请继续处理以下任务/);
+
+  const opencodePackage = buildHandoffPackage(conversation, messages, 'opencode');
+  assert.match(opencodePackage.preview, /目标工具：OpenCode/);
+  assert.match(opencodePackage.prompt, /OpenCode/);
+});
+
+test('handoff launch and state actions surface handoff state in the detail note', async () => {
+  const win = loadChat();
+  const { handleMessage, state } = win.CodePanion.__test;
+  const now = Date.now();
+
+  handleMessage({
+    type: 'workflow-snapshot',
+    snapshot: {
+      threads: [
+        { id: 'handoff-actions', source: 'cli', title: '转交动作任务', workspace: 'D:\\handoff', status: 'running', updatedAt: now, itemCount: 1 },
+      ],
+      items: [
+        { id: 'handoff-actions-item', threadId: 'handoff-actions', source: 'cli', kind: 'message', title: 'assistant', content: '需要转交给其他工具继续处理', timestamp: now },
+      ],
+    },
+  });
+
+  state.activeConversation = 'workflow:handoff-actions';
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+  win.CodePanion.__test.renderAll();
+
+  const target = win.document.getElementById('drawer-handoff-target');
+  target.value = 'claude-code';
+  target.dispatchEvent(new win.Event('change', { bubbles: true }));
+
+  win.document.getElementById('drawer-start-handoff').click();
+  win.document.getElementById('drawer-mark-handoff-active').click();
+  win.document.getElementById('drawer-return-handoff').click();
+  win.document.getElementById('drawer-clear-handoff').click();
+
+  const launchMessages = win.__hostMessages.filter(message => message?.type === 'handoff-launch');
+  const actionMessages = win.__hostMessages.filter(message => message?.type === 'task-action');
+  assert.equal(launchMessages.length, 1);
+  assert.equal(launchMessages[0].threadId, 'handoff-actions');
+  assert.equal(launchMessages[0].target, 'claude-code');
+  assert.match(launchMessages[0].prompt, /Claude Code/);
+  assert.equal(actionMessages.length, 3);
+  assert.deepEqual({ ...actionMessages[0] }, { type: 'task-action', threadId: 'handoff-actions', handoffStatus: 'active', handoffTarget: 'claude-code' });
+  assert.deepEqual({ ...actionMessages[1] }, { type: 'task-action', threadId: 'handoff-actions', handoffStatus: 'returned', handoffTarget: 'claude-code' });
+  assert.deepEqual({ ...actionMessages[2] }, { type: 'task-action', threadId: 'handoff-actions', handoffStatus: 'idle', handoffTarget: null, handoffSessionId: null });
+
+  handleMessage({
+    type: 'workflow-event',
+    data: {
+      action: 'thread-upsert',
+      thread: {
+        id: 'handoff-actions',
+        source: 'cli',
+        title: '转交动作任务',
+        workspace: 'D:\\handoff',
+        status: 'running',
+        updatedAt: now + 1,
+        itemCount: 1,
+        taskState: { handoffStatus: 'active', handoffTarget: 'claude-code', handoffSessionId: 'session-123' }
+      }
+    }
+  });
+
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+  win.CodePanion.__test.renderAll();
+  assert.match(win.document.getElementById('drawer-action-note').textContent, /已转交给 Claude Code/);
+  assert.match(win.document.getElementById('drawer-action-note').textContent, /session-123/);
+  assert.match(win.document.getElementById('drawer-handoff-preview').textContent, /目标工具：Claude Code/);
+  assert.match(win.document.getElementById('drawer-handoff-preview').textContent, /接力会话：session-123/);
+});
+
+test('handoff navigation links parent tasks and child workflow sessions in both directions', async () => {
+  const win = loadChat();
+  const { handleMessage, state } = win.CodePanion.__test;
+  const now = Date.now();
+
+  handleMessage({
+    type: 'workflow-snapshot',
+    snapshot: {
+      threads: [
+        {
+          id: 'parent-task',
+          source: 'codex-desktop',
+          title: '父任务',
+          workspace: 'D:\\Projects\\parent',
+          status: 'running',
+          updatedAt: now,
+          itemCount: 1,
+          taskState: { handoffStatus: 'active', handoffTarget: 'codex', handoffSessionId: 'child-001' }
+        },
+        {
+          id: 'session:child-001',
+          source: 'codex-desktop',
+          title: '接力会话',
+          workspace: 'D:\\Projects\\parent',
+          status: 'running',
+          updatedAt: now + 1,
+          itemCount: 1
+        }
+      ],
+      items: [
+        { id: 'parent-item', threadId: 'parent-task', source: 'codex-desktop', kind: 'message', title: 'assistant', content: '父任务内容', timestamp: now },
+        { id: 'child-item', threadId: 'session:child-001', source: 'codex-desktop', kind: 'message', title: 'assistant', content: '接力会话内容', timestamp: now + 1 }
+      ],
+    },
+  });
+
+  state.activeConversation = 'workflow:parent-task';
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+  win.CodePanion.__test.renderAll();
+
+  assert.equal(win.document.getElementById('drawer-linked-session-panel').hidden, false);
+  assert.match(win.document.getElementById('drawer-linked-session-title').textContent, /接力会话内容/);
+  assert.match(win.document.getElementById('drawer-linked-session-note').textContent, /child-001/);
+
+  win.document.getElementById('drawer-jump-linked-session').click();
+  assert.equal(state.activeConversation, 'workflow:session:child-001');
+  assert.match(win.document.getElementById('conversation-title').textContent, /接力会话内容/);
+
+  assert.equal(win.document.getElementById('drawer-parent-task-panel').hidden, false);
+  assert.match(win.document.getElementById('drawer-parent-task-title').textContent, /父任务内容/);
+
+  win.document.getElementById('drawer-jump-parent-task').click();
+  assert.equal(state.activeConversation, 'workflow:parent-task');
+  assert.match(win.document.getElementById('conversation-title').textContent, /父任务内容/);
+});
+
+test('handoff return summary from CodePanion stays visible in the parent workflow thread', async () => {
+  const win = loadChat();
+  const { handleMessage, state } = win.CodePanion.__test;
+  const now = Date.now();
+  const copied = [];
+  win.navigator.clipboard = {
+    writeText(text) {
+      copied.push(String(text));
+      return Promise.resolve();
+    },
+  };
+
+  handleMessage({
+    type: 'workflow-snapshot',
+    snapshot: {
+      threads: [
+        { id: 'parent-summary', source: 'claude-code', title: '父任务摘要', status: 'waiting', updatedAt: now, itemCount: 2, taskState: { handoffStatus: 'returned', handoffTarget: 'codex', handoffSessionId: 'child-s1' } },
+        { id: 'session:child-s1', source: 'codex', title: 'Codex child session', status: 'done', updatedAt: now + 1, itemCount: 1 },
+      ],
+      items: [
+        { id: 'parent-summary-goal', threadId: 'parent-summary', source: 'user', kind: 'message', title: 'user', role: 'user', content: '请修复构建。', timestamp: now - 1000 },
+        { id: 'parent-summary-return', threadId: 'parent-summary', source: 'codepanion', kind: 'message', title: 'assistant', role: 'assistant', content: '**接力结果摘要**\n\n- 工具：Codex\n- 会话：Codex · child\n- 回流结论：待审阅\n- 结果：成功\n- 人工处理：建议\n- 退出码：0\n- 建议重试：否\n- 处理建议：先审阅涉及文件与最近进展，再决定是否继续处理\n- 后续动作：审阅接力结果并决定下一步\n\n## 涉及文件\n- packages/gui/wwwroot/chat.js\n- scripts/package-windows.ps1\n\n## 最近进展\nUpdated packages/gui/wwwroot/chat.js and scripts/package-windows.ps1.', timestamp: now },
+        { id: 'child-s1-item', threadId: 'session:child-s1', source: 'codex', kind: 'message', title: 'assistant', role: 'assistant', content: 'child session content', timestamp: now + 1 },
+      ],
+    },
+  });
+
+  state.activeConversation = 'workflow:parent-summary';
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+  win.CodePanion.__test.renderAll();
+
+  const chatText = win.document.getElementById('chat-container').textContent;
+  assert.match(chatText, /接力结果摘要/);
+  assert.match(chatText, /packages\/gui\/wwwroot\/chat\.js/);
+  assert.match(chatText, /scripts\/package-windows\.ps1/);
+  assert.match(win.document.getElementById('drawer-action-note').textContent, /已从 Codex 回收到当前队列/);
+  assert.match(win.document.getElementById('spotlight-next-action').textContent, /等待我/);
+  assert.match(win.document.getElementById('spotlight-subaction').textContent, /先审阅涉及文件与最近进展，再决定是否继续处理/);
+  assert.match(win.document.getElementById('spotlight-summary').textContent, /待审阅/);
+  assert.match(win.document.getElementById('spotlight-breakdown').textContent, /Codex · child/);
+  assert.match(win.document.getElementById('spotlight-breakdown').textContent, /人工处理：建议/);
+  assert.match(win.document.getElementById('spotlight-breakdown').textContent, /packages\/gui\/wwwroot\/chat\.js/);
+  assert.equal(win.document.getElementById('stage-suggested-action').hidden, false);
+  assert.match(win.document.getElementById('stage-suggested-action').textContent, /打开接力会话/);
+  assert.equal(win.document.getElementById('stage-suggested-secondary').hidden, false);
+  assert.match(win.document.getElementById('stage-suggested-secondary').textContent, /复制交接包/);
+  win.document.getElementById('stage-suggested-secondary').click();
+  assert.equal(copied.length, 1);
+  assert.match(copied[0], /# CodePanion 任务转交包/);
+  assert.match(copied[0], /处理建议：先审阅涉及文件与最近进展，再决定是否继续处理/);
+  win.document.getElementById('stage-suggested-action').click();
+  assert.equal(state.activeConversation, 'workflow:session:child-s1');
+});
+
+test('failed handoff return surfaces a suggested diagnostics action', async () => {
+  const win = loadChat();
+  const { handleMessage, state } = win.CodePanion.__test;
+  const now = Date.now();
+  const copied = [];
+  win.navigator.clipboard = {
+    writeText(text) {
+      copied.push(String(text));
+      return Promise.resolve();
+    },
+  };
+
+  handleMessage({
+    type: 'workflow-snapshot',
+    snapshot: {
+      threads: [
+        { id: 'parent-failed', source: 'claude-code', title: '失败父任务', status: 'error', updatedAt: now, itemCount: 2, taskState: { handoffStatus: 'returned', handoffTarget: 'codex', handoffSessionId: 'child-failed' } },
+      ],
+      items: [
+        { id: 'parent-failed-goal', threadId: 'parent-failed', source: 'user', kind: 'message', title: 'user', role: 'user', content: '修复配置问题。', timestamp: now - 1000 },
+        { id: 'parent-failed-return', threadId: 'parent-failed', source: 'codepanion', kind: 'message', title: 'assistant', role: 'assistant', content: '**接力结果摘要**\n\n- 工具：Codex\n- 会话：Codex · failed child\n- 回流结论：失败待处理\n- 结果：失败\n- 人工处理：需要\n- 问题类型：配置问题\n- 退出码：17\n- 建议重试：是\n- 处理建议：检查 APPDATA 或相关环境变量配置后再重试\n- 后续动作：查看失败摘要并决定是否重试\n\n## 最近进展\nBuild failed: missing APPDATA configuration.', timestamp: now },
+      ],
+    },
+  });
+
+  state.activeConversation = 'workflow:parent-failed';
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+  win.CodePanion.__test.renderAll();
+
+  assert.equal(win.document.getElementById('drawer-suggested-action').hidden, false);
+  assert.match(win.document.getElementById('drawer-suggested-action').textContent, /复制诊断/);
+  assert.equal(win.document.getElementById('drawer-suggested-secondary').hidden, false);
+  assert.match(win.document.getElementById('drawer-suggested-secondary').textContent, /复制交接包/);
+  win.document.getElementById('drawer-suggested-action').click();
+  assert.equal(copied.length, 1);
+  assert.match(copied[0], /问题类型：配置问题/);
+  assert.match(copied[0], /检查 APPDATA 或相关环境变量配置后再重试/);
+  win.document.getElementById('drawer-suggested-secondary').click();
+  assert.equal(copied.length, 2);
+  assert.match(copied[1], /# CodePanion 任务转交包/);
+  assert.match(copied[1], /问题类型：配置问题/);
 });
 
 test('中文文本在主视图与复制上下文中完整保留不乱码', async () => {

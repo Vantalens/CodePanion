@@ -11,7 +11,11 @@ const state = {
     activeCodeId: '',
     workflowItemIds: new Set(),
     workflowItemsByThread: new Map(),
-    workflowThreads: new Map()
+    workflowThreads: new Map(),
+    openSnoozeMenuId: '',
+    groupMode: 'workspace',
+    batchMode: false,
+    selectedBatchConversationIds: new Set()
 };
 
 const MAX_MESSAGES = 5000;
@@ -87,6 +91,7 @@ function shortPath(path) {
 function sourceLabel(message) {
     if (message.source === 'user') return '你';
     if (message.source === 'codex-desktop' || message.source === 'codex') return 'Codex';
+    if (message.source === 'opencode') return 'OpenCode';
     if (message.source === 'cli') return '终端';
     if (message.source === 'vscode') return 'VS Code';
     if (message.source === 'trae') return 'Trae';
@@ -233,24 +238,19 @@ function renderConversationList() {
         .filter(item => item.id !== 'all')
         .filter(isUserFacingConversation)
         .sort((a, b) => {
-            // P1.1：等待我 > 失败 > 需审阅 > 运行中 > 来源在线 > 完成；
-            // 同档按 lastAt 倒序保持最新的在上，等待输入永远不会被普通输出淹没。
-            const priA = conversationPriority(a);
-            const priB = conversationPriority(b);
-            if (priA !== priB) return priA - priB;
-            if (isPinnedTask(a) !== isPinnedTask(b)) return isPinnedTask(a) ? -1 : 1;
-            return b.lastAt - a.lastAt;
+            return compareConversations(a, b);
         });
 
     updateQueueMetrics(allConversations);
 
     const activeView = normalizeView(state.activeView);
+    updateBatchToolbar(activeView, allConversations);
     let conversations = allConversations.filter(item => matchesActiveView(item, activeView));
     if (activeView === 'active') {
         conversations = allConversations.filter(isCurrentConversation);
         if (conversations.length === 0) {
             conversations = allConversations
-                .filter(item => isRecentConversation(item) && isUserFacingConversation(item) && !isArchivedTask(item) && !isSnoozedTask(item))
+                .filter(item => isRecentConversation(item) && isUserFacingConversation(item) && !isArchivedTask(item) && !isSnoozedTask(item) && item.status !== 'done')
                 .slice(0, 12);
         }
     }
@@ -271,14 +271,168 @@ function renderConversationList() {
         empty.style.padding = '12px';
         empty.textContent = activeView === 'waiting'
             ? '当前没有等待处理的任务'
+            : activeView === 'done'
+                ? '当前没有已完成任务'
             : activeView === 'later'
                 ? '当前没有稍后或已归档任务'
-                : '当前没有可显示的任务';
+                : activeView === 'active'
+                    ? '当前没有待处理任务'
+                    : '当前没有可显示的任务';
         list.appendChild(empty);
         return;
     }
 
-    conversations.forEach(item => list.appendChild(makeConversationButton(item)));
+    const groups = buildConversationGroups(conversations, activeView);
+    groups.forEach(group => {
+        const section = document.createElement('section');
+        section.className = 'conversation-group';
+        const header = document.createElement('div');
+        header.className = 'conversation-group-header';
+        header.innerHTML = `
+            <span class="conversation-group-title"></span>
+            <span class="conversation-group-count"></span>
+        `;
+        header.querySelector('.conversation-group-title').textContent = group.label;
+        header.querySelector('.conversation-group-count').textContent = `${group.items.length} 项`;
+        section.appendChild(header);
+        group.items.forEach(item => section.appendChild(makeConversationButton(item)));
+        list.appendChild(section);
+    });
+}
+
+function selectConversation(conversationId, options = {}) {
+    state.activeConversation = String(conversationId || '');
+    if (options.render === false) return;
+    renderAll();
+}
+
+function compareConversations(a, b) {
+    // 队列顺序仍以真实任务状态为主，手动优先级只在同一状态带内生效；
+    // 这样不会让“低风险高优先级”覆盖掉“真正等待输入/失败”的任务。
+    const priA = conversationPriority(a);
+    const priB = conversationPriority(b);
+    if (priA !== priB) return priA - priB;
+    if (isPinnedTask(a) !== isPinnedTask(b)) return isPinnedTask(a) ? -1 : 1;
+    const manualA = manualPriorityWeight(a);
+    const manualB = manualPriorityWeight(b);
+    if (manualA !== manualB) return manualA - manualB;
+    const sortA = manualSortOrder(a);
+    const sortB = manualSortOrder(b);
+    if (sortA !== sortB) return sortA - sortB;
+    return Number(b.lastAt || 0) - Number(a.lastAt || 0);
+}
+
+function manualSortOrder(item) {
+    const value = Number(taskStateForConversation(item).sortOrder);
+    return Number.isFinite(value) ? value : Number.MAX_SAFE_INTEGER;
+}
+
+function buildConversationGroups(conversations, activeView) {
+    const mode = normalizeGroupMode(state.groupMode);
+    if (mode === 'none') {
+        return [{ key: 'queue', label: activeView === 'later' ? '当前队列' : '任务队列', items: conversations }];
+    }
+    const groups = new Map();
+    conversations.forEach(item => {
+        const key = conversationGroupKey(item, mode);
+        const label = conversationGroupLabel(item, mode);
+        const existing = groups.get(key) || { key, label, items: [] };
+        existing.items.push(item);
+        groups.set(key, existing);
+    });
+    return Array.from(groups.values()).sort((a, b) => {
+        const firstA = a.items[0];
+        const firstB = b.items[0];
+        if (!firstA || !firstB) return 0;
+        return compareConversations(firstA, firstB);
+    });
+}
+
+function normalizeGroupMode(value) {
+    return ['workspace', 'source', 'none'].includes(String(value || '')) ? String(value) : 'workspace';
+}
+
+function conversationGroupKey(item, mode) {
+    if (mode === 'source') return `source:${String(item?.source || 'unknown').toLowerCase()}`;
+    if (mode === 'workspace') return `workspace:${groupWorkspaceLabel(item)}`;
+    return 'queue';
+}
+
+function conversationGroupLabel(item, mode) {
+    if (mode === 'source') return sourceLabel({ source: item?.source || 'daemon' });
+    if (mode === 'workspace') return groupWorkspaceLabel(item);
+    return '任务队列';
+}
+
+function groupWorkspaceLabel(item) {
+    const workspace = String(item?.workspace || '').trim();
+    if (workspace) return shortPath(workspace);
+    const title = String(item?.title || '').trim();
+    return title || '未绑定项目';
+}
+
+function updateBatchToolbar(activeView, allConversations) {
+    const toolbar = document.getElementById('batch-toolbar');
+    const selectionCount = document.getElementById('batch-selection-count');
+    const toggle = document.getElementById('batch-toggle');
+    if (!toolbar || !selectionCount || !toggle) return;
+
+    const eligibleIds = new Set(
+        allConversations
+            .filter(item => matchesActiveView(item, activeView))
+            .map(item => item.id)
+            .filter(id => workflowThreadIdFromConversationId(id))
+    );
+
+    for (const id of Array.from(state.selectedBatchConversationIds)) {
+        if (!eligibleIds.has(id)) state.selectedBatchConversationIds.delete(id);
+    }
+
+    const showToolbar = activeView !== 'code' && eligibleIds.size > 0;
+    if (!showToolbar) {
+        toolbar.hidden = true;
+        state.batchMode = false;
+        state.selectedBatchConversationIds.clear();
+        return;
+    }
+
+    toolbar.hidden = false;
+    toggle.textContent = state.batchMode ? '退出批量' : '批量选择';
+    const selectedCount = state.selectedBatchConversationIds.size;
+    selectionCount.textContent = state.batchMode
+        ? (selectedCount > 0 ? `已选择 ${selectedCount} 项` : '选择需要批量处理的任务')
+        : '批量处理当前视图中的任务';
+
+    wireActionButton('batch-toggle', true, () => {
+        state.batchMode = !state.batchMode;
+        if (!state.batchMode) state.selectedBatchConversationIds.clear();
+        renderAll();
+    });
+    wireActionButton('batch-clear', state.batchMode && selectedCount > 0, () => {
+        state.selectedBatchConversationIds.clear();
+        renderAll();
+    });
+    wireActionButton('batch-restore', state.batchMode && selectedCount > 0, () => {
+        applyBatchTaskAction({ archived: false, snoozedUntil: null });
+    });
+    wireActionButton('batch-archive', state.batchMode && selectedCount > 0, () => {
+        applyBatchTaskAction({ archived: true });
+    });
+    wireActionButton('batch-snooze', state.batchMode && selectedCount > 0, () => {
+        applyBatchTaskAction({ archived: false, snoozedUntil: Date.now() + (30 * 60 * 1000) });
+    });
+    wireActionButton('batch-pin', state.batchMode && selectedCount > 0, () => {
+        applyBatchTaskAction({ pinned: true });
+    });
+    wireActionButton('batch-priority-high', state.batchMode && selectedCount > 0, () => {
+        applyBatchTaskAction({ priority: 'high' });
+    });
+    wireActionButton('batch-priority-normal', state.batchMode && selectedCount > 0, () => {
+        applyBatchTaskAction({ priority: 'normal' });
+    });
+    wireActionButton('batch-priority-low', state.batchMode && selectedCount > 0, () => {
+        applyBatchTaskAction({ priority: 'low' });
+    });
 }
 
 function normalizeView(view) {
@@ -293,9 +447,10 @@ function matchesActiveView(item, activeView) {
     if (activeView === 'waiting') return item.status === 'prompt';
     if (activeView === 'running') return item.status !== 'prompt' && item.status !== 'done' && item.status !== 'error';
     if (activeView === 'error') return item.status === 'error';
+    if (activeView === 'done') return item.status === 'done';
     if (activeView === 'later') return isArchivedTask(item) || isSnoozedTask(item);
     if (activeView === 'code') return state.codeBlocks.some(block => block.conversationId === item.id);
-    return true;
+    return item.status !== 'done';
 }
 
 function updateQueueMetrics(conversations) {
@@ -328,22 +483,33 @@ function isUserFacingConversation(item) {
 function taskStateForConversation(item) {
     const raw = normalizeTaskStatePayload(item?.taskState || item?.TaskState);
     const snoozedUntil = Number(raw.snoozedUntil || 0);
+    const sortOrder = Number(raw.sortOrder);
     return {
         pinned: Boolean(raw.pinned),
         archived: Boolean(raw.archived),
-        snoozedUntil: Number.isFinite(snoozedUntil) && snoozedUntil > 0 ? snoozedUntil : 0
+        snoozedUntil: Number.isFinite(snoozedUntil) && snoozedUntil > 0 ? snoozedUntil : 0,
+        priority: ['high', 'low'].includes(String(raw.priority || '')) ? String(raw.priority) : 'normal',
+        sortOrder: Number.isFinite(sortOrder) ? sortOrder : undefined,
+        handoffStatus: ['pending', 'active', 'returned'].includes(String(raw.handoffStatus || '')) ? String(raw.handoffStatus) : 'idle',
+        handoffTarget: ['generic', 'codex', 'claude-code', 'opencode'].includes(String(raw.handoffTarget || '')) ? String(raw.handoffTarget) : null,
+        handoffSessionId: typeof raw.handoffSessionId === 'string' && raw.handoffSessionId.trim() ? raw.handoffSessionId : null
     };
 }
 
 function normalizeTaskStatePayload(taskState) {
     if (!taskState || typeof taskState !== 'object') {
-        return { pinned: false, archived: false, snoozedUntil: 0 };
+        return { pinned: false, archived: false, snoozedUntil: 0, priority: 'normal', handoffStatus: 'idle', handoffTarget: null, handoffSessionId: null };
     }
     const snoozedUntil = Number(taskState.snoozedUntil || taskState.SnoozedUntil || 0);
     return {
         pinned: Boolean(taskState.pinned ?? taskState.Pinned),
         archived: Boolean(taskState.archived ?? taskState.Archived),
         snoozedUntil: Number.isFinite(snoozedUntil) && snoozedUntil > 0 ? snoozedUntil : 0,
+        priority: String(taskState.priority ?? taskState.Priority ?? 'normal'),
+        sortOrder: Number(taskState.sortOrder ?? taskState.SortOrder),
+        handoffStatus: String(taskState.handoffStatus ?? taskState.HandoffStatus ?? 'idle'),
+        handoffTarget: taskState.handoffTarget ?? taskState.HandoffTarget ?? null,
+        handoffSessionId: taskState.handoffSessionId ?? taskState.HandoffSessionId ?? null,
         updatedAt: Number(taskState.updatedAt || taskState.UpdatedAt || 0)
     };
 }
@@ -359,6 +525,19 @@ function isSnoozedTask(item) {
 
 function isPinnedTask(item) {
     return taskStateForConversation(item).pinned;
+}
+
+function manualPriorityWeight(item) {
+    const priority = taskStateForConversation(item).priority;
+    if (priority === 'high') return 0;
+    if (priority === 'low') return 2;
+    return 1;
+}
+
+function taskPriorityLabel(priority) {
+    if (priority === 'high') return '高优先级';
+    if (priority === 'low') return '低优先级';
+    return '标准优先级';
 }
 
 function isActionableStatus(status) {
@@ -404,28 +583,47 @@ function isArchivedConversation(item) {
 function makeConversationButton(item) {
     const button = document.createElement('button');
     button.className = `conversation-item ${state.activeConversation === item.id ? 'active' : ''}`;
+    if (state.batchMode) button.classList.add('batch-mode');
+    if (state.selectedBatchConversationIds.has(item.id)) button.classList.add('selected');
     button.type = 'button';
     button.addEventListener('click', () => {
-        state.activeConversation = item.id;
-        renderAll();
+        if (state.batchMode) {
+            toggleBatchSelection(item.id);
+            return;
+        }
+        selectConversation(item.id);
     });
 
     // P0.3：摘要走 displayStatus（等待我/运行中/失败/需审阅/完成/来源在线），
     // preview 显示下一步动作而不是最近一条原始输出，避免命令片段刷屏。
     const display = deriveConversationDisplay(item);
+    const taskState = taskStateForConversation(item);
     button.innerHTML = `
-        <div class="conversation-name">
-            <span class="conversation-dot ${display.kind}"></span>
-            <span class="conversation-title-text"></span>
+        <div class="conversation-select" ${state.batchMode ? '' : 'hidden'}>
+            <input type="checkbox" ${state.selectedBatchConversationIds.has(item.id) ? 'checked' : ''}>
         </div>
-        <div class="conversation-meta">
-            <span class="conversation-chip status-chip"></span>
-            <span class="conversation-chip source-chip"></span>
-            <span class="conversation-chip capability-chip"></span>
-            <span class="conversation-chip management-chip" hidden></span>
+        <div class="conversation-body">
+            <div class="conversation-name">
+                <span class="conversation-dot ${display.kind}"></span>
+                <span class="conversation-title-text"></span>
+            </div>
+            <div class="conversation-meta">
+                <span class="conversation-chip status-chip"></span>
+                <span class="conversation-chip source-chip"></span>
+                <span class="conversation-chip capability-chip"></span>
+                <span class="conversation-chip priority-chip"></span>
+                <span class="conversation-chip management-chip" hidden></span>
+            </div>
+            <div class="conversation-preview"></div>
         </div>
-        <div class="conversation-preview"></div>
     `;
+    const checkbox = button.querySelector('.conversation-select input');
+    if (checkbox) {
+        checkbox.addEventListener('click', (event) => {
+            event.stopPropagation();
+            toggleBatchSelection(item.id);
+        });
+    }
     button.dataset.displayStatus = display.kind;
     if (item.source) button.dataset.source = item.source;
     button.querySelector('.conversation-title-text').textContent = item.title;
@@ -440,20 +638,84 @@ function makeConversationButton(item) {
         capChip.classList.add(capClass);
         capChip.dataset.capabilityLevel = capability.rawLevel || '';
     }
+    const priorityChip = button.querySelector('.priority-chip');
+    priorityChip.textContent = taskPriorityLabel(taskState.priority);
+    priorityChip.classList.add(`priority-${taskState.priority}`);
     const managementChip = button.querySelector('.management-chip');
-    const taskState = taskStateForConversation(item);
     if (taskState.archived) {
         managementChip.hidden = false;
         managementChip.textContent = '已归档';
     } else if (taskState.snoozedUntil > Date.now()) {
         managementChip.hidden = false;
         managementChip.textContent = `稍后至 ${formatShortTime(taskState.snoozedUntil)}`;
+    } else if (taskState.handoffStatus === 'active' && taskState.handoffTarget) {
+        managementChip.hidden = false;
+        managementChip.textContent = `已转交 ${handoffTargetLabel(taskState.handoffTarget)}`;
+    } else if (taskState.handoffStatus === 'pending' && taskState.handoffTarget) {
+        managementChip.hidden = false;
+        managementChip.textContent = `待转交 ${handoffTargetLabel(taskState.handoffTarget)}`;
+    } else if (taskState.handoffStatus === 'returned' && taskState.handoffTarget) {
+        managementChip.hidden = false;
+        managementChip.textContent = `已回流 ${handoffTargetLabel(taskState.handoffTarget)}`;
     } else if (taskState.pinned) {
         managementChip.hidden = false;
         managementChip.textContent = '已置顶';
     }
     button.querySelector('.conversation-preview').textContent = display.action;
     return button;
+}
+
+function toggleBatchSelection(conversationId) {
+    if (state.selectedBatchConversationIds.has(conversationId)) {
+        state.selectedBatchConversationIds.delete(conversationId);
+    } else if (workflowThreadIdFromConversationId(conversationId)) {
+        state.selectedBatchConversationIds.add(conversationId);
+    }
+    renderAll();
+}
+
+function workflowThreadIdFromConversationId(conversationId) {
+    if (!String(conversationId || '').startsWith('workflow:')) return '';
+    return String(conversationId).slice('workflow:'.length);
+}
+
+function handoffConversationIdForSession(sessionId) {
+    const normalized = String(sessionId || '').trim();
+    return normalized ? `workflow:session:${normalized}` : '';
+}
+
+function findLinkedHandoffConversation(conversation) {
+    const taskState = taskStateForConversation(conversation);
+    const conversationId = handoffConversationIdForSession(taskState.handoffSessionId);
+    if (!conversationId) return null;
+    return state.conversations.get(conversationId) || {
+        id: conversationId,
+        title: `接力会话 ${taskState.handoffSessionId}`,
+        source: conversation?.source || 'workflow',
+        status: 'running'
+    };
+}
+
+function findParentConversationForThread(threadId) {
+    const sessionId = String(threadId || '').startsWith('session:') ? String(threadId).slice('session:'.length) : '';
+    if (!sessionId) return null;
+    for (const conversation of state.conversations.values()) {
+        if (!String(conversation?.id || '').startsWith('workflow:')) continue;
+        if (taskStateForConversation(conversation).handoffSessionId === sessionId) return conversation;
+    }
+    return null;
+}
+
+function applyBatchTaskAction(patch) {
+    const selectedIds = Array.from(state.selectedBatchConversationIds);
+    selectedIds.forEach(conversationId => {
+        const threadId = workflowThreadIdFromConversationId(conversationId);
+        if (!threadId) return;
+        sendTaskAction(threadId, patch, { preserveSelection: true, suppressRender: true });
+    });
+    state.selectedBatchConversationIds.clear();
+    state.batchMode = false;
+    renderAll();
 }
 
 // P0.3：把任务的 status + 计数派生为 6 档显示状态 + 下一步动作；
@@ -474,10 +736,16 @@ function deriveConversationDisplay(item) {
         return { kind: 'deferred', label: '稍后处理', action: `提醒已延后到 ${formatShortTime(taskState.snoozedUntil)}` };
     }
     const status = item.status || '';
-    if (status === 'prompt') {
+    if (status === 'prompt' || status === 'waiting') {
+        if (taskState.handoffStatus === 'returned') {
+            return { kind: 'waiting-me', label: '等待我', action: '审阅接力结果并决定下一步' };
+        }
         return { kind: 'waiting-me', label: '等待我', action: '选择选项或输入回复' };
     }
     if (status === 'error') {
+        if (taskState.handoffStatus === 'returned') {
+            return { kind: 'error', label: '失败', action: '查看接力失败摘要并决定是否重试' };
+        }
         return { kind: 'error', label: '失败', action: '查看错误并复制诊断' };
     }
     if (status === 'done') {
@@ -625,6 +893,7 @@ function renderTaskSpotlight(conversation, messages) {
     const taskState = taskStateForConversation(conversation);
     const workspace = latest?.workspace || safeMessages.find(message => message.workspace)?.workspace || '';
     const breakdown = buildSpotlightBreakdown(conversation);
+    const handoffSummary = findLatestHandoffSummary(safeMessages);
     const management = taskState.archived
         ? '已归档'
         : taskState.snoozedUntil > Date.now()
@@ -634,6 +903,7 @@ function renderTaskSpotlight(conversation, messages) {
                 : conversation
                     ? '主队列中'
                     : '等待任务';
+    const priority = taskPriorityLabel(taskState.priority);
     const updatedAt = Number(conversation?.lastAt || latest?.timestamp || 0);
     const summaryCount = Number(conversation?.count || safeMessages.length || 0);
     const setText = (id, value) => {
@@ -642,13 +912,19 @@ function renderTaskSpotlight(conversation, messages) {
     };
 
     setText('spotlight-next-action', conversation ? display.label : '请选择需要处理的任务');
-    setText('spotlight-subaction', conversation ? display.action : '可从左侧任务列表中切换，或等待新的任务进入队列。');
+    setText('spotlight-subaction', conversation
+        ? (handoffSummary?.handlingAdvice || handoffSummary?.nextAction || display.action)
+        : '可从左侧任务列表中切换，或等待新的任务进入队列。');
     setText('spotlight-project', workspace ? shortPath(workspace) : (conversation?.title || '未绑定项目'));
     setText('spotlight-workspace', workspace || '当前任务未提供可展示的工作区路径。');
-    setText('spotlight-management', management);
+    setText('spotlight-management', conversation ? `${management} · ${priority}` : management);
     setText('spotlight-updated', updatedAt ? `最近更新于 ${formatShortTime(updatedAt)}` : '等待新的任务状态更新。');
-    setText('spotlight-summary', `${summaryCount} 条记录`);
-    setText('spotlight-breakdown', breakdown);
+    setText('spotlight-summary', handoffSummary
+        ? `${handoffSummary.conclusion || `接力回流 · ${handoffSummary.result || '已更新'}`}`
+        : `${summaryCount} 条记录`);
+    setText('spotlight-breakdown', handoffSummary
+        ? buildHandoffSpotlightText(handoffSummary, breakdown)
+        : breakdown);
 }
 
 function buildSpotlightBreakdown(conversation) {
@@ -689,7 +965,7 @@ function statusLabel(status) {
     // P0.3：右上角 / 抽屉态文案与左侧任务列表 6 档对齐；
     // 进入 conversation 后只能看到这五种，"需审阅"由 displayStatus 派生，
     // 这里走的是基础字符串映射，保持简洁。
-    if (status === 'prompt') return '等待我';
+    if (status === 'prompt' || status === 'waiting') return '等待我';
     if (status === 'error') return '失败';
     if (status === 'done') return '完成';
     if (status === 'deferred') return '稍后处理';
@@ -1165,21 +1441,132 @@ function renderContextDrawer() {
     wireActionButton('drawer-focus-reply', canReply, () => focusActiveReply(), { hideWhenDisabled: true });
     wireActionButton('stage-copy-context', messages.length > 0, () => copyText(stageContext));
     wireActionButton('drawer-copy-workspace', Boolean(workspace), () => copyText(workspace));
+    wireSuggestedHandoffActions(conversation, messages, taskState, stageContext);
     wireTaskActionButtons(threadId, taskState);
+    renderHandoffNavigation(conversation, taskState, threadId);
+    renderHandoffPanel(conversation, messages);
     wireOmnibar(prompt);
+}
+
+function renderHandoffNavigation(conversation, taskState, threadId) {
+    const linkedPanel = document.getElementById('drawer-linked-session-panel');
+    const linkedTitle = document.getElementById('drawer-linked-session-title');
+    const linkedNote = document.getElementById('drawer-linked-session-note');
+    const parentPanel = document.getElementById('drawer-parent-task-panel');
+    const parentTitle = document.getElementById('drawer-parent-task-title');
+    const parentNote = document.getElementById('drawer-parent-task-note');
+    const linkedConversation = findLinkedHandoffConversation(conversation);
+    const parentConversation = findParentConversationForThread(threadId);
+
+    if (linkedPanel && linkedTitle && linkedNote) {
+        const hasLinkedSession = Boolean(taskState.handoffSessionId);
+        linkedPanel.hidden = !hasLinkedSession;
+        if (hasLinkedSession) {
+            const targetLabel = taskState.handoffTarget ? handoffTargetLabel(taskState.handoffTarget) : '目标工具';
+            linkedTitle.textContent = linkedConversation?.title || `接力会话 ${taskState.handoffSessionId}`;
+            linkedNote.textContent = linkedConversation && state.conversations.has(linkedConversation.id)
+                ? `当前责任已交给 ${targetLabel}。可直接打开接力会话 ${taskState.handoffSessionId} 查看执行进度。`
+                : `当前责任已交给 ${targetLabel}。接力会话 ${taskState.handoffSessionId} 尚未出现在主界面中。`;
+        } else {
+            linkedTitle.textContent = '未建立接力会话';
+            linkedNote.textContent = '转交建立后，可直接跳转到接力会话继续跟进。';
+        }
+        wireActionButton(
+            'drawer-jump-linked-session',
+            Boolean(linkedConversation && state.conversations.has(linkedConversation.id)),
+            () => selectConversation(linkedConversation.id)
+        );
+    }
+
+    if (parentPanel && parentTitle && parentNote) {
+        parentPanel.hidden = !parentConversation;
+        if (parentConversation) {
+            const parentTaskState = taskStateForConversation(parentConversation);
+            parentTitle.textContent = parentConversation.title || '来源任务';
+            parentNote.textContent = parentTaskState.handoffTarget
+                ? `当前会话来自上游任务，责任目标为 ${handoffTargetLabel(parentTaskState.handoffTarget)}。可返回来源任务继续处理或回收责任。`
+                : '当前会话来自一个上游任务，可返回原任务查看整体状态。';
+        } else {
+            parentTitle.textContent = '未关联来源任务';
+            parentNote.textContent = '当前会话来自某个上游任务时，可直接返回原任务。';
+        }
+        wireActionButton(
+            'drawer-jump-parent-task',
+            Boolean(parentConversation),
+            () => selectConversation(parentConversation.id)
+        );
+    }
 }
 
 function buildTaskActionNote(capabilityDetail, taskState) {
     if (taskState.archived) return `${capabilityDetail} 当前任务已归档，可恢复后重新进入主队列。`;
     if (taskState.snoozedUntil > Date.now()) return `${capabilityDetail} 当前任务已稍后提醒，恢复时间：${formatFullTime(taskState.snoozedUntil)}。`;
+    if (taskState.handoffStatus === 'active' && taskState.handoffTarget) return `${capabilityDetail} 当前任务已转交给 ${handoffTargetLabel(taskState.handoffTarget)}，${taskState.handoffSessionId ? `接力会话 ${taskState.handoffSessionId} 已建立，` : ''}CodePanion 现在跟踪责任状态与回流入口。`;
+    if (taskState.handoffStatus === 'pending' && taskState.handoffTarget) return `${capabilityDetail} 当前任务已准备转交给 ${handoffTargetLabel(taskState.handoffTarget)}，等待目标工具确认接手。`;
+    if (taskState.handoffStatus === 'returned' && taskState.handoffTarget) return `${capabilityDetail} 当前任务已从 ${handoffTargetLabel(taskState.handoffTarget)} 回收到当前队列，可继续处理。`;
     if (taskState.pinned) return `${capabilityDetail} 当前任务已置顶，会在同优先级任务中优先显示。`;
+    if (typeof taskState.sortOrder === 'number') return `${capabilityDetail} 当前任务已进入手动排序队列，可继续上移或下移。`;
+    if (taskState.priority === 'high') return `${capabilityDetail} 当前任务已标记为高优先级，会在同状态任务中靠前展示。`;
+    if (taskState.priority === 'low') return `${capabilityDetail} 当前任务已标记为低优先级，会在同状态任务中靠后展示。`;
     return capabilityDetail;
+}
+
+function wireSuggestedHandoffActions(conversation, messages, taskState, stageContext) {
+    const recommendations = getSuggestedHandoffActions(conversation, messages, taskState, stageContext);
+    const primary = recommendations[0] || null;
+    const secondary = recommendations[1] || null;
+    setButtonText('stage-suggested-action', primary?.label || '建议动作');
+    setButtonText('drawer-suggested-action', primary?.label || '建议动作');
+    setButtonText('stage-suggested-secondary', secondary?.label || '后续动作');
+    setButtonText('drawer-suggested-secondary', secondary?.label || '后续动作');
+    wireActionButton('stage-suggested-action', Boolean(primary), () => primary.run(), { hideWhenDisabled: true });
+    wireActionButton('drawer-suggested-action', Boolean(primary), () => primary.run(), { hideWhenDisabled: true });
+    wireActionButton('stage-suggested-secondary', Boolean(secondary), () => secondary.run(), { hideWhenDisabled: true });
+    wireActionButton('drawer-suggested-secondary', Boolean(secondary), () => secondary.run(), { hideWhenDisabled: true });
+}
+
+function getSuggestedHandoffActions(conversation, messages, taskState, stageContext) {
+    const handoffSummary = findLatestHandoffSummary(Array.isArray(messages) ? messages : []);
+    if (!handoffSummary) return [];
+
+    const linkedConversation = findLinkedHandoffConversation(conversation);
+    const recommendations = [];
+    const appendPackageAction = () => {
+        if (!conversation) return;
+        const target = taskState.handoffTarget || 'generic';
+        const pkg = buildHandoffPackage(conversation, messages, target);
+        recommendations.push({
+            label: '复制交接包',
+            run: () => copyText(pkg.preview),
+        });
+    };
+
+    if (taskState.handoffStatus === 'returned' && !handoffSummary.issueType && linkedConversation && state.conversations.has(linkedConversation.id)) {
+        recommendations.push({
+            label: '打开接力会话',
+            run: () => selectConversation(linkedConversation.id),
+        });
+        appendPackageAction();
+        return recommendations;
+    }
+
+    if (handoffSummary.manualHandling === '需要' || handoffSummary.issueType) {
+        recommendations.push({
+            label: '复制诊断',
+            run: () => copyText(stageContext),
+        });
+        appendPackageAction();
+        return recommendations;
+    }
+
+    appendPackageAction();
+    return recommendations;
 }
 
 function wireTaskActionButtons(threadId, taskState) {
     const canManage = Boolean(threadId);
     const pinLabel = taskState.pinned ? '取消置顶' : '置顶任务';
-    const snoozeLabel = taskState.snoozedUntil > Date.now() ? '恢复到当前' : '稍后 1 小时';
+    const snoozeLabel = taskState.snoozedUntil > Date.now() ? '恢复到当前' : '稍后处理';
     const archiveLabel = taskState.archived ? '恢复任务' : '归档任务';
 
     setButtonText('stage-pin-task', pinLabel);
@@ -1188,18 +1575,41 @@ function wireTaskActionButtons(threadId, taskState) {
     setButtonText('drawer-snooze-task', snoozeLabel);
     setButtonText('stage-archive-task', archiveLabel);
     setButtonText('drawer-archive-task', archiveLabel);
+    renderSnoozeMenu('stage-snooze-menu', threadId, taskState);
+    renderSnoozeMenu('drawer-snooze-menu', threadId, taskState);
 
     wireActionButton('stage-pin-task', canManage, () => togglePinnedTask(threadId, taskState));
     wireActionButton('drawer-pin-task', canManage, () => togglePinnedTask(threadId, taskState));
-    wireActionButton('stage-snooze-task', canManage, () => toggleSnoozeTask(threadId, taskState));
-    wireActionButton('drawer-snooze-task', canManage, () => toggleSnoozeTask(threadId, taskState));
+    wireActionButton('stage-snooze-task', canManage, () => toggleSnoozeTask(threadId, taskState, 'stage-snooze-menu'));
+    wireActionButton('drawer-snooze-task', canManage, () => toggleSnoozeTask(threadId, taskState, 'drawer-snooze-menu'));
     wireActionButton('stage-archive-task', canManage, () => toggleArchivedTask(threadId, taskState));
     wireActionButton('drawer-archive-task', canManage, () => toggleArchivedTask(threadId, taskState));
+    wirePriorityButtonSet('stage', threadId, taskState, canManage);
+    wirePriorityButtonSet('drawer', threadId, taskState, canManage);
+    wireOrderButtons('stage', threadId, canManage);
+    wireOrderButtons('drawer', threadId, canManage);
 }
 
 function setButtonText(id, text) {
     const button = document.getElementById(id);
     if (button) button.textContent = text;
+}
+
+function wirePriorityButtonSet(prefix, threadId, taskState, canManage) {
+    ['high', 'normal', 'low'].forEach(priority => {
+        const button = document.getElementById(`${prefix}-priority-${priority}`);
+        if (!button) return;
+        button.disabled = !canManage;
+        button.classList.remove('active', 'priority-high', 'priority-normal', 'priority-low');
+        button.classList.add(`priority-${priority}`);
+        button.classList.toggle('active', taskState.priority === priority);
+        button.onclick = canManage ? () => setTaskPriority(threadId, priority) : null;
+    });
+}
+
+function wireOrderButtons(prefix, threadId, canManage) {
+    wireActionButton(`${prefix}-move-up`, canManage && canMoveTask(threadId, -1), () => moveTaskRelative(threadId, -1));
+    wireActionButton(`${prefix}-move-down`, canManage && canMoveTask(threadId, 1), () => moveTaskRelative(threadId, 1));
 }
 
 // P1.2：复制上下文走结构化诊断格式，保留来源、能力、隐私边界与最近若干条完整消息，
@@ -1210,6 +1620,7 @@ function buildStageContext(conversation, messages) {
     const source = conversation?.source || latest.source || '';
     const capability = capabilityForMessage(latest.source ? latest : { source });
     const taskState = taskStateForConversation(conversation);
+    const handoffSummary = findLatestHandoffSummary(safeMessages);
     const lines = [];
     lines.push('# CodePanion 任务上下文');
     lines.push(`任务：${conversation?.title || latest.conversationTitle || '当前任务'}`);
@@ -1219,8 +1630,31 @@ function buildStageContext(conversation, messages) {
     if (taskState.pinned) lines.push('任务管理：已置顶');
     if (taskState.archived) lines.push('任务管理：已归档');
     if (taskState.snoozedUntil > Date.now()) lines.push(`任务管理：稍后至 ${formatFullTime(taskState.snoozedUntil)}`);
+    if (taskState.handoffStatus !== 'idle') lines.push(`转交状态：${handoffStatusLabel(taskState.handoffStatus)}${taskState.handoffTarget ? ` · ${handoffTargetLabel(taskState.handoffTarget)}` : ''}`);
+    if (taskState.handoffSessionId) lines.push(`接力会话：${taskState.handoffSessionId}`);
+    lines.push(`优先级：${taskPriorityLabel(taskState.priority)}`);
+    if (typeof taskState.sortOrder === 'number') lines.push(`手动排序：${taskState.sortOrder}`);
     const privacy = privacyBoundaryText(latest.privacyBoundary || metadataFromSourceId(latest.sourceId, 'privacyBoundary') || source);
     if (privacy) lines.push(`隐私边界：${privacy}`);
+    if (handoffSummary) {
+        lines.push('');
+        lines.push('## 最近接力回流');
+        if (handoffSummary.tool) lines.push(`工具：${handoffSummary.tool}`);
+        if (handoffSummary.session) lines.push(`会话：${handoffSummary.session}`);
+        if (handoffSummary.conclusion) lines.push(`回流结论：${handoffSummary.conclusion}`);
+        if (handoffSummary.result) lines.push(`结果：${handoffSummary.result}`);
+        if (handoffSummary.manualHandling) lines.push(`人工处理：${handoffSummary.manualHandling}`);
+        if (handoffSummary.issueType) lines.push(`问题类型：${handoffSummary.issueType}`);
+        if (handoffSummary.exitCode) lines.push(`退出码：${handoffSummary.exitCode}`);
+        if (handoffSummary.retrySuggested) lines.push(`建议重试：${handoffSummary.retrySuggested}`);
+        if (handoffSummary.handlingAdvice) lines.push(`处理建议：${handoffSummary.handlingAdvice}`);
+        if (handoffSummary.nextAction) lines.push(`后续动作：${handoffSummary.nextAction}`);
+        if (Array.isArray(handoffSummary.touchedFiles) && handoffSummary.touchedFiles.length > 0) {
+            lines.push('涉及文件：');
+            handoffSummary.touchedFiles.forEach((file) => lines.push(`- ${file}`));
+        }
+        if (handoffSummary.progress) lines.push(`最近进展：${handoffSummary.progress}`);
+    }
 
     const recent = safeMessages.slice(-12);
     if (recent.length > 0) {
@@ -1239,6 +1673,222 @@ function buildStageContext(conversation, messages) {
     return lines.join('\n');
 }
 
+function buildHandoffPackage(conversation, messages, target = 'generic') {
+    const safeMessages = Array.isArray(messages) ? messages : [];
+    const latest = safeMessages[safeMessages.length - 1] || {};
+    const source = conversation?.source || latest.source || '';
+    const workspace = latest.workspace || safeMessages.find(message => message.workspace)?.workspace || conversation?.workspace || '';
+    const capability = capabilityForMessage(latest.source ? latest : { source });
+    const taskState = taskStateForConversation(conversation);
+    const handoffSummary = findLatestHandoffSummary(safeMessages);
+    const targetLabel = handoffTargetLabel(target);
+    const taskName = conversation?.title || latest.conversationTitle || '当前任务';
+    const promptMessage = latestActionablePrompt(safeMessages);
+    const lines = [];
+    lines.push('# CodePanion 任务转交包');
+    lines.push(`目标工具：${targetLabel}`);
+    lines.push(`任务：${taskName}`);
+    if (source) lines.push(`来源：${sourceLabel({ source })}`);
+    if (conversation?.status) lines.push(`状态：${statusLabel(conversation.status)}`);
+    if (workspace) lines.push(`工作区：${workspace}`);
+    lines.push(`能力：${capability.level}`);
+    lines.push(`优先级：${taskPriorityLabel(taskState.priority)}`);
+    if (taskState.pinned) lines.push('任务管理：已置顶');
+    if (taskState.archived) lines.push('任务管理：已归档');
+    if (taskState.snoozedUntil > Date.now()) lines.push(`任务管理：稍后至 ${formatFullTime(taskState.snoozedUntil)}`);
+    if (taskState.handoffStatus !== 'idle') lines.push(`转交状态：${handoffStatusLabel(taskState.handoffStatus)}${taskState.handoffTarget ? ` · ${handoffTargetLabel(taskState.handoffTarget)}` : ''}`);
+    if (taskState.handoffSessionId) lines.push(`接力会话：${taskState.handoffSessionId}`);
+    if (typeof taskState.sortOrder === 'number') lines.push(`手动排序：${taskState.sortOrder}`);
+
+    const goal = safeMessages.find(message => String(message.role || '').toLowerCase() === 'user' && String(message.content || '').trim());
+    if (goal?.content) {
+        lines.push('');
+        lines.push('## 原始目标');
+        lines.push(String(goal.content).trim());
+    }
+
+    if (promptMessage?.content) {
+        lines.push('');
+        lines.push('## 当前阻塞点');
+        lines.push(String(promptMessage.content).trim());
+        if (Array.isArray(promptMessage.options) && promptMessage.options.length > 0) {
+            lines.push(`可选项：${promptMessage.options.join(' / ')}`);
+        }
+    }
+
+    if (handoffSummary) {
+        lines.push('');
+        lines.push('## 最近接力回流');
+        if (handoffSummary.tool) lines.push(`工具：${handoffSummary.tool}`);
+        if (handoffSummary.session) lines.push(`会话：${handoffSummary.session}`);
+        if (handoffSummary.conclusion) lines.push(`回流结论：${handoffSummary.conclusion}`);
+        if (handoffSummary.result) lines.push(`结果：${handoffSummary.result}`);
+        if (handoffSummary.manualHandling) lines.push(`人工处理：${handoffSummary.manualHandling}`);
+        if (handoffSummary.issueType) lines.push(`问题类型：${handoffSummary.issueType}`);
+        if (handoffSummary.exitCode) lines.push(`退出码：${handoffSummary.exitCode}`);
+        if (handoffSummary.retrySuggested) lines.push(`建议重试：${handoffSummary.retrySuggested}`);
+        if (handoffSummary.handlingAdvice) lines.push(`处理建议：${handoffSummary.handlingAdvice}`);
+        if (handoffSummary.nextAction) lines.push(`后续动作：${handoffSummary.nextAction}`);
+        if (Array.isArray(handoffSummary.touchedFiles) && handoffSummary.touchedFiles.length > 0) {
+            lines.push('涉及文件：');
+            handoffSummary.touchedFiles.forEach((file) => lines.push(`- ${file}`));
+        }
+        if (handoffSummary.progress) lines.push(`最近进展：${handoffSummary.progress}`);
+    }
+
+    lines.push('');
+    lines.push('## 最近上下文');
+    safeMessages.slice(-8).forEach(message => {
+        const role = String(message.role || '').toLowerCase();
+        const actor = role === 'user' ? '用户' : sourceLabel(message);
+        const content = String(message.content || '').trim();
+        lines.push(`- ${actor} / ${typeLabel(message.type || 'activity')}：${content ? compactText(content) : '（无文本内容）'}`);
+    });
+
+    const preview = lines.join('\n');
+    const prompt = [
+        handoffPromptIntro(targetLabel),
+        '',
+        '请继续处理以下任务，并在继续前先理解当前阻塞点、已有上下文和优先级：',
+        '',
+        preview
+    ].join('\n');
+
+    return {
+        target,
+        targetLabel,
+        preview,
+        prompt
+    };
+}
+
+function findLatestHandoffSummary(messages) {
+    const match = messages.slice().reverse().find((message) => {
+        return String(message?.source || '').toLowerCase() === 'codepanion'
+            && /接力结果摘要/.test(String(message?.content || ''));
+    });
+    if (!match) return null;
+    return parseHandoffSummary(match.content);
+}
+
+function parseHandoffSummary(content) {
+    const text = String(content || '');
+    if (!/接力结果摘要/.test(text)) return null;
+    const readField = (label) => {
+        const pattern = new RegExp(`(?:^|\\n)-\\s*${label}：(.+?)(?=\\n|$)`);
+        return text.match(pattern)?.[1]?.trim() || '';
+    };
+    const touchedFilesMatch = text.match(/(?:^|\n)##\s*涉及文件\s*\n([\s\S]*?)(?=\n##\s|$)/);
+    const touchedFiles = (touchedFilesMatch?.[1] || '')
+        .split(/\r?\n/)
+        .map(line => line.replace(/^-\s*/, '').trim())
+        .filter(Boolean);
+    const progressMatch = text.match(/(?:^|\n)##\s*最近进展\s*\n([\s\S]+)$/);
+    const progress = progressMatch?.[1]?.trim() || '';
+    return {
+        tool: readField('工具'),
+        session: readField('会话'),
+        conclusion: readField('回流结论'),
+        result: readField('结果'),
+        manualHandling: readField('人工处理'),
+        issueType: readField('问题类型'),
+        exitCode: readField('退出码'),
+        retrySuggested: readField('建议重试'),
+        handlingAdvice: readField('处理建议'),
+        nextAction: readField('后续动作'),
+        touchedFiles,
+        progress,
+    };
+}
+
+function buildHandoffSpotlightText(summary, fallback) {
+    const parts = [];
+    if (summary.tool) parts.push(summary.tool);
+    if (summary.session) parts.push(summary.session);
+    if (summary.manualHandling) parts.push(`人工处理：${summary.manualHandling}`);
+    if (summary.issueType) parts.push(`问题类型：${summary.issueType}`);
+    if (summary.handlingAdvice) parts.push(`处理建议：${summary.handlingAdvice}`);
+    if (Array.isArray(summary.touchedFiles) && summary.touchedFiles[0]) parts.push(summary.touchedFiles[0]);
+    if (summary.progress) parts.push(summary.progress);
+    if (parts.length === 0) return fallback;
+    return parts.join(' · ');
+}
+
+function handoffTargetLabel(target) {
+    switch (String(target || '').toLowerCase()) {
+        case 'codex': return 'Codex';
+        case 'claude-code': return 'Claude Code';
+        case 'opencode': return 'OpenCode';
+        default: return '通用';
+    }
+}
+
+function handoffPromptIntro(targetLabel) {
+    if (targetLabel === 'Codex') return '你现在在 Codex 中接手一个来自 CodePanion 的任务。';
+    if (targetLabel === 'Claude Code') return '你现在在 Claude Code 中接手一个来自 CodePanion 的任务。';
+    if (targetLabel === 'OpenCode') return '你现在在 OpenCode 中接手一个来自 CodePanion 的任务。';
+    return '你现在接手一个来自 CodePanion 的任务。';
+}
+
+function handoffStatusLabel(status) {
+    if (status === 'pending') return '待转交';
+    if (status === 'active') return '已转交';
+    if (status === 'returned') return '已回流';
+    return '未转交';
+}
+
+function renderHandoffPanel(conversation, messages) {
+    const targetSelect = document.getElementById('drawer-handoff-target');
+    const preview = document.getElementById('drawer-handoff-preview');
+    const taskState = taskStateForConversation(conversation);
+    const hasTask = Boolean(conversation) && Array.isArray(messages) && messages.length > 0;
+    if (!targetSelect || !preview) return;
+    if (taskState.handoffTarget) {
+        targetSelect.value = taskState.handoffTarget;
+    } else if (!targetSelect.value) {
+        targetSelect.value = 'generic';
+    }
+
+    const sync = () => {
+        if (!hasTask) {
+            preview.textContent = '选择任务后显示标准化交接内容。';
+            wireActionButton('drawer-copy-handoff', false, () => undefined);
+            wireActionButton('drawer-copy-handoff-prompt', false, () => undefined);
+            wireActionButton('drawer-start-handoff', false, () => undefined);
+            wireActionButton('drawer-mark-handoff-active', false, () => undefined);
+            wireActionButton('drawer-return-handoff', false, () => undefined);
+            wireActionButton('drawer-clear-handoff', false, () => undefined);
+            return;
+        }
+        const pkg = buildHandoffPackage(conversation, messages, targetSelect.value || 'generic');
+        preview.textContent = pkg.preview;
+        wireActionButton('drawer-copy-handoff', true, () => copyText(pkg.preview));
+        wireActionButton('drawer-copy-handoff-prompt', true, () => copyText(pkg.prompt));
+        const threadId = workflowThreadIdFromConversationId(conversation.id);
+        wireActionButton('drawer-start-handoff', Boolean(threadId), () => {
+            sendToHost({
+                type: 'handoff-launch',
+                threadId,
+                target: targetSelect.value || 'generic',
+                prompt: pkg.prompt,
+                preview: pkg.preview
+            });
+        });
+        wireActionButton('drawer-mark-handoff-active', Boolean(threadId), () => {
+            sendTaskAction(threadId, { handoffStatus: 'active', handoffTarget: targetSelect.value || 'generic' });
+        });
+        wireActionButton('drawer-return-handoff', Boolean(threadId), () => {
+            sendTaskAction(threadId, { handoffStatus: 'returned', handoffTarget: targetSelect.value || 'generic' });
+        });
+        wireActionButton('drawer-clear-handoff', Boolean(threadId), () => {
+            sendTaskAction(threadId, { handoffStatus: 'idle', handoffTarget: null, handoffSessionId: null });
+        });
+    };
+
+    targetSelect.onchange = sync;
+    sync();
+}
+
 function wireActionButton(id, enabled, handler, options = {}) {
     const button = document.getElementById(id);
     if (!button) return;
@@ -1253,25 +1903,201 @@ function activeWorkflowThreadId() {
 }
 
 function togglePinnedTask(threadId, taskState) {
+    hideAllSnoozeMenus();
     sendTaskAction(threadId, { pinned: !taskState.pinned });
 }
 
-function toggleSnoozeTask(threadId, taskState) {
+function toggleSnoozeTask(threadId, taskState, menuId) {
     const isSnoozed = taskState.snoozedUntil > Date.now();
-    sendTaskAction(threadId, { snoozedUntil: isSnoozed ? null : Date.now() + (60 * 60 * 1000) });
+    if (isSnoozed) {
+        hideAllSnoozeMenus();
+        sendTaskAction(threadId, { snoozedUntil: null });
+        return;
+    }
+    toggleSnoozeMenu(menuId);
 }
 
 function toggleArchivedTask(threadId, taskState) {
+    hideAllSnoozeMenus();
     sendTaskAction(threadId, { archived: !taskState.archived });
 }
 
-function sendTaskAction(threadId, patch) {
+function setTaskPriority(threadId, priority) {
+    hideAllSnoozeMenus();
+    sendTaskAction(threadId, { priority });
+}
+
+function canMoveTask(threadId, direction) {
+    const visible = visibleWorkflowQueue();
+    const index = visible.findIndex(item => workflowThreadIdFromConversationId(item.id) === threadId);
+    if (index < 0) return false;
+    const targetIndex = index + direction;
+    return targetIndex >= 0 && targetIndex < visible.length;
+}
+
+function moveTaskRelative(threadId, direction) {
+    hideAllSnoozeMenus();
+    const visible = visibleWorkflowQueue();
+    const index = visible.findIndex(item => workflowThreadIdFromConversationId(item.id) === threadId);
+    const targetIndex = index + direction;
+    if (index < 0 || targetIndex < 0 || targetIndex >= visible.length) return;
+
+    const reordered = visible.slice();
+    const [current] = reordered.splice(index, 1);
+    reordered.splice(targetIndex, 0, current);
+
+    reordered.forEach((item, idx) => {
+        const nextOrder = (idx + 1) * 100;
+        const itemThreadId = workflowThreadIdFromConversationId(item.id);
+        if (!itemThreadId) return;
+        if (taskStateForConversation(item).sortOrder === nextOrder) return;
+        sendTaskAction(itemThreadId, { sortOrder: nextOrder }, { preserveSelection: true, suppressRender: true });
+    });
+    renderAll();
+}
+
+function visibleWorkflowQueue() {
+    const activeView = normalizeView(state.activeView);
+    const allConversations = Array.from(state.conversations.values())
+        .filter(item => item.id !== 'all')
+        .filter(isUserFacingConversation)
+        .sort(compareConversations);
+    let conversations = allConversations.filter(item => matchesActiveView(item, activeView));
+    if (activeView === 'active') {
+        conversations = allConversations.filter(isCurrentConversation);
+        if (conversations.length === 0) {
+            conversations = allConversations
+                .filter(item => isRecentConversation(item) && isUserFacingConversation(item) && !isArchivedTask(item) && !isSnoozedTask(item) && item.status !== 'done')
+                .slice(0, 12);
+        }
+    }
+    return conversations
+        .slice(0, activeView === 'active' ? 24 : 60)
+        .filter(item => Boolean(workflowThreadIdFromConversationId(item.id)));
+}
+
+function sendTaskAction(threadId, patch, options = {}) {
     if (!threadId) return;
+    hideAllSnoozeMenus();
+    if (!options.preserveSelection) {
+        state.selectedBatchConversationIds.clear();
+        state.batchMode = false;
+    }
+    applyTaskStatePatchLocal(threadId, patch);
     sendToHost({
         type: 'task-action',
         threadId,
         ...patch
     });
+    if (!options.suppressRender) renderAll();
+}
+
+function applyTaskStatePatchLocal(threadId, patch) {
+    const touchesHandoff = Object.prototype.hasOwnProperty.call(patch, 'handoffStatus')
+        || Object.prototype.hasOwnProperty.call(patch, 'handoffTarget')
+        || Object.prototype.hasOwnProperty.call(patch, 'handoffSessionId');
+    if (!touchesHandoff) return;
+    const thread = state.workflowThreads.get(threadId);
+    if (thread) {
+        thread.taskState = normalizeTaskStatePayload({
+            ...(thread.taskState || {}),
+            ...patch,
+            updatedAt: Date.now()
+        });
+    }
+    const conversationId = `workflow:${threadId}`;
+    const conversation = state.conversations.get(conversationId);
+    if (conversation) {
+        conversation.taskState = normalizeTaskStatePayload({
+            ...(conversation.taskState || {}),
+            ...patch,
+            updatedAt: Date.now()
+        });
+    }
+}
+
+function renderSnoozeMenu(containerId, threadId, taskState) {
+    const menu = document.getElementById(containerId);
+    if (!menu) return;
+    const canManage = Boolean(threadId) && !(taskState.snoozedUntil > Date.now());
+    menu.hidden = state.openSnoozeMenuId !== containerId || !canManage;
+    if (!canManage) {
+        menu.innerHTML = '';
+        return;
+    }
+
+    const tomorrowMorning = nextMorningNine();
+    menu.innerHTML = `
+        <div class="task-action-menu-title">选择提醒时间</div>
+        <div class="task-action-menu-grid">
+            <button class="action-button" type="button" data-snooze-preset="30m">30 分钟</button>
+            <button class="action-button" type="button" data-snooze-preset="2h">2 小时</button>
+            <button class="action-button" type="button" data-snooze-preset="tomorrow-9">明早 09:00</button>
+            <button class="action-button" type="button" data-snooze-action="cancel-menu">取消</button>
+        </div>
+        <div class="task-action-menu-custom">
+            <input type="datetime-local" value="${formatDateTimeLocalValue(tomorrowMorning)}">
+            <button class="action-button primary" type="button" data-snooze-action="apply-custom">确定</button>
+        </div>
+    `;
+
+    menu.querySelectorAll('[data-snooze-preset]').forEach(button => {
+        button.addEventListener('click', () => {
+            const preset = button.getAttribute('data-snooze-preset');
+            const dueAt = presetSnoozeTime(preset);
+            if (dueAt > Date.now()) sendTaskAction(threadId, { snoozedUntil: dueAt });
+        });
+    });
+
+    menu.querySelector('[data-snooze-action="cancel-menu"]')?.addEventListener('click', hideAllSnoozeMenus);
+    menu.querySelector('[data-snooze-action="apply-custom"]')?.addEventListener('click', () => {
+        const input = menu.querySelector('input[type="datetime-local"]');
+        const dueAt = parseDateTimeLocalValue(input?.value || '');
+        if (!Number.isFinite(dueAt) || dueAt <= Date.now()) {
+            input?.focus();
+            return;
+        }
+        sendTaskAction(threadId, { snoozedUntil: dueAt });
+    });
+}
+
+function toggleSnoozeMenu(menuId) {
+    state.openSnoozeMenuId = state.openSnoozeMenuId === menuId ? '' : menuId;
+    renderAll();
+}
+
+function hideAllSnoozeMenus() {
+    if (!state.openSnoozeMenuId) return;
+    state.openSnoozeMenuId = '';
+    renderAll();
+}
+
+function presetSnoozeTime(preset) {
+    if (preset === '30m') return Date.now() + (30 * 60 * 1000);
+    if (preset === '2h') return Date.now() + (2 * 60 * 60 * 1000);
+    if (preset === 'tomorrow-9') return nextMorningNine();
+    return 0;
+}
+
+function nextMorningNine() {
+    const due = new Date();
+    due.setSeconds(0, 0);
+    due.setHours(9, 0, 0, 0);
+    if (due.getTime() <= Date.now()) {
+        due.setDate(due.getDate() + 1);
+    }
+    return due.getTime();
+}
+
+function formatDateTimeLocalValue(timestamp) {
+    const date = new Date(timestamp);
+    const pad = (value) => String(value).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function parseDateTimeLocalValue(value) {
+    if (!value) return NaN;
+    return new Date(value).getTime();
 }
 
 function formatShortTime(timestamp) {
@@ -1694,6 +2520,7 @@ function refreshWorkflowConversation(threadId) {
         id: `workflow:${threadId}`,
         title: deriveWorkflowTitle(threadId, thread.title),
         source: thread.source || 'workflow',
+        workspace: thread.workspace || '',
         lastContent: preview,
         lastAt,
         count: summary.totalCount,
@@ -1715,12 +2542,7 @@ function chooseInitialConversation() {
     // 单纯 lastAt 倒序会把刚结束的 done 任务排到等待输入之前。
     const candidates = Array.from(state.conversations.values())
         .filter(isUserFacingConversation)
-        .sort((a, b) => {
-            const priA = conversationPriority(a);
-            const priB = conversationPriority(b);
-            if (priA !== priB) return priA - priB;
-            return b.lastAt - a.lastAt;
-        });
+        .sort(compareConversations);
     state.activeConversation = candidates[0]?.id || '';
 }
 
@@ -2201,9 +3023,24 @@ function bindViewButtons() {
                 item.classList.toggle('active', item.dataset.view === nextView);
             });
             state.activeView = nextView;
+            state.batchMode = false;
+            state.selectedBatchConversationIds.clear();
             if (state.activeView === 'code' && state.codeBlocks.length > 0) {
                 state.activeConversation = state.codeBlocks[state.codeBlocks.length - 1].conversationId;
             }
+            renderAll();
+        });
+    });
+}
+
+function bindGroupButtons() {
+    document.querySelectorAll('.group-button').forEach(button => {
+        button.addEventListener('click', () => {
+            const nextMode = normalizeGroupMode(button.dataset.groupMode || 'workspace');
+            state.groupMode = nextMode;
+            document.querySelectorAll('.group-button').forEach(item => {
+                item.classList.toggle('active', normalizeGroupMode(item.dataset.groupMode) === nextMode);
+            });
             renderAll();
         });
     });
@@ -2221,8 +3058,15 @@ function generateId() {
 
 function initApp() {
     bindViewButtons();
+    bindGroupButtons();
     renderAll();
     updateConnectionStatus(false);
+    document.addEventListener('click', (event) => {
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+        if (target.closest('#stage-snooze-task, #drawer-snooze-task, .task-action-menu')) return;
+        hideAllSnoozeMenus();
+    });
     if (window.chrome && window.chrome.webview) {
         window.chrome.webview.addEventListener('message', event => handleMessage(event.data));
     }
@@ -2247,7 +3091,8 @@ if (window.CODEPANION_TEST === true) {
         capabilityLevelLabel,
         capabilityChipClass,
         buildFailureDiagnostics,
-        buildStageContext
+        buildStageContext,
+        buildHandoffPackage
     };
 }
 window.CodePanion = api;

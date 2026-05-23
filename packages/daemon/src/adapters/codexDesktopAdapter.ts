@@ -13,23 +13,43 @@ type TrackedFile = {
   path: string;
   offset: number;
   threadId: string;
+  lastSeenAt: number;
 };
 
 export type CodexDesktopAdapterOptions = {
   /** Override the Codex sessions root directory. Defaults to `~/.codex/sessions`. Tests use this. */
   root?: string;
+  /** Override the upper bound on tracked files. Default 512 entries. Tests use this. */
+  maxTrackedFiles?: number;
+  /** Override the idle TTL after which an untouched file is evicted. Default 48h. Tests use this. */
+  trackedFileTtlMs?: number;
 };
 
 const RECENT_SESSION_LIMIT = 40;
 const ACTIVE_SESSION_WINDOW_MS = 1000 * 60 * 60 * 24 * 3;
+// N-13：原 trackedFiles Map 只增不减，8h 长跑会持续吃内存。引入 LRU + TTL：
+//   - 上限 512 条：覆盖 RECENT_SESSION_LIMIT(40) 的 10 倍，足以容纳过去几天的会话。
+//   - 48h idle TTL：与 ACTIVE_SESSION_WINDOW_MS(3 天) 同量级，让定期扫描不会反复重生已淘汰的项。
+//   - 文件消失（被 Codex 自身 GC）时主动删 Map，配合 evict 双保险。
+const DEFAULT_MAX_TRACKED_FILES = 512;
+const DEFAULT_TRACKED_FILE_TTL_MS = 48 * 60 * 60 * 1000;
 
 export class CodexDesktopAdapter {
   private readonly root: string;
   private readonly files = new Map<string, TrackedFile>();
+  private readonly maxTrackedFiles: number;
+  private readonly trackedFileTtlMs: number;
   private timer: NodeJS.Timeout | null = null;
 
   constructor(private workflows: WorkflowManager, options: CodexDesktopAdapterOptions = {}) {
     this.root = options.root ?? join(homedir(), '.codex', 'sessions');
+    this.maxTrackedFiles = Math.max(1, options.maxTrackedFiles ?? DEFAULT_MAX_TRACKED_FILES);
+    this.trackedFileTtlMs = Math.max(1000, options.trackedFileTtlMs ?? DEFAULT_TRACKED_FILE_TTL_MS);
+  }
+
+  /** Test-only: read the current tracked-file count without exposing the internal Map. */
+  trackedFileCountForTests(): number {
+    return this.files.size;
   }
 
   start() {
@@ -55,6 +75,7 @@ export class CodexDesktopAdapter {
   }
 
   private async scan() {
+    this.evictStaleTrackedFiles();
     const candidates = this.findRecentSessionFiles(RECENT_SESSION_LIMIT);
     for (const path of candidates) {
       try {
@@ -68,6 +89,30 @@ export class CodexDesktopAdapter {
         );
       }
     }
+    // consume 阶段可能新增 tracked 条目；末尾再 evict 一次，确保 LRU cap 立即生效，
+    // 避免单次 scan 就把 Map 撑过 maxTrackedFiles。
+    this.evictStaleTrackedFiles();
+  }
+
+  // N-13：扫描前先 evict —— 同时处理 TTL 过期 + 文件已被 Codex 删除两种情况，
+  // 避免 Map 长跑膨胀。LRU 上限走 lastSeenAt 排序。
+  private evictStaleTrackedFiles(): void {
+    const now = Date.now();
+    for (const [path, tracked] of this.files) {
+      if (now - tracked.lastSeenAt > this.trackedFileTtlMs) {
+        this.files.delete(path);
+        continue;
+      }
+      if (!existsSync(path)) {
+        this.files.delete(path);
+      }
+    }
+    if (this.files.size <= this.maxTrackedFiles) return;
+    const sorted = Array.from(this.files.entries()).sort(
+      (a, b) => a[1].lastSeenAt - b[1].lastSeenAt,
+    );
+    const overflow = this.files.size - this.maxTrackedFiles;
+    for (let i = 0; i < overflow; i++) this.files.delete(sorted[i][0]);
   }
 
   private findRecentSessionFiles(limit: number): string[] {
@@ -88,13 +133,17 @@ export class CodexDesktopAdapter {
 
   private async consume(path: string) {
     const size = statSync(path).size;
+    const now = Date.now();
     const tracked = this.files.get(path) ?? {
       path,
       offset: 0,
       threadId: this.threadIdFromPath(path),
+      lastSeenAt: now,
     };
     if (size < tracked.offset) tracked.offset = 0;
     if (size === tracked.offset) {
+      // 文件没新内容也要刷新 lastSeenAt，否则活跃但安静的会话会被 TTL 误杀。
+      tracked.lastSeenAt = now;
       this.files.set(path, tracked);
       return;
     }
@@ -113,6 +162,7 @@ export class CodexDesktopAdapter {
     }
 
     tracked.offset = Math.min(size, tracked.offset + consumed);
+    tracked.lastSeenAt = Date.now();
     this.files.set(path, tracked);
   }
 

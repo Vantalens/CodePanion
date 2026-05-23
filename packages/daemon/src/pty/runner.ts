@@ -15,15 +15,48 @@ import { PromptDetector } from './promptDetector.js';
 import type { WsServerEvent } from '../shared/protocol.js';
 
 export interface RunArgs {
+  sessionId?: string;
   command: string;
   args: string[];
   cwd?: string;
+  source?: string;
+  sourceId?: string;
+  windowTitle?: string;
+  workspace?: string;
+  parentThreadId?: string;
+  initialInput?: string;
+  mirrorOutput?: boolean;
+  interactiveStdin?: boolean;
 }
 
 function debug(...args: unknown[]) {
   if (process.env.CODEPANION_DEBUG === '1' || process.env.LOG_LEVEL === 'debug') {
     console.error('[codepanion-debug]', ...args);
   }
+}
+
+// N-15：CVE-2024-27980 —— Windows 上 child_process / node-pty 在生成 .cmd/.bat 时
+// 实际由 cmd.exe /c 解释，参数里如果含有 & | < > ^ " 等元字符即使被引号包裹也可能逃逸
+// 出 "..." 上下文并执行任意命令。Node ≥ 21.7 在 child_process 层默认拒绝，但 node-pty
+// 不走 child_process。这里在 PTY spawn 之前做一次显式过滤：
+//   - 仅在 Windows 且解析后的可执行文件后缀是 .cmd/.bat 时启用
+//   - 含危险元字符（含换行）的参数直接拒绝，要求上层换成 .exe 或重写参数
+//   - 含空白的参数用 "..." 包裹，避免被 cmd.exe 拆分
+const WIN_BATCH_DANGEROUS_RE = /[&|<>^"\r\n]/;
+
+export function isWindowsBatchShell(shell: string): boolean {
+  if (process.platform !== 'win32') return false;
+  return /\.(cmd|bat)$/i.test(shell);
+}
+
+export function escapeWindowsBatchArg(arg: string): string {
+  if (WIN_BATCH_DANGEROUS_RE.test(arg)) {
+    throw new Error(
+      `CodePanion 拒绝执行：参数包含 cmd.exe 元字符（& | < > ^ " 或换行），存在 .cmd/.bat 注入风险（CVE-2024-27980）：${JSON.stringify(arg)}`,
+    );
+  }
+  if (arg === '' || /\s/.test(arg)) return `"${arg}"`;
+  return arg;
 }
 
 function resolveExecutable(name: string): string {
@@ -64,21 +97,24 @@ export async function runWithPty(input: RunArgs): Promise<number> {
     process.exit(2);
   }
 
-  const session = await registerSession({
-    command: input.command,
-    args: input.args,
-    cwd: input.cwd,
-    cliPid: process.pid,
-  });
-
+  // H-2：先 try pty.spawn 再 registerSession。原顺序会在 spawn 失败时留下 daemon-side ghost session，
+  // GUI 会把它误判成"永远 running 的假任务"；现在 spawn 失败时 daemon 端尚未登记，无需清理。
   const cols = process.stdout.columns ?? 120;
   const rows = process.stdout.rows ?? 30;
   const shell = resolveExecutable(input.command);
 
+  let finalArgs: string[];
+  try {
+    finalArgs = isWindowsBatchShell(shell) ? input.args.map(escapeWindowsBatchArg) : input.args;
+  } catch (err) {
+    console.error(`[codepanion] ${(err as Error).message}`);
+    process.exit(2);
+  }
+
   let term: pty.IPty;
   try {
-    debug('pty.spawn shell=', shell, 'args=', input.args);
-    term = pty.spawn(shell, input.args, {
+    debug('pty.spawn shell=', shell, 'args=', finalArgs);
+    term = pty.spawn(shell, finalArgs, {
       name: 'xterm-256color',
       cols,
       rows,
@@ -88,6 +124,27 @@ export async function runWithPty(input: RunArgs): Promise<number> {
     debug('pty spawned pid=', term.pid);
   } catch (err) {
     console.error(`[codepanion] failed to spawn pty for ${shell}: ${(err as Error).message}`);
+    process.exit(2);
+  }
+
+  let session: Awaited<ReturnType<typeof registerSession>>;
+  try {
+    session = await registerSession({
+      id: input.sessionId,
+      command: input.command,
+      args: input.args,
+      cwd: input.cwd,
+      cliPid: process.pid,
+      source: input.source,
+      sourceId: input.sourceId,
+      windowTitle: input.windowTitle,
+      workspace: input.workspace,
+      parentThreadId: input.parentThreadId,
+    });
+  } catch (err) {
+    // registerSession 失败后，把已经起来的 PTY 强制退出，避免成为孤儿。
+    try { term.kill(); } catch {}
+    console.error(`[codepanion] failed to register session: ${(err as Error).message}`);
     process.exit(2);
   }
 
@@ -141,6 +198,17 @@ export async function runWithPty(input: RunArgs): Promise<number> {
     }
   });
 
+  if (input.initialInput) {
+    const timer = setTimeout(() => {
+      try {
+        term.write(input.initialInput!);
+      } catch (err) {
+        debug('initial input failed', (err as Error).message);
+      }
+    }, 120);
+    if (typeof timer.unref === 'function') timer.unref();
+  }
+
   // `.catch(() => {})` previously swallowed daemon-side failures whole, so a half-broken daemon
   // would silently drop prompts/output/exit without the user ever noticing. Now we route each
   // failure through `debug()` — silent in normal runs, but `CODEPANION_DEBUG=1` / `LOG_LEVEL=debug`
@@ -177,7 +245,9 @@ export async function runWithPty(input: RunArgs): Promise<number> {
   };
 
   term.onData((data) => {
-    process.stdout.write(data);
+    if (input.mirrorOutput !== false) {
+      process.stdout.write(data);
+    }
     detector.feed(data);
     // 不在每次输出时清 currentPromptOptions：spinner / 心跳输出仍处于等待用户回复阶段，
     // 清掉会让随后到来的 inject-input 命中空数组导致回复丢失。
@@ -187,10 +257,13 @@ export async function runWithPty(input: RunArgs): Promise<number> {
     else scheduleFlush();
   });
 
-  if (process.stdin.isTTY) process.stdin.setRawMode(true);
-  process.stdin.resume();
+  const interactiveStdin = input.interactiveStdin !== false;
   const onStdinData = (d: Buffer) => term.write(d.toString('utf8'));
-  process.stdin.on('data', onStdinData);
+  if (interactiveStdin) {
+    if (process.stdin.isTTY) process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.on('data', onStdinData);
+  }
 
   const onResize = () => {
     const c = process.stdout.columns ?? 120;
@@ -207,10 +280,12 @@ export async function runWithPty(input: RunArgs): Promise<number> {
       flush();
       postExit(session.id, exitCode).catch(reportClientFailure('postExit'));
       try {
-        if (process.stdin.isTTY) process.stdin.setRawMode(false);
+        if (interactiveStdin && process.stdin.isTTY) process.stdin.setRawMode(false);
       } catch {}
-      process.stdin.off('data', onStdinData);
-      process.stdin.pause();
+      if (interactiveStdin) {
+        process.stdin.off('data', onStdinData);
+        process.stdin.pause();
+      }
       process.stdout.off('resize', onResize);
       try {
         ws.close();

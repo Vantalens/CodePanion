@@ -63,6 +63,11 @@ export class WorkflowManager {
     pinned?: boolean;
     archived?: boolean;
     snoozedUntil?: number | null;
+    priority?: 'high' | 'normal' | 'low';
+    sortOrder?: number;
+    handoffStatus?: 'idle' | 'pending' | 'active' | 'returned';
+    handoffTarget?: 'generic' | 'codex' | 'claude-code' | 'opencode' | null;
+    handoffSessionId?: string | null;
   }): WorkflowThread | undefined {
     const current = this.threads.get(threadId);
     if (!current) return undefined;
@@ -297,10 +302,33 @@ function normalizeTaskState(taskState?: Partial<WorkflowTaskState> | null): Work
   const snoozedUntil = typeof taskState?.snoozedUntil === 'number' && Number.isFinite(taskState.snoozedUntil)
     ? taskState.snoozedUntil
     : null;
+  const priority = taskState?.priority === 'high' || taskState?.priority === 'low'
+    ? taskState.priority
+    : 'normal';
+  const sortOrder = typeof taskState?.sortOrder === 'number' && Number.isFinite(taskState.sortOrder)
+    ? taskState.sortOrder
+    : undefined;
+  const handoffStatus = taskState?.handoffStatus === 'pending' || taskState?.handoffStatus === 'active' || taskState?.handoffStatus === 'returned'
+    ? taskState.handoffStatus
+    : 'idle';
+  const handoffTarget = taskState?.handoffTarget === 'generic'
+    || taskState?.handoffTarget === 'codex'
+    || taskState?.handoffTarget === 'claude-code'
+    || taskState?.handoffTarget === 'opencode'
+    ? taskState.handoffTarget
+    : null;
+  const handoffSessionId = typeof taskState?.handoffSessionId === 'string' && taskState.handoffSessionId.trim().length > 0
+    ? taskState.handoffSessionId
+    : null;
   return {
     pinned: Boolean(taskState?.pinned),
     archived: Boolean(taskState?.archived),
     snoozedUntil,
+    priority,
+    sortOrder,
+    handoffStatus,
+    handoffTarget,
+    handoffSessionId,
     updatedAt: taskState?.updatedAt,
   };
 }

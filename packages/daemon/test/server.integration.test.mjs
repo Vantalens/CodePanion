@@ -31,8 +31,8 @@ function testConfig() {
   };
 }
 
-async function withServer(run) {
-  const created = createServer(testConfig(), { workflowSnapshotPath: null });
+async function withServer(run, options = {}) {
+  const created = createServer(testConfig(), { workflowSnapshotPath: null, ...options });
   const server = await created.start();
   const address = server.address();
   const port = typeof address === 'object' && address ? address.port : 0;
@@ -1262,24 +1262,326 @@ test('workflow thread task-state updates persist and broadcast thread-upsert eve
         token,
         'POST',
         `/workflow/threads/${encodeURIComponent(threadId)}/task-state`,
-        { pinned: true, archived: true, snoozedUntil: 123456789 },
+        { pinned: true, archived: true, snoozedUntil: 123456789, priority: 'high', sortOrder: 120, handoffStatus: 'pending', handoffTarget: 'codex', handoffSessionId: 'session-42' },
       );
 
       assert.equal(updated.status, 200);
       assert.equal(updated.body.taskState.pinned, true);
       assert.equal(updated.body.taskState.archived, true);
       assert.equal(updated.body.taskState.snoozedUntil, 123456789);
+      assert.equal(updated.body.taskState.priority, 'high');
+      assert.equal(updated.body.taskState.sortOrder, 120);
+      assert.equal(updated.body.taskState.handoffStatus, 'pending');
+      assert.equal(updated.body.taskState.handoffTarget, 'codex');
+      assert.equal(updated.body.taskState.handoffSessionId, 'session-42');
       assert.ok(updated.body.taskState.updatedAt > 0);
 
       const wsEvent = await threadUpdated;
       assert.equal(wsEvent.event.thread.taskState.archived, true);
       assert.equal(wsEvent.event.thread.taskState.snoozedUntil, 123456789);
+      assert.equal(wsEvent.event.thread.taskState.priority, 'high');
+      assert.equal(wsEvent.event.thread.taskState.sortOrder, 120);
+      assert.equal(wsEvent.event.thread.taskState.handoffStatus, 'pending');
+      assert.equal(wsEvent.event.thread.taskState.handoffTarget, 'codex');
+      assert.equal(wsEvent.event.thread.taskState.handoffSessionId, 'session-42');
 
       const thread = await request(port, token, 'GET', `/workflow/threads/${encodeURIComponent(threadId)}`);
       assert.equal(thread.status, 200);
       assert.equal(thread.body.threads[0].taskState.pinned, true);
       assert.equal(thread.body.threads[0].taskState.archived, true);
       assert.equal(thread.body.threads[0].taskState.snoozedUntil, 123456789);
+      assert.equal(thread.body.threads[0].taskState.priority, 'high');
+      assert.equal(thread.body.threads[0].taskState.sortOrder, 120);
+      assert.equal(thread.body.threads[0].taskState.handoffStatus, 'pending');
+      assert.equal(thread.body.threads[0].taskState.handoffTarget, 'codex');
+      assert.equal(thread.body.threads[0].taskState.handoffSessionId, 'session-42');
+    } finally {
+      await closeWs(observer.ws);
+    }
+  });
+});
+
+test('workflow handoff launch endpoint updates the origin thread and returns launch metadata', async () => {
+  const launchCalls = [];
+  await withServer(async ({ port, token }) => {
+    const sessionCreated = await request(port, token, 'POST', '/sessions', {
+      command: 'codex',
+      args: ['review'],
+      cliPid: 65434,
+      source: 'cli',
+      workspace: 'D:\\repo-a',
+    });
+    assert.equal(sessionCreated.status, 200);
+    const threadId = `session:${sessionCreated.body.id}`;
+
+    const launched = await request(
+      port,
+      token,
+      'POST',
+      `/workflow/threads/${encodeURIComponent(threadId)}/handoff`,
+      {
+        target: 'codex',
+        prompt: '请继续处理这个任务。',
+        preview: 'handoff preview',
+      },
+    );
+
+    assert.equal(launched.status, 200);
+    assert.equal(launched.body.ok, true);
+    assert.equal(launched.body.threadId, threadId);
+    assert.equal(launched.body.sessionId, 'handoff-session-1');
+    assert.equal(launched.body.target, 'codex');
+    assert.equal(launched.body.launchMode, 'tool');
+    assert.equal(launchCalls.length, 1);
+    assert.equal(launchCalls[0].originThread.id, threadId);
+    assert.equal(launchCalls[0].target, 'codex');
+    assert.equal(launchCalls[0].prompt, '请继续处理这个任务。');
+
+    const thread = await request(port, token, 'GET', `/workflow/threads/${encodeURIComponent(threadId)}`);
+    assert.equal(thread.status, 200);
+    assert.equal(thread.body.threads[0].taskState.handoffStatus, 'active');
+    assert.equal(thread.body.threads[0].taskState.handoffTarget, 'codex');
+    assert.equal(thread.body.threads[0].taskState.handoffSessionId, 'handoff-session-1');
+    assert.ok(thread.body.items.some((item) => item.title === '任务已转交'));
+  }, {
+    launchHandoffSession: async (request) => {
+      launchCalls.push(request);
+      return {
+        ok: true,
+        threadId: request.originThread.id,
+        sessionId: 'handoff-session-1',
+        target: request.target,
+        launchMode: 'tool',
+        command: 'codex',
+        args: [],
+      };
+    },
+  });
+});
+
+test('handoff child session exit returns responsibility to the parent thread', async () => {
+  await withServer(async ({ port, token }) => {
+    const observer = await openWsBuffered(`ws://127.0.0.1:${port}/ws?role=observer`, {
+      protocols: tokenSubprotocol(token),
+    });
+    const parentCreated = await request(port, token, 'POST', '/sessions', {
+      command: 'claude',
+      args: ['fix'],
+      cliPid: 65435,
+      source: 'cli',
+    });
+    assert.equal(parentCreated.status, 200);
+    const parentThreadId = `session:${parentCreated.body.id}`;
+    await request(port, token, 'POST', `/workflow/threads/${encodeURIComponent(parentThreadId)}/task-state`, {
+      handoffStatus: 'active',
+      handoffTarget: 'claude-code',
+      handoffSessionId: 'handoff-child-1',
+    });
+
+    try {
+      const returnedEvent = observer.wait((m) =>
+        m.type === 'workflow-event' &&
+        m.event?.action === 'thread-upsert' &&
+        m.event?.thread?.id === parentThreadId &&
+        m.event?.thread?.taskState?.handoffStatus === 'returned',
+      2000);
+
+      const registeredChild = await request(port, token, 'POST', '/sessions', {
+        id: 'handoff-child-1',
+        command: 'codex',
+        args: [],
+        cliPid: 65436,
+        source: 'codex',
+        windowTitle: 'Codex · parent',
+        parentThreadId,
+      });
+      assert.equal(registeredChild.status, 200);
+
+      const exited = await request(port, token, 'POST', '/sessions/handoff-child-1/exit', { exitCode: 0 });
+      assert.equal(exited.status, 200);
+
+      await returnedEvent;
+
+      const parentThread = await request(port, token, 'GET', `/workflow/threads/${encodeURIComponent(parentThreadId)}`);
+      assert.equal(parentThread.status, 200);
+      assert.equal(parentThread.body.threads[0].status, 'waiting');
+      assert.equal(parentThread.body.threads[0].taskState.handoffStatus, 'returned');
+      assert.equal(parentThread.body.threads[0].taskState.handoffSessionId, 'handoff-child-1');
+      assert.ok(parentThread.body.items.some((item) => item.title === '接力结果待审阅'));
+    } finally {
+      await closeWs(observer.ws);
+    }
+  });
+});
+
+test('failed handoff child session returns the parent thread to error state', async () => {
+  await withServer(async ({ port, token }) => {
+    const parentCreated = await request(port, token, 'POST', '/sessions', {
+      command: 'claude',
+      args: ['fix'],
+      cliPid: 65439,
+      source: 'cli',
+    });
+    assert.equal(parentCreated.status, 200);
+    const parentThreadId = `session:${parentCreated.body.id}`;
+    await request(port, token, 'POST', `/workflow/threads/${encodeURIComponent(parentThreadId)}/task-state`, {
+      handoffStatus: 'active',
+      handoffTarget: 'codex',
+      handoffSessionId: 'handoff-child-failed',
+    });
+
+    const childCreated = await request(port, token, 'POST', '/sessions', {
+      id: 'handoff-child-failed',
+      command: 'codex',
+      args: ['--continue'],
+      cliPid: 65442,
+      source: 'codex',
+      windowTitle: 'Codex · failed child',
+      parentThreadId,
+    });
+    assert.equal(childCreated.status, 200);
+
+    await request(port, token, 'POST', '/sessions/handoff-child-failed/output', {
+      chunk: 'Build failed: missing APPDATA configuration.\n',
+    });
+    const exited = await request(port, token, 'POST', '/sessions/handoff-child-failed/exit', { exitCode: 17 });
+    assert.equal(exited.status, 200);
+
+    const parentThread = await request(port, token, 'GET', `/workflow/threads/${encodeURIComponent(parentThreadId)}`);
+    assert.equal(parentThread.status, 200);
+    assert.equal(parentThread.body.threads[0].status, 'error');
+    assert.equal(parentThread.body.threads[0].taskState.handoffStatus, 'returned');
+    assert.ok(parentThread.body.items.some((item) => item.title === '转交会话异常回流'));
+    const summaryItem = parentThread.body.items.find((item) =>
+      item.threadId === parentThreadId
+      && item.kind === 'message'
+      && item.source === 'codepanion'
+      && /接力结果摘要/.test(item.content || ''),
+    );
+    assert.ok(summaryItem);
+    assert.match(summaryItem.content, /- 回流结论：失败待处理/);
+    assert.match(summaryItem.content, /- 结果：失败/);
+    assert.match(summaryItem.content, /- 人工处理：需要/);
+    assert.match(summaryItem.content, /- 问题类型：配置问题/);
+    assert.match(summaryItem.content, /- 建议重试：是/);
+    assert.match(summaryItem.content, /- 处理建议：检查 APPDATA 或相关环境变量配置后再重试/);
+    assert.match(summaryItem.content, /- 后续动作：查看失败摘要并决定是否重试/);
+  });
+});
+
+test('handoff child session exit appends a visible summary message back to the parent thread', async () => {
+  await withServer(async ({ port, token }) => {
+    const parentCreated = await request(port, token, 'POST', '/sessions', {
+      command: 'claude',
+      args: ['fix'],
+      cliPid: 65440,
+      source: 'cli',
+    });
+    assert.equal(parentCreated.status, 200);
+    const parentThreadId = `session:${parentCreated.body.id}`;
+    await request(port, token, 'POST', `/workflow/threads/${encodeURIComponent(parentThreadId)}/task-state`, {
+      handoffStatus: 'active',
+      handoffTarget: 'codex',
+      handoffSessionId: 'handoff-child-summary',
+    });
+
+    const childCreated = await request(port, token, 'POST', '/sessions', {
+      id: 'handoff-child-summary',
+      command: 'codex',
+      args: ['--continue'],
+      cliPid: 65441,
+      source: 'codex',
+      windowTitle: 'Codex · summary child',
+      parentThreadId,
+    });
+    assert.equal(childCreated.status, 200);
+
+    await request(port, token, 'POST', '/sessions/handoff-child-summary/output', {
+      chunk: 'Running tests...\n',
+    });
+    await request(port, token, 'POST', '/sessions/handoff-child-summary/output', {
+      chunk: 'Updated packages/gui/wwwroot/chat.js and scripts/package-windows.ps1.\n',
+    });
+    const exited = await request(port, token, 'POST', '/sessions/handoff-child-summary/exit', { exitCode: 0 });
+    assert.equal(exited.status, 200);
+
+    const parentThread = await request(port, token, 'GET', `/workflow/threads/${encodeURIComponent(parentThreadId)}`);
+    assert.equal(parentThread.status, 200);
+
+    const summaryItem = parentThread.body.items.find((item) =>
+      item.threadId === parentThreadId
+      && item.kind === 'message'
+      && item.source === 'codepanion'
+      && /接力结果摘要/.test(item.content || ''),
+    );
+
+    assert.ok(summaryItem, 'parent thread should receive a visible handoff summary message');
+    assert.match(summaryItem.content, /- 工具：Codex/);
+    assert.match(summaryItem.content, /- 会话：Codex · summary child/);
+    assert.match(summaryItem.content, /- 回流结论：待审阅/);
+    assert.match(summaryItem.content, /- 结果：成功/);
+    assert.match(summaryItem.content, /- 人工处理：建议/);
+    assert.match(summaryItem.content, /- 退出码：0/);
+    assert.match(summaryItem.content, /- 建议重试：否/);
+    assert.match(summaryItem.content, /- 处理建议：先审阅涉及文件与最近进展，再决定是否继续处理/);
+    assert.match(summaryItem.content, /- 后续动作：审阅接力结果并决定下一步/);
+    assert.match(summaryItem.content, /## 涉及文件/);
+    assert.match(summaryItem.content, /packages\/gui\/wwwroot\/chat\.js/);
+    assert.match(summaryItem.content, /scripts\/package-windows\.ps1/);
+    assert.match(summaryItem.content, /## 最近进展/);
+    assert.match(summaryItem.content, /Updated packages\/gui\/wwwroot\/chat\.js and scripts\/package-windows\.ps1/);
+  });
+});
+
+test('snoozed workflow task returns to the active queue and broadcasts a reminder when due', async () => {
+  await withServer(async ({ port, token }) => {
+    const observer = await openWsBuffered(`ws://127.0.0.1:${port}/ws?role=observer`, {
+      protocols: tokenSubprotocol(token),
+    });
+    const sessionCreated = await request(port, token, 'POST', '/sessions', {
+      command: 'codex',
+      args: ['review'],
+      cliPid: 65433,
+      source: 'cli',
+    });
+    assert.equal(sessionCreated.status, 200);
+    const threadId = `session:${sessionCreated.body.id}`;
+    const dueAt = Date.now() + 80;
+
+    try {
+      const reminderEvent = observer.wait((m) =>
+        m.type === 'notification' &&
+        m.data?.source === 'codepanion' &&
+        m.data?.threadId === threadId &&
+        /稍后任务/.test(m.data?.title || ''),
+      2000);
+      const unsnoozedThread = observer.wait((m) =>
+        m.type === 'workflow-event' &&
+        m.event?.action === 'thread-upsert' &&
+        m.event?.thread?.id === threadId &&
+        (m.event?.thread?.taskState?.snoozedUntil ?? null) === null,
+      2000);
+
+      const updated = await request(
+        port,
+        token,
+        'POST',
+        `/workflow/threads/${encodeURIComponent(threadId)}/task-state`,
+        { snoozedUntil: dueAt },
+      );
+      assert.equal(updated.status, 200);
+      assert.equal(updated.body.taskState.snoozedUntil, dueAt);
+
+      const reminder = await reminderEvent;
+      assert.match(reminder.data.title, /稍后任务/);
+      assert.equal(reminder.data.threadId, threadId);
+
+      const wsEvent = await unsnoozedThread;
+      assert.equal(wsEvent.event.thread.taskState.snoozedUntil, null);
+
+      const thread = await request(port, token, 'GET', `/workflow/threads/${encodeURIComponent(threadId)}`);
+      assert.equal(thread.status, 200);
+      assert.equal(thread.body.threads[0].taskState.snoozedUntil, null);
     } finally {
       await closeWs(observer.ws);
     }

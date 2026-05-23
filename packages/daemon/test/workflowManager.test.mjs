@@ -261,7 +261,7 @@ test('WorkflowManager debounces async snapshot writes and flushes on demand', as
   }
 });
 
-test('WorkflowManager updates and persists task-state metadata', () => {
+test('WorkflowManager updates and persists task-state metadata', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'codepanion-workflow-'));
   const snapshotPath = join(dir, 'workflow-snapshot.json');
   try {
@@ -279,19 +279,35 @@ test('WorkflowManager updates and persists task-state metadata', () => {
       pinned: true,
       archived: true,
       snoozedUntil: 123456789,
+      priority: 'high',
+      sortOrder: 120,
+      handoffStatus: 'pending',
+      handoffTarget: 'codex',
+      handoffSessionId: 'session-42',
     });
     assert.ok(updated);
     assert.equal(updated.taskState.pinned, true);
     assert.equal(updated.taskState.archived, true);
     assert.equal(updated.taskState.snoozedUntil, 123456789);
+    assert.equal(updated.taskState.priority, 'high');
+    assert.equal(updated.taskState.sortOrder, 120);
+    assert.equal(updated.taskState.handoffStatus, 'pending');
+    assert.equal(updated.taskState.handoffTarget, 'codex');
+    assert.equal(updated.taskState.handoffSessionId, 'session-42');
     assert.ok(updated.taskState.updatedAt > 0);
 
+    await manager.flushSnapshot();
     const restored = new WorkflowManager({ snapshotPath, snapshotDebounceMs: 0 });
     const snapshot = restored.threadSnapshot('thread:task-state');
     assert.ok(snapshot);
     assert.equal(snapshot.threads[0].taskState.pinned, true);
     assert.equal(snapshot.threads[0].taskState.archived, true);
     assert.equal(snapshot.threads[0].taskState.snoozedUntil, 123456789);
+    assert.equal(snapshot.threads[0].taskState.priority, 'high');
+    assert.equal(snapshot.threads[0].taskState.sortOrder, 120);
+    assert.equal(snapshot.threads[0].taskState.handoffStatus, 'pending');
+    assert.equal(snapshot.threads[0].taskState.handoffTarget, 'codex');
+    assert.equal(snapshot.threads[0].taskState.handoffSessionId, 'session-42');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
