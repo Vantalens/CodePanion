@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -91,4 +91,21 @@ test('template parameter parsers reject invalid names', () => {
   assert.throws(() => parseTemplateParams(['bad name=x']), /Invalid/);
   assert.throws(() => parseTemplateValues(['bad name=x']), /invalid parameter assignment/);
   assert.deepEqual(parseTemplateValues(['target=a=b']), { target: 'a=b' });
+});
+
+test('WorkflowTemplateManager 遇到损坏 JSON 时隔离文件并返回空 store（N-9）', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'codepanion-templates-broken-'));
+  try {
+    const target = join(dir, 'workflow-templates.json');
+    writeFileSync(target, '{not-json', 'utf8');
+    const manager = new WorkflowTemplateManager(target);
+    assert.deepEqual(manager.list(), [], '损坏模板文件应被替换为空列表');
+    const entries = readdirSync(dir);
+    assert.ok(
+      entries.some((name) => name.startsWith('workflow-templates.json.broken-')),
+      `应生成隔离副本，目录内容：${entries.join(',')}`,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

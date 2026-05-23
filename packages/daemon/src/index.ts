@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { bootDaemon } from './daemon/boot.js';
 import { runCli } from './cli/index.js';
+import { runHandoffRunner } from './pty/handoffRunner.js';
 import { runWithPty } from './pty/runner.js';
 
 async function main() {
@@ -8,6 +9,16 @@ async function main() {
   if (argv.includes('--daemon')) {
     await bootDaemon();
     return;
+  }
+
+  if (argv[0] === '__handoff-runner') {
+    const configPath = argv[1];
+    if (!configPath) {
+      console.error('usage: codepanion __handoff-runner <config-path>');
+      process.exit(2);
+    }
+    const exitCode = await runHandoffRunner(configPath);
+    process.exit(exitCode);
   }
 
   // Special-case: `codepanion run -- <command> [args...]`

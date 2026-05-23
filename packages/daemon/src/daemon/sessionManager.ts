@@ -37,6 +37,7 @@ export class SessionManager {
   }
 
   register(input: {
+    id?: string;
     command: string;
     args: string[];
     cwd?: string;
@@ -45,8 +46,9 @@ export class SessionManager {
     sourceId?: string;
     windowTitle?: string;
     workspace?: string;
+    parentThreadId?: string;
   }): SessionInfo {
-    const id = randomUUID();
+    const id = input.id ?? randomUUID();
     const rec: SessionRecord = {
       id,
       command: input.command,
@@ -56,6 +58,7 @@ export class SessionManager {
       sourceId: input.sourceId,
       windowTitle: input.windowTitle,
       workspace: input.workspace,
+      parentThreadId: input.parentThreadId,
       cliPid: input.cliPid,
       startedAt: Date.now(),
       status: 'running',

@@ -60,8 +60,8 @@ namespace CodePanion.Gui.Services
 
     public class FocusAssistDetector
     {
-        // Windows 10/11 Focus Assist 状态检测
-        // 使用 WinRT API 检测免打扰模式
+        // N-21：旧实现读取的注册表路径不再反映真实状态（QuietHours 子键内容已变），
+        // 改用 Shell API SHQueryUserNotificationState，覆盖 Focus Assist、专注模式与全屏 D3D。
 
         [DllImport("user32.dll")]
         private static extern IntPtr GetForegroundWindow();
@@ -69,39 +69,55 @@ namespace CodePanion.Gui.Services
         [DllImport("user32.dll")]
         private static extern int GetWindowThreadProcessId(IntPtr hWnd, out int lpdwProcessId);
 
+        [DllImport("shell32.dll", SetLastError = false)]
+        private static extern int SHQueryUserNotificationState(out QueryUserNotificationState state);
+
+        private enum QueryUserNotificationState
+        {
+            QUNS_NOT_PRESENT = 1,
+            QUNS_BUSY = 2,
+            QUNS_RUNNING_D3D_FULL_SCREEN = 3,
+            QUNS_PRESENTATION_MODE = 4,
+            QUNS_ACCEPTS_NOTIFICATIONS = 5,
+            QUNS_QUIET_TIME = 6,
+            QUNS_APP = 7,
+        }
+
         public enum FocusAssistState
         {
-            Off,           // 关闭
-            PriorityOnly,  // 仅优先级
-            AlarmsOnly     // 仅闹钟
+            Off,           // 关闭：默认接受通知
+            PriorityOnly,  // 仅优先级（含 Busy / 演示模式 / D3D 全屏）
+            AlarmsOnly     // 仅闹钟（Windows Quiet Hours）
         }
 
         public static FocusAssistState GetCurrentState()
         {
             try
             {
-                // 尝试通过注册表读取 Focus Assist 状态
-                using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
-                    @"Software\Microsoft\Windows\CurrentVersion\CloudStore\Store\DefaultAccount\Current\default$windows.data.notifications.quiethourssettings\windows.data.notifications.quiethourssettings"))
+                if (SHQueryUserNotificationState(out var state) != 0)
                 {
-                    if (key != null)
-                    {
-                        var data = key.GetValue("Data") as byte[];
-                        if (data != null && data.Length > 0)
-                        {
-                            // 简化的状态检测
-                            // 实际的字节解析可能需要更复杂的逻辑
-                            return FocusAssistState.Off;
-                        }
-                    }
+                    return FocusAssistState.Off;
+                }
+
+                switch (state)
+                {
+                    case QueryUserNotificationState.QUNS_QUIET_TIME:
+                        return FocusAssistState.AlarmsOnly;
+                    case QueryUserNotificationState.QUNS_BUSY:
+                    case QueryUserNotificationState.QUNS_RUNNING_D3D_FULL_SCREEN:
+                    case QueryUserNotificationState.QUNS_PRESENTATION_MODE:
+                        return FocusAssistState.PriorityOnly;
+                    case QueryUserNotificationState.QUNS_ACCEPTS_NOTIFICATIONS:
+                    case QueryUserNotificationState.QUNS_APP:
+                    case QueryUserNotificationState.QUNS_NOT_PRESENT:
+                    default:
+                        return FocusAssistState.Off;
                 }
             }
             catch
             {
-                // 如果无法检测，假设为关闭状态
+                return FocusAssistState.Off;
             }
-
-            return FocusAssistState.Off;
         }
 
         public static bool IsInFocusAssistMode()

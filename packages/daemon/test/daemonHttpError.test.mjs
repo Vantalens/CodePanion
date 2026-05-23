@@ -16,8 +16,9 @@ test('DaemonHttpError carries structured fields and remains an Error subclass', 
   assert.equal(err.path, '/sessions/abc/prompt');
   assert.equal(err.status, 400);
   assert.equal(err.body, 'invalid payload');
-  assert.match(err.message, /POST \/sessions\/abc\/prompt failed: 400/);
-  assert.match(err.message, /invalid payload/);
+  // N-10：message 只含路由信息，不拼 body，避免被 pino / gui.log 二次落盘。
+  assert.equal(err.message, 'POST /sessions/abc/prompt failed: 400');
+  assert.ok(!err.message.includes('invalid payload'), 'message 不应直接暴露 body');
 });
 
 test('DaemonHttpError body is truncated to 4096 chars to avoid bloating logs', () => {
@@ -26,11 +27,11 @@ test('DaemonHttpError body is truncated to 4096 chars to avoid bloating logs', (
   assert.equal(err.body.length, 4096);
 });
 
-test('DaemonHttpError message snippet caps at 200 chars to keep stderr tidy', () => {
+test('DaemonHttpError message 不随 body 增长（N-10）', () => {
   const huge = 'y'.repeat(1000);
   const err = new DaemonHttpError('GET', '/foo', 500, huge);
-  // 200 字符 snippet + 前缀部分；总长不超过 ~300 即可。
-  assert.ok(err.message.length < 300, `message too long: ${err.message.length}`);
+  // message 是定长模板，与 body 大小无关。
+  assert.equal(err.message, 'GET /foo failed: 500');
 });
 
 test('maskValue preserves DaemonHttpError fields so pino can serialize them', () => {

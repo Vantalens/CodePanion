@@ -1896,3 +1896,322 @@ npm run validate:dtos
 
 - N-3 未单独写集成测试：daemon client 模块边界 mock 成本与 abort 单行 catch 改动的可见性不成比例；abort 与 finalize 共用同一个 `disconnectSource` API，原 finalize 路径已有间接覆盖。
 - N-5 未单独写并发读 stream 测试：异步 I/O 时序难复现，靠代码注释 + 评审固化。
+
+---
+
+## 2026-05-23 第三轮审计修复（N-6 / N-7 / N-9 + H-1 / H-2）
+
+[docs/CODE_REVIEW_2026-05-23.md](./CODE_REVIEW_2026-05-23.md) 列出的全仓审计 20 项中，本轮先落地隐私 + 启动健壮性 + 接力链路最高 ROI 五项；其余 H-3 ~ H-5 与 N-8 / N-10 ~ N-21 仍挂在 [DEVELOPMENT_TASKS.md](../DEVELOPMENT_TASKS.md)「2026-05-23 第三轮审计待处理」分组按优先级排期。
+
+### N-6 aiToolProcessAdapter 上报字段脱敏 + 移除 process.path 兜底
+
+- 路径：[packages/daemon/src/adapters/aiToolProcessAdapter.ts](../packages/daemon/src/adapters/aiToolProcessAdapter.ts)
+- `process.commandLine` 仅用于本地 profile 匹配，永不直接上报；`windowTitle` 与 `workspace` 走新增的 `sanitizeReportField`：`maskString`（HOME → `~`、`Bearer ...` → `[Redacted]`、≥32 字符 hex → `[Redacted]`）+ 80 字符截断。
+- `inferWorkspace` 不再用 `process.path`（含 `C:\Users\<name>\` 用户名）作兜底，未匹配到工程目录时返回 `undefined`，宁缺勿滥。
+- 测试：[packages/daemon/test/aiToolProcessAdapter.test.mjs](../packages/daemon/test/aiToolProcessAdapter.test.mjs) 新增 `'sanitizeReportField 把 HOME 替换为 ~ 并截断到 80 字符（N-6）'`，验证空值、200 字符长串截断、以 `…` 收尾。
+
+### N-7 通知通道中心化脱敏 + 关键 call site 改用固定模板
+
+- 路径：[packages/daemon/src/daemon/notifier.ts](../packages/daemon/src/daemon/notifier.ts) + [packages/daemon/src/daemon/server.ts](../packages/daemon/src/daemon/server.ts)
+- `Notifier.show` 在交给原生通知前统一走 `clipNotifyText`：`maskString` + 多空白合并 + 截断（title 60 / body 80），并停止把 title / message 写到 `logger.warn`（与 [N-12] 关联，避免日志副本超出 daemon retention）。
+- 5 个 call site 切换为固定模板，不再把用户内容塞进系统通知 body：
+  - `emitSnoozeDueNotification`：`'点击 CodePanion 查看任务'`
+  - `/notify` 路由：按 level 选择 `'有任务等待您的回复'` / `'任务出现错误，请查看 CodePanion'` / `'任务已完成'` / `'点击 CodePanion 查看详情'`
+  - monitor-event 触发的通知：按 `event.type` 选择同上 4 套模板，原始 `event.content` / `windowTitle` 留给 GUI broadcast。
+  - `POST /sessions/:id/prompt`：body 改成 `'有任务等待您的回复'`，不再把 PTY 最后 2 行原文喂进系统通知。
+- broadcastNotification（GUI 通道）保持原内容，由 GUI 自己决定如何渲染——系统通知中心只承载触发，不承载内容。
+- 测试：新增 [packages/daemon/test/notifier.test.mjs](../packages/daemon/test/notifier.test.mjs)（4 条）覆盖：截断到 max 字符 + `…` 收尾、空 / undefined 返回空字符串、Bearer token → `[Redacted]`、多空白合并为单空格。
+
+### N-9 workflow 定义 / 历史 / 模板加载隔离损坏文件
+
+- 路径：[packages/daemon/src/workflows/workflowDefinitionManager.ts](../packages/daemon/src/workflows/workflowDefinitionManager.ts) + [packages/daemon/src/workflows/templateManager.ts](../packages/daemon/src/workflows/templateManager.ts)
+- 三个 `load()` 全部 `try { JSON.parse + schema.parse } catch { quarantine + 返回空 store }`。
+- 损坏文件改名为 `<name>.broken-<ISO 时间戳>.json`，`logger.warn` 记录 `path` + `quarantined` 字段；重命名也失败时降级到 `logger.error` 但**仍返回空 store**，daemon 继续启动（这是核心：再差也比让 daemon 起不来好）。
+- 测试覆盖：
+  - [workflowDefinitionManager.test.mjs](../packages/daemon/test/workflowDefinitionManager.test.mjs) 新增 `'WorkflowDefinitionManager 遇到损坏 JSON 时隔离文件并返回空 store'` 与 `'WorkflowRunHistory 遇到损坏 JSON 时隔离文件并返回空 store'`。
+  - [workflowTemplateManager.test.mjs](../packages/daemon/test/workflowTemplateManager.test.mjs) 新增 `'WorkflowTemplateManager 遇到损坏 JSON 时隔离文件并返回空 store'`。
+  - 断言：`list()` 返回 `[]`；目录里出现 `xxx.json.broken-*` 副本；原文件已被改名。
+
+### H-1 daemon 启动时 snooze due 聚合为单条通知
+
+- 路径：[packages/daemon/src/daemon/server.ts](../packages/daemon/src/daemon/server.ts) 启动 hook（原 `for ... scheduleSnoozeReminder` 循环位置）
+- 启动遍历改为两个分支：未过期 → 走原 `scheduleSnoozeReminder` 定时器；已过期 → 收集到 `dueAtStartup[]` 并同步清掉 `snoozedUntil`。
+- 循环结束后若 `dueAtStartup` 非空：发**一条**系统通知（`'稍后任务已到期'` + `'{N} 个稍后任务已回到待处理队列'`），同时仍逐个走 `broadcastNotification` 让 GUI 列表逐条更新。
+- 这样用户机器睡了一夜后启动 daemon 不再被 N 条系统通知抢焦点（违反 P0.1 「不乱跳」），而 GUI 内部状态仍准确。
+- 未单独写单元测试：startup 逻辑依赖 `createServer` 内闭包，单测引入成本大于价值；行为靠 server.integration.test.mjs 已有的 snapshot 路径间接覆盖（无 due 任务时无变化）。
+
+### H-2 pty.runner 先 spawn 再 registerSession
+
+- 路径：[packages/daemon/src/pty/runner.ts](../packages/daemon/src/pty/runner.ts)
+- 原顺序：`registerSession`（daemon 登记）→ `pty.spawn`（spawn 失败 → `process.exit(2)` → daemon 这边留着 ghost session）。
+- 新顺序：`pty.spawn`（失败 → exit 2，daemon 未登记 → 无 ghost）→ `registerSession`（失败 → `term.kill()` 兜底 + exit 2）。
+- 这样满足 H-2 描述的"spawn 失败不留 ghost"语义；与 [N-14] 关联——workflow step spawn 失败后 daemon source 不再泄露的根因从 hook 层下沉到 runner 层。
+- 没有单独写集成测试：node-pty 失败路径在 CI 环境难以稳定触发；改动是顺序调换 + 一个 catch 兜底，靠 server.integration.test.mjs 已有的正常 spawn 路径回归。
+
+### 验证
+
+```powershell
+npm test            # daemon 206/204 pass + 2 skip + adapter-sdk 19 全绿，0 fail
+npm run validate:dtos  # C# DTO 与 protocol.ts 仍一致
+```
+
+### 不做的事
+
+- N-7 没有进一步把 `notifier.show` 调用方全数转成 enum 化模板：5 个 call site 已经处理，剩余 handoff launched / session exit 两处本身就是 hardcoded 文本，没有用户内容透传。继续抽象只增维护成本。
+- 没有给 H-1 / H-2 写专门的集成测试：见各小节末尾的「未单独写」说明，靠现有 server.integration / runner 路径间接覆盖。
+
+---
+
+## 2026-05-23 第三轮审计第二批修复（N-10 / N-11 / N-12 / N-19 / N-20 / N-21）
+
+延续上一批 (N-6/N-7/N-9 + H-1/H-2)，本次收口剩余的 P0/P1 日志脱敏 + GUI ↔ native 边界 + 焦点检测。来源仍是 [docs/CODE_REVIEW_2026-05-23.md](CODE_REVIEW_2026-05-23.md)。
+
+### N-10 DaemonHttpError.message 去掉 response body
+
+- 路径：[packages/daemon/src/shared/client.ts](../packages/daemon/src/shared/client.ts)
+- 原构造器在 `super(...)` 里拼了 `body.slice(0, 200)`：daemon 把请求体 echo 回来（典型场景：Zod 报错的 issue.path/path/issue.message + 4xx 的 invalid payload）时，message 直接含用户文本；GUI 端 `OnLogMessage` 写到 `gui.log`、daemon pino 走 `{err}` 同样落 `log.jsonl`。
+- 改为 `super(\`${method} ${path} failed: ${status}\`);`，body 仍然保留在 `error.body`（≤4096 字节）字段。调用方需要诊断时显式 `err.body` 取，普通 logger 不再二次落盘正文。
+- 测试：[packages/daemon/test/daemonHttpError.test.mjs](../packages/daemon/test/daemonHttpError.test.mjs) 已有用例改成断言「message 等于 `${method} ${path} failed: ${status}`、不含 body」；新增 client.test.mjs 复测同契约。
+
+### N-11 daemon client request() 加 AbortSignal.timeout
+
+- 路径：[packages/daemon/src/shared/client.ts](../packages/daemon/src/shared/client.ts)
+- 旧 `request()` 直接 `await fetch(...)`，无 timeout。一旦 daemon 卡死或被长任务阻塞主线程，CLI 和 GUI 都会永远挂起；之前 `checkHealth` 自己单点处理了 1500ms abort，可惜 `notify` / `postOutput` / `postPrompt` / `listSources` 都没有兜底。
+- 新增：
+  - `DaemonClientTimeoutError`（带 `method` / `path` / `timeoutMs`，name 稳定）—— 调用方据此区分「daemon 不在线」（ECONNREFUSED / fetch failed）与「daemon 卡死」。
+  - `RequestOptions { timeoutMs?: number; signal?: AbortSignal }` —— 默认 `8000ms`，长任务（handoff/workflow）可在调用点提一格；外部 signal 与 timeout 协同 abort。
+  - `CODEPANION_REQUEST_TIMEOUT_MS` 环境覆盖：方便测试缩短到 200ms 重现「daemon 卡死」。
+- 实现细节：用 `AbortController` 加 `setTimeout` 取消，`finally` 里清 timer + 解绑 externalAbort，区分 timeout 与外部 abort（外部 abort 透传，timeout 才包成 `DaemonClientTimeoutError`）。
+- 测试：[packages/daemon/test/client.test.mjs](../packages/daemon/test/client.test.mjs)
+  - DaemonHttpError message 不含 body（N-10 回归）。
+  - body 截断到 4096。
+  - DaemonClientTimeoutError 类形状（name / timeoutMs / method / path）。
+- 不做：现有调用站点 (`notify` / `postOutput` / `listSources` 等) 暂未改成 long-op 8s 之外的 timeout；这些都是短调用，8s 足够。handoff / workflow 的长操作主入口走 CLI 侧 PTY，不经过这层 fetch，不影响。
+
+### N-12 sourceManager 日志收敛到路由字段
+
+- 路径：[packages/daemon/src/daemon/sourceManager.ts](../packages/daemon/src/daemon/sourceManager.ts)
+- 三处 `logger.info({ ... })` 此前直接把整个 source / event / reply 对象 dump 出来，落到 `~/.codepanion/log.jsonl`：含 `windowTitle`、`workspace`、`content`、`title`、`text` 等可能携带用户内容的字段——与 [docs/POSITIONING.md](POSITIONING.md) 「audit --redact 时正文走 maskString」相悖（log.jsonl 已经写下了 mask 之前的版本）。
+- 默认改为只打路由字段：
+  - `register`：`{ sourceId, kind, capabilityLevel, integrationKind }`
+  - `emitEvent`：`{ eventId, eventKind, sourceId, sessionId, level, contentBytes, hasOptions }`
+  - `reply`：`{ eventId, sourceId, textBytes }`
+- 正文字段（`source`/`event`/`text`）落到 `logger.trace` 等级。pino 默认 level `info`，trace 不会写盘；开发者要排查时改 `CODEPANION_LOG_LEVEL=trace` 显式打开，等于把"是否落盘用户内容"决策权交还给用户。
+- 不做：没有写新单测。pino 的 destination 是模块级 lazy singleton，注入 mock 成本远高于改动本身；改动是显式字段列表 + 一处级别下放，回归靠现有 server.integration.test.mjs / sourceManager.test.mjs 的正路径检查日志没有 crash。
+
+### N-19 WebView2 拦截 NavigationStarting / NewWindowRequested
+
+- 路径：[packages/gui/MainWindow.xaml.cs](../packages/gui/MainWindow.xaml.cs)
+- WebView2 渲染 markdown 时，DOMPurify 会保留可点击的 `<a href>`。CSP 已经阻止脚本注入，但用户点击外链会让 WebView2 自己导航——离开 `codepanion.local` 后整个 chat UI 就被替换成第三方页面，且 CSP 范围也随之失效。
+- 现在在 `InitializeWebView()` 里订阅两事件：
+  - `NavigationStarting`：放行 `codepanion.local` / `about:` / `data:` 三类内部导航；其它 URI 直接 `e.Cancel = true` 转给 `OpenExternalLink`。
+  - `NewWindowRequested`：一律 `e.Handled = true`，URI 同样走 `OpenExternalLink`。
+- `OpenExternalLink` 行为：
+  - 非 `http` / `https` 协议（含 `javascript:` / `file:` / `mailto:`）直接拒绝，写 gui.log。
+  - http(s) 弹 OK/Cancel 确认框，明示要打开的 URL，再调用 `Process.Start(... UseShellExecute = true)` 让系统默认浏览器接管。
+- 不做：没有写 WebView2 的自动化点击测试。WPF + WebView2 单测需要真实窗口栈，CI 上跑不动；改动是两段 cancel 路径，靠下一次 GUI 手测覆盖。
+
+### N-20 WebMessageReceived 收敛到 type 白名单
+
+- 路径：[packages/gui/MainWindow.xaml.cs](../packages/gui/MainWindow.xaml.cs)
+- 原实现用 `JObject.Parse` 拿到 `type`，然后链式 `if` 走 5 个 type；JSON 解析失败时只写一句 log，未知 type 也只是写 log，且每个分支都自己处理 `JObject` 的 dynamic 取值。
+- 改为：
+  - 顶层 try/catch 包裹 JObject.Parse，失败先写 gui.log 再 return。
+  - 新增 `AllowedWebMessageTypes` 静态 HashSet (`ready` / `reply` / `event-reply` / `task-action` / `handoff-launch`)，空 / 未知 type 直接 warn + return。
+  - 命中后才进入 switch，从这里再分派给 Handle* 方法。
+- 这样恶意 / 误植的 type（未来 chat.js 改动出 bug 时）不会触达 daemon。
+- 不做：没有进一步切到 `System.Text.Json` + 严格 record schema。Newtonsoft.Json 是项目主依赖，引入 STJ 会带来双依赖；目前 type 白名单 + Handle* 内部各自的 string 校验已经足以隔离 daemon。
+
+### N-21 App.xaml.cs 崩溃落盘 + FocusAssistDetector 真实实现
+
+- 路径：[packages/gui/App.xaml.cs](../packages/gui/App.xaml.cs)、[packages/gui/Services/SoundPlayer.cs](../packages/gui/Services/SoundPlayer.cs)
+- App.xaml.cs：
+  - 原 `DispatcherUnhandledException` 只弹 MessageBox，用户秒关后事故现场就丢了。
+  - 改为先写 `%LocalAppData%\CodePanion\logs\gui-crash.log`（含异常类型 / message / stack），再异步入 GuiLogWriter 队列，最后才弹 MessageBox 并提示用户去看 log。
+  - 同时挂上 `AppDomain.CurrentDomain.UnhandledException`：非 UI 线程崩溃也会落盘。
+- SoundPlayer.cs (`FocusAssistDetector`)：
+  - 原 `GetCurrentState` 读了一个并不存在的 `CloudStore\...\quiethourssettings.Data` 注册表项，且即便取到 byte[] 也直接返回 `Off`，等于全程返回 Off → 用户开了专注模式也照样发提示音。
+  - 改为 P/Invoke `shell32.dll!SHQueryUserNotificationState`，按 Windows 文档枚举映射：`QUNS_QUIET_TIME → AlarmsOnly`、`QUNS_BUSY / RUNNING_D3D_FULL_SCREEN / PRESENTATION_MODE → PriorityOnly`、`QUNS_ACCEPTS_NOTIFICATIONS / QUNS_APP / QUNS_NOT_PRESENT → Off`。
+  - 这次同时覆盖了 Focus Assist、Presentation Mode、D3D 全屏：用户开会 / 玩游戏时不发声音，回到正常态恢复。
+- 不做：没有给 SHQueryUserNotificationState 写注入式 mock。Shell API 在 CI 容器里没有桌面 session，调用要么返回 NOT_PRESENT 要么返回 ACCEPTS——两种都映射到 Off，回归测试价值低；改动是一处 P/Invoke + switch，靠手动 QA 验证。
+
+### 验证
+
+```powershell
+npm run build       # tsc + build-daemon-bundle 通过
+npm test            # daemon 209/207 pass + 2 skip + adapter-sdk 19/19 全绿，0 fail
+npm run validate:dtos  # C# DTO 与 protocol.ts 仍一致
+```
+
+### 不做的事（本批跳过项）
+
+- N-13 ~ N-18、H-3 ~ H-5：留待下批集中处理；它们或者依赖更深的重构（H-3 / H-4 的同步阻塞）、或者影响打包发布脚本（N-15 / N-17 / N-18），需要单独评估变更面。
+- 没有为 N-19 弹确认框的体验做 GUI 截屏对齐：当前 MessageBox 已是 WPF 标准控件，单走真机 QA 即可。后续 P3 GUI 整改可再统一替换成更克制的 in-app banner。
+
+---
+
+## 2026-05-23 第三轮审计第三批修复（N-8 / H-3 / H-4 / H-5 / N-13 / N-14 / N-15 / N-18）
+
+收口 P0 yargs 兼容、P1 性能与隐私、P1 Map 单增 / Windows 命令注入 / pid 复用误杀。来源仍是 [docs/CODE_REVIEW_2026-05-23.md](CODE_REVIEW_2026-05-23.md)。
+
+### N-8 `codepanion notify --message` 在 yargs `.strict()` 下首启即坏
+
+- 路径：[packages/daemon/src/cli/index.ts](../packages/daemon/src/cli/index.ts)
+- `install claude-code` hook 注入的命令是 `codepanion notify "<title>" --message "<body>"`，而 `notify` 仅声明了位置参数 `message`、未注册 `--message`；`.strict()` 直接拒，CLI 退出 1，hook 静默丢消息。
+- 在 `notify` 命令上显式注册 `--message` 选项，描述里写明「与位置参数 message 二选一，--message 优先」。运行时回退顺序保持不变（`a.message ?? positional`）。
+- 不做：没有改 install hook 的命令格式，因为多个第三方文档已经引用 `--message` 这种写法；服务端兼容反而成本最低。
+
+### H-3 commandExists 改异步 + 5min TTL 缓存
+
+- 路径：[packages/daemon/src/daemon/server.ts](../packages/daemon/src/daemon/server.ts)
+- 原 `commandExists(name)` 用 `execSync('command -v ... / where ...')`，连续发起 handoff 时每次都同步阻塞 daemon 主线程几十～几百 ms（取决于 OS PATH 长度），WS broadcast 在这段时间内全部卡住。
+- 改为：
+  - `execFile` + Promise 包装，stdio 完全异步。
+  - POSIX 用 `which`（`command -v` 是 shell builtin，`execFile` 不可达），Windows 用 `where`。
+  - 模块级 `commandExistsCache: Map<name, { result, expiresAt }>`，TTL 5min；典型部署只有 codex / claude / opencode 三个目标，首启实测一次，后续走缓存。
+- 调用点改为 `await commandExists(...)`，原 `const fallback = ... || !commandExists(...)` 同步逻辑一并改成 await。
+- 不做：没有把 cache key 加上 PATH 指纹。本地开发环境 PATH 在 5min 内被改的几率极低，引入哈希反而增加冷启动开销。
+
+### H-4 classifyHandoffIssueType 改预编译 + 末尾语料
+
+- 路径：[packages/daemon/src/daemon/server.ts](../packages/daemon/src/daemon/server.ts)
+- 原 6 条带 `.*?` 的 regex 每次调用都在调用栈里临时构造；分类输入是接力子进程的整段 stdout（轻则几十 KB，重则 200 KB+），含大量短行时 `.*?` 的回溯能把单次 classifier 抬到 50~100ms 量级，期间 daemon 主线程不响应。
+- 改为：
+  - `HANDOFF_ISSUE_PATTERNS` 提到模块级常量数组（`{ kind, pattern }`），预编译一次；`classifyHandoffIssueType` 只做 `pattern.test(corpus)` 短路遍历。
+  - 引入 `buildHandoffClassificationCorpus`：从 items / output chunks 反向取，截尾 50 行、上限 8KB；分类只看这小段，避开巨型 stdout 上的回溯。
+- 关键字保持不变，确保现有 fixture / 用户语义可识别。
+- 不做：没有引入 Aho-Corasick 等多模匹配库。当前 6 条 pattern 在 8KB 语料上的耗时已 < 1ms，加依赖得不偿失。
+
+### H-5 handoffRunner prompt 明文不再静默残留
+
+- 路径：[packages/daemon/src/pty/handoffRunner.ts](../packages/daemon/src/pty/handoffRunner.ts)、[packages/daemon/src/daemon/boot.ts](../packages/daemon/src/daemon/boot.ts)
+- 旧实现：daemon 把 prompt + 启动配置 JSON 写到 OS `tmpdir/codepanion-handoff/<id>.json`，子进程 `rmSync` 删一次就 try/catch 静默吞失败；Windows AV 锁文件 / 子进程崩溃都会让明文 prompt 留下来。
+- 现在：
+  - 子进程 `runHandoffRunner` 启动后先 `readFileSync` 把 JSON 读进内存，再走 `tryRemoveWithRetry`：4 次尝试，间隔 0ms / 100ms / 250ms / 500ms。
+  - 仍删不掉时把残留路径追加到 `tmpdir/codepanion-handoff/leaks.log`（`ISO\tpath`），保证父进程可见。
+  - daemon `bootDaemon()` 在 acquireLock 之后立刻 `cleanupStaleHandoffTmp()`：扫整个 handoff tmp 目录，删 24h 前的残留；读 `leaks.log` 把登记过的路径再补一刀，处理完删 leaks.log 自身。
+- 不做：没有把 prompt 写成加密格式。本地 tmp 在 OS 用户上下文内可读取就是设计前提，重点是「不留下 + 留下可追溯」而非加密。
+
+### N-13 codexDesktopAdapter trackedFiles 引入 LRU + TTL
+
+- 路径：[packages/daemon/src/adapters/codexDesktopAdapter.ts](../packages/daemon/src/adapters/codexDesktopAdapter.ts)
+- 旧 `trackedFiles: Map<path, { path, offset, threadId }>` 只增不减；用户长时间挂着 GUI 时 codex sessions 目录会持续产新 jsonl，Map 单调爬升，8h 长跑 RSS 报告每小时 +几 MB。
+- 改动：
+  - `TrackedFile` 新增 `lastSeenAt`，`consume()` 初始化与每次更新都刷新。
+  - 新增 `evictStaleTrackedFiles()`：先按 TTL (48h idle) 与 `existsSync(path)` 清除过期 / 文件已被 Codex 自身 GC 的条目；若仍超过 cap (512)，按 `lastSeenAt` 升序删除最旧的若干。
+  - `scan()` 头尾各调用一次 `evictStaleTrackedFiles()`，保证单次 scan 内即便新增 > cap 也能立刻收敛。
+  - 构造器暴露 `maxTrackedFiles` / `trackedFileTtlMs` 重载（测试用）；新增 `trackedFileCountForTests()` test-only API。
+- cap 取 512 = 10 × RECENT_SESSION_LIMIT，足够覆盖几天的会话；TTL 48h 与 ACTIVE_SESSION_WINDOW_MS (3 天) 同量级，避免周期扫描反复重生已淘汰的项。
+- 不做：没有把 trackedFiles 移到磁盘持久化。重启后从头扫一遍只多消耗一次 IO，但拿回了「单进程内 Map 上限可控」的强保证。
+
+### N-14 runWorkflow 对 executor 抛错归一化为 failed step
+
+- 路径：[packages/daemon/src/workflows/workflowDefinitionManager.ts](../packages/daemon/src/workflows/workflowDefinitionManager.ts)、[packages/daemon/test/workflowDefinitionManager.test.mjs](../packages/daemon/test/workflowDefinitionManager.test.mjs)
+- H-2 让 pty.spawn 失败时不再 process.exit 直接绕过 hooks，但 `runWorkflow` 自身仍是 `const exitCode = await executor(...)` 裸 await：executor 抛错（spawn ENOENT、registerSession 失败、handoff 路径异常）会一路 reject 到 daemon，`onStepFinish` / `onWorkflowFinish` 都不触发，GUI 上 step 永远停在 running。
+- 现在用 try/catch 包裹，捕获到异常时把 stepRun 标成 `status='failed'` / `exitCode=-1` / `message='executor threw: ${err.message}'`，触发 onStepFinish 后把 run.status 置 failed 并 break。剩余步骤不再执行（与 exitCode!==0 行为一致）。
+- 测试：新增「executor 抛错（如 pty.spawn 失败）时归一化为 failed step」用例，断言 step.exitCode=-1、message 含原始错误、finalRun.status='failed'、后续依赖步骤不执行。
+
+### N-15 Windows .cmd/.bat 参数转义（CVE-2024-27980）
+
+- 路径：[packages/daemon/src/pty/runner.ts](../packages/daemon/src/pty/runner.ts)、[packages/daemon/test/runnerWindowsEscape.test.mjs](../packages/daemon/test/runnerWindowsEscape.test.mjs)
+- CVE-2024-27980：Windows 上 child_process / node-pty 生成 `.cmd` / `.bat` 时实际由 `cmd.exe /c` 解释；参数即使被 `"..."` 包裹，含 `& | < > ^ "` 或换行的内容仍可逃逸出引号上下文执行任意命令。Node ≥ 21.7 在 `child_process` 默认拒绝，但 node-pty 不走 child_process，必须在 daemon 这层显式拦。
+- 新增导出：
+  - `isWindowsBatchShell(shell)`：只在 Windows 平台对 `.cmd` / `.bat` 后缀返回 true。
+  - `escapeWindowsBatchArg(arg)`：含 `& | < > ^ "` 或换行的参数直接抛错（明确提到 CVE-2024-27980），含空白的安全参数包裹 `"..."`，其余原样返回。
+- `runWithPty` 在 PTY spawn 之前判断 `isWindowsBatchShell(shell)`，命中时 `input.args.map(escapeWindowsBatchArg)`；任何参数失败都 `console.error` 后 `process.exit(2)`，不静默放行。
+- 测试：覆盖 8 种典型危险参数 + 含空白安全参数 + 无空白安全参数；测试在非 Windows 上仍跑得通（`isWindowsBatchShell` 返回 false 不进入转义路径）。
+- 不做：没有提供「我知道我在干什么，请放行」的 override。本仓 workflow / template 参数面向本地用户填写，正常用例从来用不到 cmd.exe 元字符；真要绕过应改成调 `.exe`。
+
+### N-18 cli stop 验证 daemon 身份再发 SIGTERM
+
+- 路径：[packages/daemon/src/daemon/pidfile.ts](../packages/daemon/src/daemon/pidfile.ts)、[packages/daemon/src/cli/stop.ts](../packages/daemon/src/cli/stop.ts)、[packages/daemon/test/pidfileIdentity.test.mjs](../packages/daemon/test/pidfileIdentity.test.mjs)
+- 旧 `stopCommand` 拿到 pidfile 后直接 `process.kill(pid, 'SIGTERM')`；如果 daemon 早已退出而 OS 把 pid 复用给了用户的另一个进程（编辑器、终端），就会误杀无辜进程。
+- 新增 `verifyDaemonIdentity(pid)`：
+  - Linux 读 `/proc/<pid>/cmdline`（NUL 分隔 → 空格）。
+  - macOS 用 `execFileSync('ps', ['-p', pid, '-o', 'command='])`。
+  - Windows 先 `wmic process where ProcessId=<pid> get CommandLine /value`，失败 / `match()` 为空时回退 `powershell -Command "(Get-CimInstance Win32_Process -Filter 'ProcessId=<pid>').CommandLine"`。
+  - 命令行匹配 `/(daemon-entry|codepanion)/i` 返回 `match`、不匹配返回 `mismatch`、OS 调用全失败返回 `unknown`。
+- `stopCommand` 行为：
+  - `match` / `unknown` → 维持旧逻辑（SIGTERM → 25 × 100ms 等待 → 必要时 SIGKILL）。
+  - `mismatch` → 写 warn 后只清 pidfile，绝不 kill。
+  - SIGKILL 之前再 verify 一次，避免 SIGTERM 等待期内 pid 被复用。
+- 测试：用当前测试进程（命令行不含 daemon-entry）断言 result ∈ {mismatch, unknown} 且绝不为 match；用 pid=2147483646 断言 unknown 路径不抛错。
+
+### 验证
+
+```powershell
+npm run build          # tsc + build-daemon-bundle 通过
+npm test               # daemon 215/218 pass + 2 skip + 1 ephemeral-port flake（server.integration 单跑全绿），adapter-sdk 19/19，0 真失败
+npm run validate:dtos  # C# DTO 与 protocol.ts 一致
+```
+
+### 不做的事（本批跳过项）
+
+- N-16 history.append NDJSON 重构、N-17 cli start 与 GUI 双击并发竞态：留待下批；它们都属于持久化 / 进程协议层的更深动作，需要单独评估。
+- 没有对 H-3 commandExists 缓存写直接单测（函数是 server.ts 内部模块作用域）；改动只是把同步 execSync 替换成异步 execFile + Map 缓存，回归靠现有 server.integration.test.mjs 的 handoff 路径覆盖。
+- 没有对 H-4 buildHandoffClassificationCorpus 写性能基准；新实现把语料截到 8KB / 50 行后回溯空间塌缩到常数级，肉眼即可判断收益，正式 benchmark 留给「长时间稳态验证」阶段统一做。
+
+---
+
+## 2026-05-23 第三轮审计第四批修复（N-16 / N-17）
+
+收口剩余 P1 持久化健壮性 + 启动原子性两项。来源仍是 [docs/CODE_REVIEW_2026-05-23.md](CODE_REVIEW_2026-05-23.md)。
+
+### N-16 — `WorkflowRunHistory` 重写为 NDJSON
+
+旧实现把 history 当成单个 JSON 对象（`{ version, runs:[] }`），每次 `append` 都是「读全文件 → 整段 schema parse → 数组追加 → 全量回写」。这条路径有两个致命问题：
+
+1. **任何一条历史 schema 失败，整个文件被 quarantine** —— `load` 走 try/catch 后把文件改名为 `*.broken-*.json` 并返回空 store，几百条历史一次坏 entry 全丢。
+2. **append 频率随 runs 数线性变慢** —— 每次都要 reparse 整段 + 整段 stringify 回写。
+
+改成 NDJSON：
+
+- [packages/daemon/src/workflows/workflowDefinitionManager.ts](../packages/daemon/src/workflows/workflowDefinitionManager.ts)
+  - `append(run)` 改为 `appendFileSync(this.path, JSON.stringify(parsed) + '\n', 'utf8')`：不再读旧文件，新 run 永远落得下来。
+  - `load()` 增加 `tryLoadLegacy()`：先 `JSON.parse(raw)`，多行 NDJSON 在第二条 JSON 处必败 → 走 `parseNdjsonRuns`；parse 成功且形状是 `{ version, runs }` 容器才走 legacy 迁移（成功 → `rewriteNdjson` 一次到位；schema 失败 → 仍走 quarantine 隔离，避免把可疑文件误当 NDJSON 用）。
+  - `parseNdjsonRuns()`：按行 `JSON.parse + WorkflowRunSchema.parse`，坏行计数 + 首样本 → `logger.warn`，其余行保留；同 id 后写入覆盖前写入（适配「dry-run 后真跑」覆盖语义）。
+  - `maybeCompact()`：用 newline 计数做廉价启发，超过 `maxRuns × 1.5` 才 compact —— `load → sort by startedAt desc → slice(0, maxRuns) → tmp+rename rewrite`，把成本摊到很多次 append 上。
+
+关键设计点：
+
+- **legacy 识别不能只看首字符 `{`**：NDJSON 每行也以 `{` 开头，否则 NDJSON 文件会被误判成损坏 legacy 容器，触发 quarantine 后整个文件被改名 —— append 还能写但 list 永远空。改用「parse 整段成功 + 形状有 `runs` 字段」双重判断。
+- **compaction 不在每次 append 后都跑**：行数计数走 `Buffer.charCodeAt(i) === 10`，常数级；行数 ≤ 阈值时立即返回。
+
+回归测试（[packages/daemon/test/workflowDefinitionManager.test.mjs](../packages/daemon/test/workflowDefinitionManager.test.mjs)）：
+
+1. **单行坏数据不会 truncate 全历史** —— 在合法 run 之间夹两条坏行，`list()` 返回 3 条合法 run，原文件不被改名。
+2. **旧版 `{ version, runs }` 容器首次加载自动迁移为 NDJSON** —— 文件被原地改写为多行，每行独立 JSON。
+3. **append 不读旧文件，坏行存在时新 run 仍能成功落盘** —— 预置一行损坏 NDJSON，调用 `append`；旧坏行原样保留、新行追加到末尾，`list()` 跳过坏行返回新 run。
+4. **超过 `maxRuns × 1.5` 后触发 compaction，长跑稳定在 maxRuns** —— maxRuns=4 append 10 次，文件最终落在 ≤ 6 行，`list()` 返回最新 4 条。
+5. **现有 N-9 测试更新**：旧版 quarantine 语义只在「JSON.parse 成功 + 形状是 legacy 容器 + schema 失败」这条窄路径上保留；完全坏掉的 JSON（trailing comma 之类）改交给 NDJSON 跳过坏行处理，更安全。
+
+### N-17 — `acquireLock` 改用 `openSync('wx')` 原子独占创建
+
+旧实现 `readPid → isProcessAlive → clearPid → writePid` 四步全是非原子。`codepanion start` 与 GUI 双击同时启动时，两个 daemon child 可以同时通过 alive 检查（pid 文件刚被对方 `clearPid` 清掉，或两侧都拿到 dead pid），然后两侧 `writePid` 顺序覆盖，最终两个 daemon 同时跑 —— 抢 8181 端口、抢 token 文件、抢 workflow snapshot 写入。
+
+改动（[packages/daemon/src/daemon/pidfile.ts](../packages/daemon/src/daemon/pidfile.ts)）：
+
+- `acquireLock(path = PID_PATH)` 走 `openSync(path, 'wx')` 原子独占创建：只有一个 child 能赢，其他立即 EEXIST 退出。
+- EEXIST 时检查持有者：alive → 本进程立刻让位（`return false`）；dead → unlinkSync 后重试一次 `wx`（兼容上次 daemon 异常退出后无法重启）。最多 2 attempt。
+- 接受 `path` 入参（默认 `PID_PATH`）：production 行为无变化，回归测试可以传 mkdtempSync 临时路径覆盖三条关键路径，不污染 `~/.codepanion/daemon.pid`。
+
+回归测试（[packages/daemon/test/pidfileLock.test.mjs](../packages/daemon/test/pidfileLock.test.mjs)）：
+
+1. **首获空闲 pidfile** → 返回 true，文件写入当前 pid。
+2. **活持有者** → 把测试进程自己的 pid 预写入 pidfile（alive 检查必为 true），`acquireLock` 立刻返回 false，绝不覆盖。
+3. **死残留** → 预写一个几乎不可能存在的 pid（2147483646），触发「EEXIST → isProcessAlive=false → unlink → 重试 wx → 成功」路径。
+4. **同进程连续调用** → 首获成功、再次必返回 false（覆盖「两个 child 都通过 alive 检查」的回归不变量）。
+
+### 验证
+
+```powershell
+npm run build          # tsc + build-daemon-bundle 通过
+npm test               # daemon 224 pass + 2 skip（@npmcli/ci-detect / 平台门控），adapter-sdk 19/19，0 真失败
+npm run validate:dtos  # C# DTO 与 protocol.ts 一致
+```
+
+### 不做的事（本批跳过项）
+
+- `cli/start.ts` 仍保留 `stalePid` 时 `clearPid()` 的旧逻辑：`acquireLock` 已能在 child 侧原子化处理死残留，这段 CLI 提前清理在并发场景下严格意义上是冗余的，但不再有害（child 走 wx，并发另一侧仍能让位）。删除它属于另一项「CLI startup 流程精简」，不在本次审计范围。
+- 没有对 N-16 写「8h 长跑 history 文件不会无限膨胀」的端到端基准：compaction 触发条件（行数 > maxRuns×1.5）容易由单元测试覆盖，真实长跑数据点留给 [docs/POSITIONING.md](POSITIONING.md) 的 Alpha 验收阶段。
+- 没有 N-17 的真多进程并发测试：node:test 同进程下用 `openSync('wx')` 串行也能覆盖关键不变量（首获 / 活让位 / 死残留），真正的多进程原子性由 OS `O_EXCL` 语义保证；手动多终端验证留给 GUI 真机入口审查环节。

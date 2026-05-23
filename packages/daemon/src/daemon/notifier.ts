@@ -1,9 +1,21 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { logger } from '../logger.js';
+import { logger, maskString } from '../logger.js';
 import type { Config } from '../config.js';
 
 const execFileAsync = promisify(execFile);
+
+// N-7：系统通知中心会持久缓存 body（Windows wpndatabase.db / macOS NotificationCenter）。
+// 进入系统通道前统一脱敏（HOME → ~、token → [Redacted]）+ 截断，避免日志副本超出 daemon 本地 retention 控制。
+const NOTIFY_TITLE_MAX = 60;
+const NOTIFY_BODY_MAX = 80;
+
+export function clipNotifyText(value: string | undefined, max: number): string {
+  if (!value) return '';
+  const masked = maskString(String(value)).replace(/\s+/g, ' ').trim();
+  if (masked.length <= max) return masked;
+  return masked.slice(0, Math.max(0, max - 1)) + '…';
+}
 
 export class Notifier {
   constructor(private cfg: Config) {}
@@ -11,8 +23,12 @@ export class Notifier {
   show(title: string, message: string, opts?: { sound?: boolean }) {
     if (!this.cfg.toast.enabled) return;
 
-    this.showNative(title, message || ' ', opts).catch((err) => {
-      logger.warn({ err, title, message }, 'native notification failed');
+    const safeTitle = clipNotifyText(title, NOTIFY_TITLE_MAX) || 'CodePanion';
+    const safeMessage = clipNotifyText(message, NOTIFY_BODY_MAX) || ' ';
+
+    // 日志路径不再回写 title / message，避免 daemon.log 成为通知内容副本（与 N-12 同一类）。
+    this.showNative(safeTitle, safeMessage, opts).catch((err) => {
+      logger.warn({ err }, 'native notification failed');
     });
   }
 

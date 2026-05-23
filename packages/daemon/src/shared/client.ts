@@ -14,9 +14,9 @@ function baseUrl() {
 }
 
 /**
- * HTTP failure with enough structured context that callers logging `{ err }` via pino
- * (or printing err.message) can pinpoint the call without re-parsing a free-form string.
- * Fields are intentionally enumerable so they survive pino's stdSerializers.err / our maskValue serializer.
+ * HTTP failure with structured context. N-10：`Error.message` 仅含 method/path/status，
+ * 不再把 response body 拼进字符串，避免被 pino logger / GUI 日志再次落盘。
+ * Body 仍保留在 `error.body` 字段，调试时显式取用。
  */
 export class DaemonHttpError extends Error {
   readonly method: string;
@@ -25,8 +25,7 @@ export class DaemonHttpError extends Error {
   readonly body: string;
 
   constructor(method: string, path: string, status: number, body: string) {
-    const snippet = body.slice(0, 200);
-    super(`${method} ${path} failed: ${status}${snippet ? ` ${snippet}` : ''}`);
+    super(`${method} ${path} failed: ${status}`);
     this.name = 'DaemonHttpError';
     this.method = method;
     this.path = path;
@@ -35,21 +34,75 @@ export class DaemonHttpError extends Error {
   }
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const { url, token } = baseUrl();
-  const res = await fetch(`${url}${path}`, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new DaemonHttpError(method, path, res.status, text);
+/**
+ * N-11：daemon 卡死 / 单线程被长任务阻塞时，client fetch 必须有超时，
+ * 否则 GUI/CLI 会无限挂起。timeout 抛 `DaemonClientTimeoutError`，
+ * 调用方据此区分「连不上 daemon」与「daemon 在线但卡死」。
+ */
+export class DaemonClientTimeoutError extends Error {
+  readonly method: string;
+  readonly path: string;
+  readonly timeoutMs: number;
+
+  constructor(method: string, path: string, timeoutMs: number) {
+    super(`${method} ${path} timed out after ${timeoutMs}ms`);
+    this.name = 'DaemonClientTimeoutError';
+    this.method = method;
+    this.path = path;
+    this.timeoutMs = timeoutMs;
   }
-  return (await res.json()) as T;
+}
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 8000;
+
+export type RequestOptions = {
+  /** 长任务（handoff/workflow run）传更大的超时；普通请求建议保留默认值。 */
+  timeoutMs?: number;
+  /** 调用方自己控制取消时传 signal；与 timeoutMs 互不冲突。 */
+  signal?: AbortSignal;
+};
+
+function resolveTimeoutMs(override?: number): number {
+  if (override !== undefined && override > 0) return override;
+  const raw = process.env.CODEPANION_REQUEST_TIMEOUT_MS;
+  const parsed = raw ? Number(raw) : Number.NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_REQUEST_TIMEOUT_MS;
+}
+
+async function request<T>(method: string, path: string, body?: unknown, options: RequestOptions = {}): Promise<T> {
+  const { url, token } = baseUrl();
+  const timeoutMs = resolveTimeoutMs(options.timeoutMs);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const externalAbort = () => controller.abort();
+  if (options.signal) {
+    if (options.signal.aborted) controller.abort();
+    else options.signal.addEventListener('abort', externalAbort, { once: true });
+  }
+  try {
+    const res = await fetch(`${url}${path}`, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new DaemonHttpError(method, path, res.status, text);
+    }
+    return (await res.json()) as T;
+  } catch (err) {
+    if ((err as Error).name === 'AbortError' && !options.signal?.aborted) {
+      throw new DaemonClientTimeoutError(method, path, timeoutMs);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+    if (options.signal) options.signal.removeEventListener('abort', externalAbort);
+  }
 }
 
 export async function checkHealth(): Promise<{ ok: boolean; pid?: number; error?: string }> {

@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { z } from 'zod';
 import { HOME_DIR } from '../config.js';
+import { logger } from '../logger.js';
 
 export const WORKFLOW_TEMPLATES_PATH = `${HOME_DIR}/workflow-templates.json`;
 const templatePath = () => process.env.CODEPANION_TEMPLATE_PATH || WORKFLOW_TEMPLATES_PATH;
@@ -94,8 +95,21 @@ export class WorkflowTemplateManager {
 
   private load(): TemplateStore {
     if (!existsSync(this.path)) return { version: 1, templates: [] };
-    const raw = JSON.parse(readFileSync(this.path, 'utf8'));
-    return StoreSchema.parse(raw);
+    try {
+      const raw = JSON.parse(readFileSync(this.path, 'utf8'));
+      return StoreSchema.parse(raw);
+    } catch (err) {
+      // N-9：单文件损坏不阻塞 daemon 启动；隔离后返回空 store。
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const target = `${this.path}.broken-${stamp}.json`;
+      try {
+        renameSync(this.path, target);
+        logger.warn({ err, path: this.path, quarantined: target }, '损坏的 workflow 模板文件已隔离，daemon 继续启动');
+      } catch (renameErr) {
+        logger.error({ err, renameErr, path: this.path }, 'workflow 模板解析失败且隔离也失败');
+      }
+      return { version: 1, templates: [] };
+    }
   }
 
   private write(store: TemplateStore): void {

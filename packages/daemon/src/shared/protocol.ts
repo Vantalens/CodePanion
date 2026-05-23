@@ -5,12 +5,16 @@ export const NotifyRequestSchema = z.object({
   message: z.string().optional().default(''),
   source: z.string().optional().default('manual'),
   level: z.enum(['info', 'prompt', 'done', 'error']).optional().default('info'),
+  threadId: z.string().optional(),
   sessionId: z.string().optional(),
   sourceId: z.string().optional(),
   windowTitle: z.string().optional(),
   workspace: z.string().optional(),
 });
 export type NotifyRequest = z.infer<typeof NotifyRequestSchema>;
+
+export const HandoffTargetSchema = z.enum(['generic', 'codex', 'claude-code', 'opencode']);
+export type HandoffTarget = z.infer<typeof HandoffTargetSchema>;
 
 export const SourceKindSchema = z.enum([
   'cli',
@@ -129,6 +133,11 @@ export const WorkflowTaskStateSchema = z.object({
   pinned: z.boolean().optional().default(false),
   archived: z.boolean().optional().default(false),
   snoozedUntil: z.number().int().positive().nullable().optional(),
+  priority: z.enum(['high', 'normal', 'low']).optional().default('normal'),
+  sortOrder: z.number().finite().optional(),
+  handoffStatus: z.enum(['idle', 'pending', 'active', 'returned']).optional().default('idle'),
+  handoffTarget: HandoffTargetSchema.nullable().optional(),
+  handoffSessionId: z.string().nullable().optional(),
   updatedAt: z.number().int().positive().optional(),
 });
 export type WorkflowTaskState = z.infer<typeof WorkflowTaskStateSchema>;
@@ -170,10 +179,34 @@ export const UpdateWorkflowTaskStateRequestSchema = z.object({
   pinned: z.boolean().optional(),
   archived: z.boolean().optional(),
   snoozedUntil: z.number().int().positive().nullable().optional(),
+  priority: z.enum(['high', 'normal', 'low']).optional(),
+  sortOrder: z.number().finite().optional(),
+  handoffStatus: z.enum(['idle', 'pending', 'active', 'returned']).optional(),
+  handoffTarget: HandoffTargetSchema.nullable().optional(),
+  handoffSessionId: z.string().nullable().optional(),
 });
 export type UpdateWorkflowTaskStateRequest = z.infer<typeof UpdateWorkflowTaskStateRequestSchema>;
 
+export const LaunchHandoffRequestSchema = z.object({
+  target: HandoffTargetSchema,
+  prompt: z.string().min(1).max(200000),
+  preview: z.string().optional().default(''),
+});
+export type LaunchHandoffRequest = z.infer<typeof LaunchHandoffRequestSchema>;
+
+export const LaunchHandoffResponseSchema = z.object({
+  ok: z.literal(true),
+  threadId: z.string(),
+  sessionId: z.string(),
+  target: HandoffTargetSchema,
+  launchMode: z.enum(['tool', 'fallback']),
+  command: z.string(),
+  args: z.array(z.string()),
+});
+export type LaunchHandoffResponse = z.infer<typeof LaunchHandoffResponseSchema>;
+
 export const RegisterSessionRequestSchema = z.object({
+  id: z.string().optional(),
   command: z.string().min(1),
   args: z.array(z.string()).default([]),
   cwd: z.string().optional(),
@@ -182,6 +215,7 @@ export const RegisterSessionRequestSchema = z.object({
   sourceId: z.string().optional(),
   windowTitle: z.string().optional(),
   workspace: z.string().optional(),
+  parentThreadId: z.string().optional(),
 });
 export type RegisterSessionRequest = z.infer<typeof RegisterSessionRequestSchema>;
 
@@ -214,6 +248,7 @@ export const SessionInfoSchema = z.object({
   sourceId: z.string().optional(),
   windowTitle: z.string().optional(),
   workspace: z.string().optional(),
+  parentThreadId: z.string().optional(),
   startedAt: z.number().int(),
   status: z.enum(['running', 'waiting', 'exited']),
   exitCode: z.number().int().nullable().optional(),
@@ -230,7 +265,7 @@ export type WsServerEvent =
   | { type: 'reply-injected'; sessionId: string; text: string }
   | { type: 'inject-input'; sessionId: string; optionIndex: number }
   | { type: 'monitor-event-reply'; eventId: string; sourceId?: string; text: string; timestamp: number }
-  | { type: 'notification'; data: MonitorEvent & { title: string; message: string; timestamp: number } }
+  | { type: 'notification'; data: MonitorEvent & { title: string; message: string; timestamp: number; threadId?: string } }
   | { type: 'source-registered'; source: MonitorSource }
   | { type: 'source-disconnected'; sourceId: string }
   | { type: 'monitor-event'; event: MonitorEvent & { id: string; timestamp: number } }

@@ -17,6 +17,7 @@ namespace CodePanion.Gui.Models
         public string? SourceId { get; set; }
         public string? WindowTitle { get; set; }
         public string? Workspace { get; set; }
+        public string? ParentThreadId { get; set; }
         public long StartedAt { get; set; }
         public string Status { get; set; } = "running";
         public int? ExitCode { get; set; }

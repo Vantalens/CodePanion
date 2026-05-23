@@ -45,6 +45,11 @@ export async function runCli(argv: string[]): Promise<void> {
         y
           .positional('title', { type: 'string', demandOption: true })
           .positional('message', { type: 'string' })
+          // N-8：install hook 注入的是 `--message`，过去没注册 → yargs .strict() 直接拒，首启即坏。
+          .option('message', {
+            type: 'string',
+            describe: '通知正文；与位置参数 message 二选一，--message 优先',
+          })
           .option('source', { type: 'string', default: 'cli' })
           .option('level', {
             type: 'string',
