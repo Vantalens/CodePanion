@@ -1,11 +1,20 @@
 param(
-    [string]$RuntimeIdentifier = "win-x64"
+    [string]$RuntimeIdentifier = "win-x64",
+    [string]$BuildRoot = ""
 )
 
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
-$publishDir = Join-Path $root "packages\gui\bin\Release\net8.0-windows\$RuntimeIdentifier\publish"
+$buildArtifactsRoot = if ($BuildRoot) {
+    $BuildRoot
+} elseif ($env:CODEPANION_GUI_BUILD_ROOT) {
+    $env:CODEPANION_GUI_BUILD_ROOT
+} else {
+    Join-Path $root ".artifacts\gui-build"
+}
+$publishRoot = Join-Path $buildArtifactsRoot "publish\$RuntimeIdentifier"
+$publishDir = Join-Path $publishRoot "publish"
 $distRoot = Join-Path $root "dist"
 $distDir = Join-Path $distRoot "CodePanion-$RuntimeIdentifier"
 $project = Join-Path $root "packages\gui\CodePanion.Gui.csproj"
@@ -123,7 +132,8 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "[2/4] Publishing GUI ($RuntimeIdentifier)..."
-dotnet publish $project -c Release -r $RuntimeIdentifier --self-contained true -p:PublishSingleFile=false
+New-Item -ItemType Directory -Path $publishRoot -Force | Out-Null
+dotnet publish $project -c Release -r $RuntimeIdentifier --self-contained true -p:PublishSingleFile=false -m:1 "-p:BaseIntermediateOutputPath=$(Join-Path $publishRoot 'obj\')" "-p:MSBuildProjectExtensionsPath=$(Join-Path $publishRoot 'obj\')" "-p:BaseOutputPath=$(Join-Path $publishRoot 'bin\')" "-p:PublishDir=$publishDir\"
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
@@ -147,14 +157,14 @@ Write-Host "[package] Node runtime: $($nodeInfo.Version), SHA256=$($nodeInfo.Sha
 
 $readmePath = Join-Path $distDir "README_START.txt"
 @(
-    "CodePanion 便携版（Windows Alpha）",
+    "CodePanion Portable Build (Windows Alpha)",
     "",
-    "启动方式：双击 CodePanion.Gui.exe。",
-    "GUI 启动时会自动拉起本地 daemon，无需额外安装 Node.js 或 npm。",
-    "请勿单独把文件移出此目录，daemon、Node 运行时与 GUI 需要同处一个目录树。",
+    "Start: double-click CodePanion.Gui.exe.",
+    "The GUI starts the local daemon automatically. No separate Node.js or npm install is required for end users.",
+    "Keep all files inside this directory tree. The GUI, daemon bundle, and packaged Node runtime must stay together.",
     "",
-    "日志与配置默认写入 %USERPROFILE%\.codepanion\（仅当前 Windows 用户可读）。",
-    "卸载：关闭 GUI 后整体删除本目录即可，所有运行时都在此目录内。"
+    "Logs and local config are written to %USERPROFILE%\\.codepanion\\ for the current Windows user.",
+    "Uninstall: close the GUI and remove this directory."
 ) | Set-Content -LiteralPath $readmePath -Encoding UTF8
 
 Write-Host "[4/4] Done."
