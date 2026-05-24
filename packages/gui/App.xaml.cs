@@ -27,6 +27,8 @@ namespace CodePanion.Gui
                 catch
                 {
                 }
+                _singleInstanceMutex.Dispose();
+                _singleInstanceMutex = null;
                 Shutdown();
                 return;
             }
