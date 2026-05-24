@@ -189,6 +189,9 @@ export async function runWithPty(input: RunArgs): Promise<number> {
     // 长度上限与 daemon HTTP schema 对齐（ReplyRequestSchema.text 上限 8192）。
     // 多一层 runner 本地校验，避免畸形或被中间人改写的 WS 消息把超长串塞进 PTY parser。
     if (record.text.length > 8192) return null;
+    // 仅允许可打印字符与常见输入空白（\n \r \t），拒绝其余控制字符（尤其 ESC）。
+    // 避免通过 WS 注入终端控制序列/不可见控制码影响 PTY 执行与显示。
+    if (!/^[\p{L}\p{N}\p{P}\p{S}\p{Zs}\n\r\t]*$/u.test(record.text)) return null;
     return { type: 'inject-text', sessionId: record.sessionId, text: record.text };
   };
 
