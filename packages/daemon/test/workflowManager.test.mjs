@@ -65,6 +65,40 @@ test('WorkflowManager caps total retained threads', () => {
   assert.equal(manager.threadSnapshot('thread:0'), undefined);
 });
 
+test('WorkflowManager snapshot can be capped for GUI startup payloads', () => {
+  const manager = new WorkflowManager();
+
+  for (let index = 0; index < 5; index += 1) {
+    const threadId = `thread:cap:${index}`;
+    manager.upsertThread({
+      id: threadId,
+      source: 'codex-desktop',
+      title: threadId,
+      status: 'running',
+      updatedAt: index + 1,
+      itemCount: 0,
+    });
+    for (let item = 0; item < 5; item += 1) {
+      manager.appendItem({
+        id: `item:cap:${index}:${item}`,
+        threadId,
+        source: 'codex-desktop',
+        kind: 'message',
+        content: `${index}-${item}`,
+        timestamp: (index + 1) * 10 + item,
+      });
+    }
+  }
+
+  const snapshot = manager.snapshot({ maxThreads: 2, maxItemsPerThread: 3 });
+  assert.deepEqual(snapshot.threads.map((thread) => thread.id), ['thread:cap:4', 'thread:cap:3']);
+  assert.equal(snapshot.items.length, 6);
+  assert.deepEqual(
+    snapshot.items.filter((item) => item.threadId === 'thread:cap:4').map((item) => item.content),
+    ['4-2', '4-3', '4-4'],
+  );
+});
+
 test('WorkflowManager.getThread returns the live thread record or undefined', () => {
   const manager = new WorkflowManager();
   assert.equal(manager.getThread('absent'), undefined);
@@ -93,6 +127,41 @@ test('WorkflowManager.getThread returns the live thread record or undefined', ()
     timestamp: 2,
   });
   assert.equal(manager.getThread('thread:get').status, 'done');
+});
+
+test('WorkflowManager does not mark a running thread done for command output completion', () => {
+  const manager = new WorkflowManager();
+  manager.upsertThread({
+    id: 'thread:command-output',
+    source: 'codex-desktop',
+    title: 'active codex session',
+    status: 'running',
+    updatedAt: 1,
+    itemCount: 0,
+  });
+
+  manager.appendItem({
+    id: 'item:tool-call',
+    threadId: 'thread:command-output',
+    source: 'codex-desktop',
+    kind: 'tool_call',
+    title: 'shell_command',
+    content: 'npm test',
+    status: 'running',
+    timestamp: 2,
+  });
+  manager.appendItem({
+    id: 'item:tool-output',
+    threadId: 'thread:command-output',
+    source: 'codex-desktop',
+    kind: 'command',
+    title: 'function_call_output',
+    content: 'Exit code: 0',
+    status: 'done',
+    timestamp: 3,
+  });
+
+  assert.equal(manager.getThread('thread:command-output').status, 'running');
 });
 
 test('WorkflowManager truncates oversized workflow item content before snapshotting', () => {
@@ -256,6 +325,83 @@ test('WorkflowManager debounces async snapshot writes and flushes on demand', as
     assert.ok(snapshot);
     assert.equal(snapshot.items.length, 20);
     assert.equal(snapshot.items.at(-1).content, 'chunk-19');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('WorkflowManager.setSourceOnline 翻 sourceOnline 字段并通过 source 字段匹配 thread', () => {
+  const manager = new WorkflowManager();
+  const events = [];
+  manager.onEvent((event) => { events.push(event); });
+
+  // thread.id 不带 source: 前缀，但 thread.source 匹配 sourceId，也应被识别。
+  manager.upsertThread({
+    id: 'thread:claude-code-1',
+    source: 'claude-code-vscode',
+    title: 'Claude Code 任务',
+    status: 'running',
+    updatedAt: 1,
+    itemCount: 0,
+  });
+
+  events.length = 0;
+  const flipped = manager.setSourceOnline('claude-code-vscode', false);
+  assert.equal(flipped.length, 1, 'thread.source 匹配 sourceId 也算关联');
+  assert.equal(flipped[0].sourceOnline, false);
+
+  // 重复刷成同一值时不应再广播 thread-upsert（避免高频空刷新）。
+  events.length = 0;
+  const stable = manager.setSourceOnline('claude-code-vscode', false);
+  assert.equal(stable.length, 0);
+  assert.equal(events.length, 0, '同值不再广播');
+
+  // 翻回 true 时应广播。
+  events.length = 0;
+  const online = manager.setSourceOnline('claude-code-vscode', true);
+  assert.equal(online.length, 1);
+  assert.equal(online[0].sourceOnline, true);
+  assert.equal(events.filter((e) => e.event?.action === 'thread-upsert').length, 1);
+});
+
+test('WorkflowManager.setSourceOnline 通过 thread.id === source:<id> 命名约定匹配', () => {
+  const manager = new WorkflowManager();
+  manager.upsertThread({
+    id: 'source:abc',
+    source: 'irrelevant',
+    title: '来源任务',
+    status: 'running',
+    updatedAt: 1,
+    itemCount: 0,
+  });
+
+  const flipped = manager.setSourceOnline('abc', false);
+  assert.equal(flipped.length, 1, 'thread.id === source:<sourceId> 也算关联');
+  assert.equal(flipped[0].sourceOnline, false);
+});
+
+test('WorkflowManager.loadSnapshot 重启后所有 thread 默认 sourceOnline=false', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'codepanion-workflow-online-'));
+  const snapshotPath = join(dir, 'workflow-snapshot.json');
+  try {
+    const manager = new WorkflowManager({ snapshotPath, snapshotDebounceMs: 0 });
+    manager.upsertThread({
+      id: 'source:online',
+      source: 'online',
+      title: 'online',
+      status: 'running',
+      updatedAt: 1,
+      itemCount: 0,
+      sourceOnline: true,
+    });
+    manager.flushSnapshotSync();
+
+    // 重启后 sources 都未 register —— sourceOnline 必须强制 false，
+    // 否则 GUI 会显示已退出工具仍"在线"。
+    const restored = new WorkflowManager({ snapshotPath, snapshotDebounceMs: 0 });
+    const snapshot = restored.threadSnapshot('source:online');
+    assert.ok(snapshot);
+    assert.equal(snapshot.threads[0].sourceOnline, false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -8,6 +8,12 @@
 //
 // 边界：仅做文件名级别的 fs.watch，不读取文件内容，符合 explicit-adapter 隐私边界。
 //
+// 平台支持：
+//   - Windows / macOS：使用 fs.watch({ recursive: true }) 原生支持子目录递归。
+//   - Linux：Node 20+ 的 fs.watch 已支持 recursive（基于 inotify），20 以下回退到
+//     手动递归 watch（每个目录单独 watch），缺点是无法捕获后续新建的深层子目录。
+//     若需要 Linux 大目录稳定监控，推荐配合 chokidar 等专用库。
+//
 // 已内置降噪：
 //   - 默认忽略 node_modules / .git / dist / build / .next / .cache / out / target；
 //     避免 `npm install` 等命令把成千上万次 change 推给 daemon。
@@ -90,15 +96,71 @@ async function main() {
     }
   };
 
-  const watcher = fs.watch(absolute, { recursive: true }, (eventType, filename) => {
-    if (!filename) return;
-    const relPath = String(filename);
+  // 维护所有打开的 watcher：Linux 老版本 Node 在 recursive 不可用时需要手动逐目录监控。
+  const watchers = new Set();
+
+  const onChange = (relPath, eventType) => {
+    if (!relPath) return;
     if (shouldIgnore(relPath)) return;
     // 后到的 eventType 覆盖前一次：rename 通常更值得保留
     pending.set(relPath, eventType);
     if (flushTimer) return;
     flushTimer = setTimeout(flush, DEBOUNCE_MS);
-  });
+  };
+
+  function watchRecursiveFallback(rootDir) {
+    // Linux Node <20 不支持 recursive：手动遍历目录树，每个目录单独 watch。
+    const stack = [rootDir];
+    while (stack.length > 0) {
+      const dir = stack.pop();
+      const rel = path.relative(absolute, dir);
+      if (rel && shouldIgnore(rel)) continue;
+      try {
+        const w = fs.watch(dir, (eventType, filename) => {
+          if (!filename) return;
+          const joined = rel ? path.join(rel, String(filename)) : String(filename);
+          onChange(joined, eventType);
+        });
+        watchers.add(w);
+      } catch (err) {
+        console.warn(`[adapter] watch 失败 ${dir}: ${err.message}`);
+        continue;
+      }
+      let entries;
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        if (DEFAULT_IGNORE.has(entry.name)) continue;
+        stack.push(path.join(dir, entry.name));
+      }
+    }
+  }
+
+  function tryRecursiveWatch() {
+    try {
+      const w = fs.watch(absolute, { recursive: true }, (eventType, filename) => {
+        onChange(filename ? String(filename) : '', eventType);
+      });
+      watchers.add(w);
+      return true;
+    } catch (err) {
+      // Linux Node <20：fs.watch recursive 抛 ERR_FEATURE_UNAVAILABLE_ON_PLATFORM
+      if (err && (err.code === 'ERR_FEATURE_UNAVAILABLE_ON_PLATFORM' || /recursive/i.test(err.message))) {
+        return false;
+      }
+      throw err;
+    }
+  }
+
+  if (!tryRecursiveWatch()) {
+    console.warn('[adapter] fs.watch recursive 不可用（多见于 Linux Node <20），回退到手动递归监控。');
+    console.warn('[adapter] 提示：手动递归无法捕获启动后新建的深层子目录，建议升级 Node 20+ 或使用 chokidar。');
+    watchRecursiveFallback(absolute);
+  }
 
   let shuttingDown = false;
   const shutdown = async (signal) => {
@@ -107,7 +169,10 @@ async function main() {
     console.log(`[adapter] 收到 ${signal}，正在断开来源 ...`);
     if (flushTimer) clearTimeout(flushTimer);
     flush();
-    watcher.close();
+    for (const w of watchers) {
+      try { w.close(); } catch {}
+    }
+    watchers.clear();
     try {
       await adapter.disconnect();
     } catch (err) {

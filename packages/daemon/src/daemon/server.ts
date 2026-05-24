@@ -43,6 +43,10 @@ type CreateServerOptions = {
 };
 
 const HANDOFF_TMP_DIR = join(tmpdir(), 'codepanion-handoff');
+const GUI_WORKFLOW_SNAPSHOT_LIMITS = {
+  maxThreads: 20,
+  maxItemsPerThread: 40,
+} as const;
 
 export function createServer(cfg: Config): {
   start: () => Promise<Server>;
@@ -319,6 +323,16 @@ export function createServer(
   });
 
   sources.onEvent((event) => {
+    // source 离线 / 重新上线时同步刷新所有关联 thread 的 sourceOnline 字段。
+    // 否则 Codex / Claude Code 进程已退出，GUI 仍把对应任务显示成「运行中」。
+    if (event.type === 'source-disconnected') {
+      workflows.setSourceOnline(event.sourceId, false);
+      return;
+    }
+    if (event.type === 'source-registered') {
+      workflows.setSourceOnline(event.source.id, true);
+      return;
+    }
     if (event.type !== 'monitor-event') return;
     const monitor = event.event;
     const threadId = `source:${monitor.sourceId ?? monitor.source ?? 'external'}`;
@@ -331,6 +345,8 @@ export function createServer(
       status: monitor.type === 'prompt' ? 'waiting' : monitor.type === 'error' ? 'error' : monitor.type === 'done' ? 'done' : 'running',
       updatedAt: timestamp,
       itemCount: 0,
+      // 既然事件能到达，说明 source 当前在线。下次 source 断开时 setSourceOnline 会把它翻成 false。
+      sourceOnline: true,
     });
     workflows.appendItem({
       id: `monitor:${event.event.id}`,
@@ -441,7 +457,7 @@ export function createServer(
   });
 
   app.get('/workflow/snapshot', (_req, res) => {
-    res.json(workflows.snapshot());
+    res.json(workflows.snapshot(GUI_WORKFLOW_SNAPSHOT_LIMITS));
   });
 
   app.post('/workflow/threads/:id/task-state', (req, res) => {
@@ -686,7 +702,7 @@ export function createServer(
       res.status(400).json({ error: parsed.error.message });
       return;
     }
-    const result = sessions.injectReply(req.params.id, parsed.data.text);
+    const result = sessions.injectReply(req.params.id, parsed.data.text, parsed.data.mode);
     if (result === 'not-connected') {
       res.status(404).json({ error: 'session not connected' });
       return;
@@ -1143,7 +1159,7 @@ function handleWs(
     // 否则左侧任务列表会因只接收增量事件而保持为空。
     ws.send(JSON.stringify({ type: 'sessions-snapshot', sessions: sessions.list() }));
     ws.send(JSON.stringify({ type: 'sources-snapshot', sources: sources.list() }));
-    ws.send(JSON.stringify({ type: 'workflow-snapshot', snapshot: workflows.snapshot() }));
+    ws.send(JSON.stringify({ type: 'workflow-snapshot', snapshot: workflows.snapshot(GUI_WORKFLOW_SNAPSHOT_LIMITS) }));
   }
 
   ws.on('error', (err) => logger.warn({ err }, 'ws error'));

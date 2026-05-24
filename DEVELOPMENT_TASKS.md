@@ -49,10 +49,14 @@
 
 ### P2 / P3 长尾（Strategy Backlog 后排）
 
-- [ ] **J-01 ~ J-10** GUI 前端 chat.js 长跑内存 / 重渲 / 链接处理（详见审计文件「P2 / P3 长尾」）。
-- [ ] **A-3 / A-4** adapter-sdk 示例 Linux 兼容 + 事件 dedupe。
-- [ ] **V-1 / V-2 / V-3** vscode-extension daemon-down 退避 + request timeout + socket 探测重试。
-- [ ] **S-1 / S-2** package-windows.ps1 通配符行为 + build-daemon-bundle external 声明。
+- [x] **A-3** adapter-sdk `file-watcher.mjs` Linux 兼容 → `tryRecursiveWatch()` 捕获 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` 自动回退到 `watchRecursiveFallback()`，按顶层目录逐层 `fs.watch` 兜底，旧 Node + Linux 不再静默丢事件。
+- [x] **A-4** adapter-sdk `local-tool-bridge.mjs` 事件 dedupe → 新增 `createDedupe()` 工厂：sha1 行哈希 + 30s 窗口 + LRU 4000 cap，`drainChunk` 在分类前过滤；测试覆盖窗口内抑制、窗口外重新放行、LRU 淘汰最旧 key。
+- [x] **V-1** vscode-extension daemon-down 退避 → `scheduleReconnect()` 1s → 2s → 4s … 上限 60s；`SILENT_AFTER_FAILURES=3` 后静默；reconnect 成功补一条「VS Code 已连接」。
+- [x] **V-2** vscode-extension request timeout → `DEFAULT_REQUEST_TIMEOUT_MS=8000`，`req.setTimeout()` socket 级兜底，异常 socket 不再无限挂起。
+- [x] **V-3** vscode-extension socket 探测重试 → `watchConfigFile()` 返回布尔；config 文件不存在时 `startConfigProbe()` 用 `setInterval(5s).unref()` 周期探测，daemon 起来后自动装上 fs.watch。
+- [x] **S-1** `scripts/package-windows.ps1` 通配符行为 → 改用 `Get-ChildItem -LiteralPath | ForEach-Object { Copy-Item -LiteralPath ... -Recurse }` 显式枚举顶层条目，绕开 PS5/PS7 `"$dir\*"` 通配符语义差异。
+- [ ] **S-2** `scripts/build-daemon-bundle.mjs` external 声明（仍延后）。
+- [ ] **J-01 ~ J-10** GUI 前端 chat.js 长跑内存 / 重渲 / 链接处理 → 本轮以东京黑单栏 CSS 重做 + host 端 snapshot replay 临时收尾「刷新就空」与「布局太杂」两个最痛点；DOM 节点裁剪与 chatWorkflowSnapshot.test 同步更新放下一轮 Phase 2。
 
 > 修复完成后逐项 `[x]`，并在 [docs/IMPLEMENTATION_LOG.md](docs/IMPLEMENTATION_LOG.md) 追加 `2026-05-XX 第三轮审计修复` 段落。
 

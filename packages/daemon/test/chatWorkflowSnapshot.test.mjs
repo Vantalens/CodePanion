@@ -32,6 +32,12 @@ function loadChat() {
       <button class="group-button" data-group-mode="none"></button>
       <span class="status-dot"></span>
       <span class="status-text"></span>
+      <section id="source-status-panel">
+        <div class="source-status-row" data-source-kind="vscode">
+          <span class="source-status-dot" data-state="offline"></span>
+          <p id="vscode-source-status"></p>
+        </div>
+      </section>
       <div id="conversation-list"></div>
       <div id="batch-toolbar"></div>
       <button id="batch-toggle"></button>
@@ -217,10 +223,10 @@ test('passive config switcher workflow activity is not shown as a task', async (
   assert.equal(state.conversations.has('workflow:cc-thread'), false);
   assert.equal(state.activeConversation, '');
   assert.equal(win.document.querySelectorAll('.conversation-item').length, 0);
-  assert.match(win.document.getElementById('conversation-list').textContent, /当前没有待处理任务/);
+  assert.match(win.document.getElementById('conversation-list').textContent, /当前没有正在同步的任务/);
 });
 
-test('omnibar is hidden when the selected task has no actionable reply target', async () => {
+test('omnibar stays visible but disabled when the selected task has no reply target', async () => {
   const win = loadChat();
   const { handleMessage } = win.CodePanion.__test;
 
@@ -243,11 +249,11 @@ test('omnibar is hidden when the selected task has no actionable reply target', 
 
   await new Promise(resolve => win.requestAnimationFrame(resolve));
 
-  assert.equal(win.document.getElementById('omnibar').hidden, true);
+  assert.equal(win.document.getElementById('omnibar').hidden, false);
   assert.equal(win.document.getElementById('omnibar-input').disabled, true);
 });
 
-test('session prompts require explicit options and do not expose custom text entry', async () => {
+test('session prompts expose the omnibar for typed replies', async () => {
   const win = loadChat();
   const { handleMessage } = win.CodePanion.__test;
   const now = Date.now();
@@ -271,9 +277,11 @@ test('session prompts require explicit options and do not expose custom text ent
 
   await new Promise(resolve => win.requestAnimationFrame(resolve));
 
-  assert.equal(win.document.getElementById('omnibar').hidden, true);
-  assert.equal(win.document.getElementById('stage-focus-reply').hidden, true);
-  assert.equal(win.document.querySelector('.custom-input'), null);
+  assert.equal(win.document.getElementById('omnibar').hidden, false);
+  assert.equal(win.document.getElementById('omnibar-input').disabled, false);
+  assert.equal(win.document.getElementById('stage-focus-reply').hidden, false);
+  // 自由文本 session prompt 同时渲染 inline custom-input（freeform 注入）+ 启用 omnibar，详见 H4。
+  assert.ok(win.document.querySelector('.custom-input'), 'inline freeform 输入框应存在');
 
   handleMessage({
     type: 'workflow-event',
@@ -295,18 +303,18 @@ test('session prompts require explicit options and do not expose custom text ent
 
   await new Promise(resolve => win.requestAnimationFrame(resolve));
 
-  assert.equal(win.document.getElementById('omnibar').hidden, true);
+  assert.equal(win.document.getElementById('omnibar').hidden, false);
+  assert.equal(win.document.getElementById('omnibar-input').disabled, false);
   assert.equal(win.document.getElementById('stage-focus-reply').hidden, false);
   assert.equal(win.document.querySelectorAll('.option-button').length, 2);
-  assert.equal(win.document.querySelector('.custom-input'), null);
 
   win.document.querySelector('.option-button').click();
   assert.doesNotMatch(win.document.getElementById('chat-container').textContent, /您的回复/);
 });
 
-test('session prompts without options surface a CLI-direct-input hint', async () => {
-  // H4：自由文本 session prompt（密码、文件名）在 GUI 不可点选/不可输入时，
-  // 必须给用户明确引导回到 CLI 终端输入，否则会看上去"卡住"。
+test('session prompts without options render a freeform input box', async () => {
+  // H4：自由文本 session prompt（密码、文件名）在 PTY 接管会话下，GUI 直接给出输入框，
+  // 用户可在 GUI 内回写到 PTY（mode=freeform），不再要求回到 CLI 终端。
   const win = loadChat();
   const { handleMessage } = win.CodePanion.__test;
   const now = Date.now();
@@ -330,11 +338,11 @@ test('session prompts without options surface a CLI-direct-input hint', async ()
 
   await new Promise(resolve => win.requestAnimationFrame(resolve));
 
-  const hint = win.document.querySelector('.prompt-hint');
-  assert.ok(hint, '应渲染 .prompt-hint 引导用户');
-  assert.match(hint.textContent, /CLI 终端/);
+  const input = win.document.querySelector('.custom-input');
+  assert.ok(input, '应渲染 .custom-input 让用户在 GUI 内回写到 PTY');
+  assert.equal(input.type, 'text');
+  assert.match(input.placeholder, /自由文本|PTY/);
   assert.equal(win.document.querySelector('.option-button'), null);
-  assert.equal(win.document.querySelector('.custom-input'), null);
 });
 
 test('sources-snapshot replaces stale sources after observer reconnect', async () => {
@@ -358,6 +366,25 @@ test('sources-snapshot replaces stale sources after observer reconnect', async (
   assert.equal(state.sources.has('stale-source'), false);
   assert.equal(state.sources.has('kept-source'), true);
   assert.equal(state.sources.has('fresh-source'), true);
+});
+
+test('sidebar shows VS Code extension connection state from sources snapshot', async () => {
+  const win = loadChat();
+  const { handleMessage } = win.CodePanion.__test;
+
+  handleMessage({ type: 'connection-status', connected: true });
+  assert.match(win.document.getElementById('vscode-source-status').textContent, /未连接/);
+  assert.equal(win.document.querySelector('[data-source-kind="vscode"] .source-status-dot').dataset.state, 'offline');
+
+  handleMessage({
+    type: 'sources-snapshot',
+    sources: [
+      { id: 'vscode-source', kind: 'vscode', name: 'VS Code', status: 'online', workspace: 'D:\\CodePanion' },
+    ],
+  });
+
+  assert.match(win.document.getElementById('vscode-source-status').textContent, /在线/);
+  assert.equal(win.document.querySelector('[data-source-kind="vscode"] .source-status-dot').dataset.state, 'online');
 });
 
 test('internal approval transcripts are not shown as user tasks', async () => {
@@ -634,6 +661,27 @@ test('conversation list shows fixed 6-state status labels with next-step action 
   assert.equal(sourceOnline.kind, 'source-online');
   assert.equal(sourceOnline.label, '来源在线');
 
+  // 2026-05-24：来源已离线时把运行中类状态降级为 "来源已离线"，
+  // 防止"Codex 已关掉但 GUI 还显示运行中"这种与现实脱节的展示。
+  const sourceOffline = deriveConversationDisplay({
+    id: 't5b', status: 'activity', source: 'codex', sourceOnline: false,
+  });
+  assert.equal(sourceOffline.kind, 'source-offline');
+  assert.equal(sourceOffline.label, '来源已离线');
+  assert.match(sourceOffline.action, /确认|工具|运行/);
+
+  // 等待我 / 失败 / 需审阅 是用户必须处理的高优先级状态，
+  // 即使来源已离线也不能降级——否则会盖掉真正需要回复的任务。
+  const offlineButWaiting = deriveConversationDisplay({
+    id: 't5c', status: 'prompt', source: 'codex', sourceOnline: false,
+  });
+  assert.equal(offlineButWaiting.kind, 'waiting-me');
+
+  const offlineButError = deriveConversationDisplay({
+    id: 't5d', status: 'error', source: 'codex', sourceOnline: false,
+  });
+  assert.equal(offlineButError.kind, 'error');
+
   const running = deriveConversationDisplay({ id: 't6', status: 'activity', source: 'cli', commandCount: 3 });
   assert.equal(running.kind, 'running');
   assert.equal(running.label, '运行中');
@@ -735,7 +783,8 @@ test('prompts without a real reply target do not render any reply entry', async 
   const hint = win.document.querySelector('.prompt-hint');
   assert.ok(hint, '应给出"该提示无可回写目标"提示');
   assert.match(hint.textContent, /回到来源工具/);
-  assert.equal(win.document.getElementById('omnibar').hidden, true, 'omnibar 也必须隐藏');
+  assert.equal(win.document.getElementById('omnibar').hidden, false, 'omnibar 保持可见');
+  assert.equal(win.document.getElementById('omnibar-input').disabled, true, '无回写目标时输入框禁用');
 });
 
 test('session prompt detail surfaces a reply-target line above the options', async () => {
@@ -802,9 +851,9 @@ test('passive source workflow with a real prompt enters the main queue as 等待
   assert.equal(items[0].dataset.displayStatus, 'waiting-me');
 });
 
-test('VS Code 来源仅 activity 事件不会在主任务队列中制造假任务', async () => {
-  // P2.1：VS Code 扩展会把终端开/关、调试开始、激活心跳之类的事件发成 activity；
-  // 这些仅是"来源视图"信息，不能在主队列里冒出一个假的 VS Code 任务来抢用户注意力。
+test('VS Code / Claude Code activity is visible in the active task list', async () => {
+  // VS Code 端现在承载 Claude Code / Codex 终端输出，activity 必须进入主运行列表；
+  // 否则用户看不到 VS Code 里正在发生什么。
   const win = loadChat();
   const { handleMessage, state } = win.CodePanion.__test;
   const now = Date.now();
@@ -812,18 +861,21 @@ test('VS Code 来源仅 activity 事件不会在主任务队列中制造假任�
   handleMessage({
     type: 'workflow-snapshot',
     snapshot: {
-      threads: [{ id: 'vscode-thread', source: 'vscode', title: 'sample - VS Code', status: 'running', updatedAt: now, itemCount: 2 }],
+      threads: [{ id: 'vscode-thread', source: 'claude-code', title: 'sample - VS Code', status: 'done', updatedAt: now, itemCount: 2, sourceOnline: true }],
       items: [
-        { id: 'term-open', threadId: 'vscode-thread', source: 'vscode', kind: 'message', title: '终端打开：pwsh', content: 'shellPath=pwsh', timestamp: now - 1000 },
-        { id: 'debug-start', threadId: 'vscode-thread', source: 'vscode', kind: 'message', title: '调试开始：jest', content: 'sessionId=dbg-1', timestamp: now },
+        { id: 'claude-start', threadId: 'vscode-thread', source: 'claude-code', kind: 'message', title: 'Claude Code 开始执行', content: 'claude', timestamp: now - 1000 },
+        { id: 'claude-output', threadId: 'vscode-thread', source: 'claude-code', kind: 'message', title: 'Claude Code 输出', content: '正在修改 src/index.ts', status: 'done', timestamp: now },
       ],
     },
   });
 
   await new Promise(resolve => win.requestAnimationFrame(resolve));
 
-  assert.equal(state.conversations.has('workflow:vscode-thread'), false, 'VS Code 纯 activity 事件不应入主队列');
-  assert.equal(win.document.querySelectorAll('.conversation-item').length, 0, '主任务列表应为空');
+  assert.equal(state.conversations.has('workflow:vscode-thread'), true, 'Claude Code activity 应入主运行列表');
+  const items = win.document.querySelectorAll('.conversation-item');
+  assert.equal(items.length, 1);
+  const text = win.document.getElementById('conversation-list').textContent;
+  assert.match(text, /Claude Code|正在修改 src\/index\.ts/);
 });
 
 test('VS Code 来源出现真实失败时才会抬升为主队列任务', async () => {
@@ -1094,7 +1146,35 @@ test('snoozed and archived tasks are removed from the active queue and available
   assert.ok(laterItems.some(item => /已归档/.test(item.textContent)));
 });
 
-test('done view isolates completed tasks away from the pending queue', async () => {
+test('offline non-actionable workflow threads are removed from the active queue', async () => {
+  const win = loadChat();
+  const { handleMessage, state } = win.CodePanion.__test;
+  const now = Date.now();
+
+  handleMessage({
+    type: 'workflow-snapshot',
+    snapshot: {
+      threads: [
+        { id: 'offline-old', source: 'codex-desktop', title: '旧任务', status: 'running', updatedAt: now, itemCount: 1, sourceOnline: false },
+        { id: 'online-current', source: 'codex-desktop', title: '当前任务', status: 'running', updatedAt: now - 1000, itemCount: 1, sourceOnline: true },
+      ],
+      items: [
+        { id: 'offline-item', threadId: 'offline-old', source: 'codex-desktop', kind: 'message', title: 'assistant', content: '旧任务输出', timestamp: now },
+        { id: 'online-item', threadId: 'online-current', source: 'codex-desktop', kind: 'message', title: 'assistant', content: '当前任务输出', timestamp: now - 1000 },
+      ],
+    },
+  });
+
+  await new Promise(resolve => win.requestAnimationFrame(resolve));
+
+  state.activeView = 'active';
+  win.CodePanion.__test.renderAll();
+  const text = win.document.getElementById('conversation-list').textContent;
+  assert.match(text, /当前任务|当前任务输出/);
+  assert.doesNotMatch(text, /旧任务|旧任务输出/);
+});
+
+test('active view keeps recently synced completed tasks until the user reviews them', async () => {
   const win = loadChat();
   const { handleMessage, state } = win.CodePanion.__test;
   const now = Date.now();
@@ -1117,9 +1197,9 @@ test('done view isolates completed tasks away from the pending queue', async () 
 
   state.activeView = 'active';
   win.CodePanion.__test.renderAll();
-  assert.equal(win.document.querySelectorAll('.conversation-item').length, 1, '待处理看板不应混入完成任务');
+  assert.equal(win.document.querySelectorAll('.conversation-item').length, 2, '当前列表不应仅凭 done 状态隐藏任务');
   assert.match(win.document.getElementById('conversation-list').textContent, /仍在处理/);
-  assert.doesNotMatch(win.document.getElementById('conversation-list').textContent, /执行完成/);
+  assert.match(win.document.getElementById('conversation-list').textContent, /执行完成/);
 
   state.activeView = 'done';
   win.CodePanion.__test.renderAll();
@@ -1254,7 +1334,10 @@ test('snooze menu sends preset and custom task-state updates', async () => {
   const customApply = win.document.querySelector('#stage-snooze-menu [data-snooze-action="apply-custom"]');
   assert.ok(customInput, '稍后菜单应提供自定义时间输入');
   assert.ok(customApply, '稍后菜单应提供自定义时间确认按钮');
-  customInput.value = '2026-05-24T09:30';
+  const customDueAt = now + (3 * 60 * 60 * 1000);
+  const customDue = new Date(customDueAt);
+  const pad = (value) => String(value).padStart(2, '0');
+  customInput.value = `${customDue.getFullYear()}-${pad(customDue.getMonth() + 1)}-${pad(customDue.getDate())}T${pad(customDue.getHours())}:${pad(customDue.getMinutes())}`;
   customInput.dispatchEvent(new win.Event('input', { bubbles: true }));
   customApply.click();
 
@@ -1263,7 +1346,7 @@ test('snooze menu sends preset and custom task-state updates', async () => {
   assert.equal(actionMessages[0].threadId, 'snooze-thread');
   assert.ok(actionMessages[0].snoozedUntil >= now + (30 * 60 * 1000) - 1000, '30 分钟预设应写入正确的稍后时间');
   assert.equal(actionMessages[1].threadId, 'snooze-thread');
-  assert.equal(actionMessages[1].snoozedUntil, new Date('2026-05-24T09:30').getTime());
+  assert.equal(actionMessages[1].snoozedUntil, new Date(customInput.value).getTime());
 });
 
 test('batch task actions send restore, archive, and snooze updates for selected conversations', async () => {

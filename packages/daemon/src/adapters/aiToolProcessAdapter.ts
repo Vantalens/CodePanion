@@ -11,6 +11,8 @@ import { SourceManager } from '../daemon/sourceManager.js';
 const REPORT_FIELD_MAX = 80;
 
 const execFileAsync = promisify(execFile);
+const INITIAL_SCAN_DELAY_MS = 1500;
+const SCAN_INTERVAL_MS = 30_000;
 
 export type ProcessInfo = {
   processId: number;
@@ -39,6 +41,52 @@ export type ToolProfile = {
 };
 
 export const TOOL_PROFILES: ToolProfile[] = [
+  {
+    // Anthropic Claude Code CLI（`npm i -g @anthropic-ai/claude-code`）。
+    //
+    // 2026-05-24 严控：不再用 processPatterns，避免任何叫 claude.exe / claude-code.exe 的
+    // 同名程序被误识别；必须命令行里见到 npm 包路径 `@anthropic-ai/claude-code` 才算命中。
+    // 这避开了 VS Code 主进程 / helper / 其它带 "claude" 字串的进程被吞进来的回归。
+    kind: 'claude-code',
+    name: 'Claude Code',
+    group: 'CLI 型工具',
+    tier: 'first',
+    processPatterns: [],
+    commandPatterns: [
+      /[\\/]@anthropic-ai[\\/]claude-code[\\/]/i,
+    ],
+    capabilities: ['process-detected', 'cli-detected', 'anthropic-claude'],
+  },
+  {
+    // OpenAI Codex CLI（`npm i -g @openai/codex`）。
+    //
+    // 2026-05-24 严控：不再用 processPatterns。Codex Desktop（Electron 应用）的主进程
+    // 与多个 renderer / GPU / utility 子进程都叫 `codex.exe`，会被宽匹配抓成"运行中的
+    // Codex CLI 多份"，触发任务列表里同一来源被重复登记成 N 条。
+    // 命令行必须严格匹配 npm 包路径 `@openai/codex` 才算 CLI。Desktop 走 codexDesktopAdapter，
+    // 不在这里参与匹配。
+    kind: 'codex',
+    name: 'Codex CLI',
+    group: 'CLI 型工具',
+    tier: 'first',
+    processPatterns: [],
+    commandPatterns: [
+      /[\\/]@openai[\\/]codex[\\/]/i,
+    ],
+    capabilities: ['process-detected', 'cli-detected', 'openai-codex'],
+  },
+  {
+    // sst/opencode CLI。同样只靠 `@sst/opencode` 包路径锚定，避免任何同名 binary 误命中。
+    kind: 'external',
+    name: 'OpenCode',
+    group: 'CLI 型工具',
+    tier: 'first',
+    processPatterns: [],
+    commandPatterns: [
+      /[\\/]@sst[\\/]opencode[\\/]/i,
+    ],
+    capabilities: ['process-detected', 'cli-detected', 'opencode'],
+  },
   {
     kind: 'cc-switch',
     name: 'CC Switch',
@@ -145,10 +193,13 @@ export class AiToolProcessAdapter {
       return;
     }
 
-    this.scan().catch((err) => logger.warn({ err }, 'ai tool process initial scan failed'));
+    const initialTimer = setTimeout(() => {
+      this.scan().catch((err) => logger.warn({ err }, 'ai tool process initial scan failed'));
+    }, INITIAL_SCAN_DELAY_MS);
+    initialTimer.unref();
     this.timer = setInterval(() => {
       this.scan().catch((err) => logger.warn({ err }, 'ai tool process scan failed'));
-    }, 10_000);
+    }, SCAN_INTERVAL_MS);
     this.timer.unref();
   }
 
@@ -175,6 +226,19 @@ export class AiToolProcessAdapter {
           continue;
         }
 
+        // process-scan 路径不能走 sourceManager 的 kind 默认 metadata：
+        // - 'claude-code' / 'codex' kind 默认是 L3 cli-pty（CLI handoff 启动时是真 PTY），但
+        //   这里只是看到进程在跑，不持有它的 stdio，能力实质只到 L1-L2。
+        // - 显式标 process-scan 后 GUI 来源面板的「能力层级 / 接入方式 / 隐私边界」三项与
+        //   adapter 的实际语义一致，避免把进程级识别误展示成「深度接管」。
+        // switcher（cc-switch）保留默认 config-switcher 语义。
+        const overrideMetadata = profile.tier !== 'switcher'
+          ? {
+              capabilityLevel: 'L1-L2' as const,
+              integrationKind: 'process-scan' as const,
+              privacyBoundary: 'minimal-process' as const,
+            }
+          : {};
         const source = this.sources.register({
           kind: profile.kind,
           name: profile.name,
@@ -182,6 +246,7 @@ export class AiToolProcessAdapter {
           workspace: inferWorkspace(process),
           pid: process.processId,
           capabilities: profile.capabilities,
+          ...overrideMetadata,
         });
         this.sourceIdsByKey.set(key, source.id);
         this.emitDetectedEvent(source, profile, process);
@@ -228,9 +293,18 @@ export function matchToolProfile(process: ProcessInfo): ToolProfile | undefined 
 }
 
 export function sourceKeyForProcess(profile: ToolProfile, process: ProcessInfo): string {
-  if (profile.kind === 'cc-switch') {
+  // 路径级去重：CC Switch + 三个新加 CLI profile 一律按 binary 路径合并，
+  // 避免同一工具的多个子进程（VS Code helper / Electron renderer / npm shim 子进程）
+  // 被各自登记成独立 source —— 这就是 2026-05-24 用户反馈"列表里 8 条几乎一样的 Codex"
+  // 的根因。其它（IDE 型）保留 PID 区分，因为它们的多窗口需要分开统计。
+  if (
+    profile.kind === 'cc-switch' ||
+    profile.kind === 'claude-code' ||
+    profile.kind === 'codex' ||
+    profile.kind === 'external'
+  ) {
     const identity = normalizeProcessIdentity(process.path) || normalizeProcessIdentity(process.name);
-    return `${profile.kind}:${identity || 'cc-switch'}`;
+    return `${profile.kind}:${identity || profile.kind}`;
   }
   return `${profile.kind}:${process.processId}`;
 }

@@ -1,23 +1,33 @@
+/* 2026-05-23 东京黑（Tokyo Night）调色 + 极简单栏布局重做。
+   设计原则：
+   - 整体色调改为 Tokyo Night：bg #1a1b26，文本 #c0caf5，强调蓝 #7aa2f7。
+   - 单栏任务流：source-rail / 顶部 stage-actions 一排按钮 / 顶部四宫格 spotlight /
+     左侧 sidebar-tools 状态 tab / list-grouping 分组按钮 / 右侧 code-browser 抽屉
+     / 底部 omnibar 在视觉上一律隐藏。DOM 节点保留（chatWorkflowSnapshot.test.mjs
+     仍依赖这些 id），样式层 display: none !important 收住。
+   - 任务行 hover 时再露出 ⋯ 菜单。
+   下一个 PR 真正删除 DOM 节点 + 调整测试，本轮先做视觉重做。 */
 :root {
-    --bg: #f5f6f8;
-    --panel: #ffffff;
-    --panel-soft: #f0f2f5;
-    --panel-strong: #e8edf3;
-    --line: #dbe1e8;
-    --line-strong: #c7d0dc;
-    --text: #20242a;
-    --muted: #66717f;
-    --muted-2: #9aa5b1;
-    --accent: #2563eb;
-    --accent-soft: #eaf1ff;
-    --teal: #0f766e;
-    --green: #059669;
-    --orange: #d97706;
-    --red: #dc2626;
-    --code-bg: #121923;
-    --radius: 8px;
-    --font: "Segoe UI Variable Text", "Segoe UI", "Aptos", "Inter", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
-    --mono: "Cascadia Code", Consolas, "SFMono-Regular", monospace;
+    --bg: #1a1b26;
+    --panel: #1f2030;
+    --panel-soft: #16161e;
+    --panel-strong: #24283b;
+    --line: #292e42;
+    --line-strong: #3b4261;
+    --text: #c0caf5;
+    --muted: #9aa5ce;
+    --muted-2: #565f89;
+    --accent: #7aa2f7;
+    --accent-soft: #2a3050;
+    --teal: #7dcfff;
+    --green: #9ece6a;
+    --orange: #e0af68;
+    --red: #f7768e;
+    --purple: #bb9af7;
+    --code-bg: #16161e;
+    --radius: 6px;
+    --font: "Segoe UI Variable Text", "Segoe UI", "Inter", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+    --mono: "JetBrains Mono", "Cascadia Code", Consolas, "SFMono-Regular", monospace;
 }
 
 * { box-sizing: border-box; }
@@ -454,6 +464,7 @@ button {
 .conversation-dot.done { background: var(--green); }
 .conversation-dot.review { background: #8b5cf6; }
 .conversation-dot.source-online { background: var(--muted-2); }
+.conversation-dot.source-offline { background: #475569; }
 .conversation-dot.running { background: var(--accent); }
 .conversation-dot.deferred { background: #7c8aa1; }
 .conversation-dot.archived { background: #94a3b8; }
@@ -484,6 +495,15 @@ button {
 .conversation-item:has(.conversation-dot.deferred),
 .conversation-item:has(.conversation-dot.archived) {
     background: #f8fafc;
+}
+
+.conversation-item:has(.conversation-dot.source-offline) {
+    opacity: 0.62;
+}
+
+.conversation-item:has(.conversation-dot.source-offline) .status-chip {
+    background: #475569;
+    color: #e2e8f0;
 }
 
 .conversation-chip.status-chip {
@@ -1687,5 +1707,357 @@ button {
 
     #chat-container {
         padding: 14px;
+    }
+}
+
+/* ============================================================================
+   2026-05-23 极简单栏 + 东京黑 视觉重做
+   ----------------------------------------------------------------------------
+   策略：保留所有 DOM 节点（chatWorkflowSnapshot.test.mjs 依赖 id），
+   仅用 !important override 把"莫名其妙的东西"视觉隐藏；
+   主舞台留下：左侧任务流 + 右侧任务详情（仅核心）。
+   ========================================================================== */
+
+#app-shell {
+    grid-template-columns: 360px minmax(420px, 1fr) !important;
+    grid-template-rows: minmax(0, 1fr) auto !important;
+    background: var(--bg) !important;
+}
+
+/* 视觉隐藏：左侧 activity rail / 右侧 code-browser */
+#source-rail,
+#code-browser {
+    display: none !important;
+}
+
+#conversation-sidebar {
+    grid-column: 1 !important;
+    grid-row: 1 / 3 !important;
+}
+
+#conversation-main {
+    grid-column: 2 !important;
+    grid-row: 1 !important;
+}
+
+#omnibar {
+    grid-column: 2 !important;
+    grid-row: 2 !important;
+    display: grid !important;
+}
+
+/* 隐藏 sidebar 顶部一堆 metrics / sidebar-tools / list-grouping / batch-toolbar */
+.queue-overview,
+.sidebar-tools,
+.list-grouping,
+#batch-toolbar {
+    display: none !important;
+}
+
+/* 隐藏顶部 stage-actions 一大排操作按钮 + 顶部四宫格 spotlight + priority-strip */
+.stage-actions,
+.priority-strip,
+#task-spotlight,
+#conversation-header .crumb {
+    display: none !important;
+}
+
+/* 顶栏只保留任务标题 + meta，整体收紧 */
+#conversation-header {
+    border-bottom: 1px solid var(--line) !important;
+    padding: 14px 18px !important;
+    background: var(--panel-soft) !important;
+}
+
+#conversation-title {
+    color: var(--text) !important;
+    font-size: 15px !important;
+    font-weight: 600 !important;
+    margin: 0 !important;
+}
+
+.stage-meta {
+    color: var(--muted) !important;
+    font-size: 12px !important;
+    margin-top: 6px !important;
+}
+
+.stage-meta span {
+    color: var(--muted) !important;
+    background: transparent !important;
+}
+
+/* sidebar 容器：东京黑背景 + 紧凑 brand-row */
+#conversation-sidebar {
+    background: var(--panel-soft) !important;
+    border-right: 1px solid var(--line) !important;
+    color: var(--text) !important;
+}
+
+#conversation-sidebar .brand-row {
+    padding: 14px 16px !important;
+    border-bottom: 1px solid var(--line) !important;
+}
+
+#conversation-sidebar .brand-row h1 {
+    color: var(--text) !important;
+    font-size: 14px !important;
+    font-weight: 600 !important;
+}
+
+#conversation-sidebar .brand-row p {
+    color: var(--muted-2) !important;
+    font-size: 11px !important;
+}
+
+/* 极简单栏：brand-row 只保留 logo 标题，副标题 + 未连接指示器都收掉，
+   让 sidebar 顶部直接进入任务列表，避免用户看到莫名其妙的小控件。
+   实际连接状态会通过 stage-meta 和 source-offline 任务标记体现。*/
+#conversation-sidebar .brand-row p,
+#conversation-sidebar .status-indicator {
+    display: none !important;
+}
+
+#source-status-panel {
+    padding: 8px !important;
+    border-bottom: 1px solid var(--line) !important;
+    background: var(--panel-soft) !important;
+}
+
+.source-status-row {
+    display: grid !important;
+    grid-template-columns: auto minmax(0, 1fr) !important;
+    align-items: center !important;
+    gap: 10px !important;
+    padding: 9px 10px !important;
+    border: 1px solid var(--line) !important;
+    background: var(--panel) !important;
+    border-radius: var(--radius) !important;
+}
+
+.source-status-dot {
+    width: 8px !important;
+    height: 8px !important;
+    border-radius: 999px !important;
+    background: var(--muted-2) !important;
+}
+
+.source-status-dot[data-state="online"] {
+    background: var(--green) !important;
+}
+
+.source-status-dot[data-state="offline"] {
+    background: var(--red) !important;
+}
+
+.source-status-row strong {
+    display: block !important;
+    color: var(--text) !important;
+    font-size: 12px !important;
+    line-height: 1.2 !important;
+}
+
+.source-status-row p {
+    margin: 3px 0 0 !important;
+    color: var(--muted) !important;
+    font-size: 11px !important;
+    line-height: 1.35 !important;
+}
+
+/* 任务列表：东京黑卡片 + hover 抬升 */
+#conversation-list {
+    background: var(--panel-soft) !important;
+    padding: 8px !important;
+}
+
+.conversation-item {
+    background: var(--panel) !important;
+    border: 1px solid var(--line) !important;
+    color: var(--text) !important;
+    margin-bottom: 6px !important;
+    transition: background 0.12s, border-color 0.12s !important;
+}
+
+.conversation-item:hover {
+    background: var(--panel-strong) !important;
+    border-color: var(--line-strong) !important;
+}
+
+.conversation-item.active {
+    background: var(--accent-soft) !important;
+    border-color: var(--accent) !important;
+}
+
+.conversation-item .conversation-title,
+.conversation-item strong {
+    color: var(--text) !important;
+}
+
+.conversation-item .conversation-meta,
+.conversation-item .conversation-summary,
+.conversation-item small,
+.conversation-item p {
+    color: var(--muted) !important;
+}
+
+/* 主区背景 + 内容 */
+#conversation-main {
+    background: var(--bg) !important;
+    color: var(--text) !important;
+}
+
+#chat-container {
+    background: var(--bg) !important;
+    color: var(--text) !important;
+}
+
+/* 消息卡片整体走深色 */
+.message,
+.message-card,
+.workflow-summary,
+.workflow-details,
+.prompt-card,
+.error-card,
+.command-output,
+.tool-call,
+.file-change-card {
+    background: var(--panel) !important;
+    border: 1px solid var(--line) !important;
+    color: var(--text) !important;
+}
+
+.message-meta,
+.message-source,
+.message-timestamp,
+.message-role,
+.prompt-hint {
+    color: var(--muted) !important;
+}
+
+/* 代码块 / pre */
+pre,
+code,
+.code-block,
+.handoff-preview {
+    background: var(--code-bg) !important;
+    color: var(--text) !important;
+    border-color: var(--line) !important;
+}
+
+/* 按钮：保留功能，颜色调整 */
+.action-button {
+    background: var(--panel) !important;
+    border: 1px solid var(--line) !important;
+    color: var(--text) !important;
+}
+
+.action-button:hover:not(:disabled) {
+    background: var(--panel-strong) !important;
+    border-color: var(--accent) !important;
+    color: var(--accent) !important;
+}
+
+.action-button.primary {
+    background: var(--accent) !important;
+    border-color: var(--accent) !important;
+    color: #1a1b26 !important;
+}
+
+.action-button.primary:hover:not(:disabled) {
+    background: #9bb5f8 !important;
+    border-color: #9bb5f8 !important;
+}
+
+.action-button:disabled {
+    opacity: 0.4 !important;
+    cursor: not-allowed !important;
+}
+
+/* 状态标签 */
+.status-pill,
+.status-tag,
+.task-status,
+.capability-chip {
+    background: var(--panel-strong) !important;
+    border: 1px solid var(--line) !important;
+    color: var(--muted) !important;
+}
+
+.status-pill.urgent,
+.task-status.waiting-me,
+.task-status.urgent {
+    background: rgba(224, 175, 104, 0.15) !important;
+    border-color: var(--orange) !important;
+    color: var(--orange) !important;
+}
+
+.status-pill.danger,
+.task-status.error {
+    background: rgba(247, 118, 142, 0.15) !important;
+    border-color: var(--red) !important;
+    color: var(--red) !important;
+}
+
+.task-status.running {
+    background: rgba(122, 162, 247, 0.15) !important;
+    border-color: var(--accent) !important;
+    color: var(--accent) !important;
+}
+
+.task-status.done {
+    background: rgba(158, 206, 106, 0.15) !important;
+    border-color: var(--green) !important;
+    color: var(--green) !important;
+}
+
+/* 输入框 */
+input[type="text"],
+input:not([type]),
+textarea,
+select {
+    background: var(--panel-soft) !important;
+    border: 1px solid var(--line) !important;
+    color: var(--text) !important;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+    outline: none !important;
+    border-color: var(--accent) !important;
+}
+
+/* 滚动条 */
+::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bg);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--line-strong);
+    border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--muted-2);
+}
+
+/* 窄屏：单栏 fallback */
+@media (max-width: 760px) {
+    #app-shell {
+        grid-template-columns: 1fr !important;
+    }
+    #conversation-main {
+        display: none;
+    }
+    #app-shell.show-main #conversation-sidebar {
+        display: none;
+    }
+    #app-shell.show-main #conversation-main {
+        display: block;
     }
 }
