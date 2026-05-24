@@ -3,6 +3,7 @@ using System.IO;
 using System.Net.Http;
 using System.Net.WebSockets;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -15,6 +16,7 @@ namespace CodePanion.Gui.Services
     {
         private WebsocketClient? _wsClient;
         private readonly HttpClient _httpClient;
+        private static readonly TimeSpan HealthProbeTimeout = TimeSpan.FromMilliseconds(700);
         private string _daemonUrl = "http://127.0.0.1:7777";
         private string _token = "";
 
@@ -98,7 +100,8 @@ namespace CodePanion.Gui.Services
 
                 try
                 {
-                    var response = await _httpClient.GetAsync(healthUrl);
+                    using var cts = new CancellationTokenSource(HealthProbeTimeout);
+                    var response = await _httpClient.GetAsync(healthUrl, cts.Token);
 
                     if (!response.IsSuccessStatusCode)
                     {
@@ -338,6 +341,46 @@ namespace CodePanion.Gui.Services
             };
             request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {_token}");
             return await _httpClient.SendAsync(request);
+        }
+
+        // C 修复（"刷新就空"）：daemon WebSocket 是长连，只在状态变化时推增量。
+        // 用户在 GUI 启动后再启停工具（Codex 关掉 / Claude Code 打开）时，host 端
+        // 缓存可能跟实际状态脱节。WebView 右键刷新发回 ready 时，host 用这两个 GET
+        // 主动重拉一次权威 snapshot 推给 WebView，比靠 host 端 cache replay 稳。
+        public async Task<string?> FetchSourcesSnapshotJsonAsync()
+        {
+            try
+            {
+                var url = $"{_daemonUrl}/sources";
+                var request = new HttpRequestMessage(HttpMethod.Get, url);
+                request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {_token}");
+                var response = await _httpClient.SendAsync(request);
+                if (!response.IsSuccessStatusCode) return null;
+                return await response.Content.ReadAsStringAsync();
+            }
+            catch (Exception ex)
+            {
+                Log($"刷新来源快照失败：{ex.Message}");
+                return null;
+            }
+        }
+
+        public async Task<string?> FetchWorkflowSnapshotJsonAsync()
+        {
+            try
+            {
+                var url = $"{_daemonUrl}/workflow/snapshot";
+                var request = new HttpRequestMessage(HttpMethod.Get, url);
+                request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {_token}");
+                var response = await _httpClient.SendAsync(request);
+                if (!response.IsSuccessStatusCode) return null;
+                return await response.Content.ReadAsStringAsync();
+            }
+            catch (Exception ex)
+            {
+                Log($"刷新工作流快照失败：{ex.Message}");
+                return null;
+            }
         }
 
         public async Task<bool> SendReplyAsync(string sessionId, string text)

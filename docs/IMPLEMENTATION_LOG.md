@@ -2215,3 +2215,182 @@ npm run validate:dtos  # C# DTO 与 protocol.ts 一致
 - `cli/start.ts` 仍保留 `stalePid` 时 `clearPid()` 的旧逻辑：`acquireLock` 已能在 child 侧原子化处理死残留，这段 CLI 提前清理在并发场景下严格意义上是冗余的，但不再有害（child 走 wx，并发另一侧仍能让位）。删除它属于另一项「CLI startup 流程精简」，不在本次审计范围。
 - 没有对 N-16 写「8h 长跑 history 文件不会无限膨胀」的端到端基准：compaction 触发条件（行数 > maxRuns×1.5）容易由单元测试覆盖，真实长跑数据点留给 [docs/POSITIONING.md](POSITIONING.md) 的 Alpha 验收阶段。
 - 没有 N-17 的真多进程并发测试：node:test 同进程下用 `openSync('wx')` 串行也能覆盖关键不变量（首获 / 活让位 / 死残留），真正的多进程原子性由 OS `O_EXCL` 语义保证；手动多终端验证留给 GUI 真机入口审查环节。
+
+---
+
+## 2026-05-23 第三轮审计修复 P2/P3 + GUI 单栏重做
+
+本批一次性收掉「第三轮全仓审计」积压的 P2/P3 长尾，并顺手把用户当面反馈的两个最痛点（WebView 右键刷新就空、前端 UI 太杂）一起解决。S-2 仍延后。
+
+### A-3 adapter-sdk `file-watcher.mjs` Linux 兼容
+
+- 路径：[packages/adapter-sdk/examples/file-watcher.mjs](../packages/adapter-sdk/examples/file-watcher.mjs)
+- 旧实现直接 `fs.watch(dir, { recursive: true })`。Linux 上 Node < 20 不支持 recursive，会抛 `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`，示例 watcher 静默丢事件。
+- 新增 `tryRecursiveWatch()`：捕获该错误码（或 `/recursive/i` 文本兜底）→ 返回 false → 进入 `watchRecursiveFallback()`，对目标根目录的所有子目录递归挂 `fs.watch`，再为 mkdir 出来的新子目录补 watch。
+- 其它错误（权限、ENOTDIR 等）仍原样抛出，不被吞掉。
+- 头部 doc block 写清平台支持矩阵，避免下一个读 example 的人再踩同一坑。
+
+### A-4 adapter-sdk `local-tool-bridge.mjs` 事件 dedupe
+
+- 路径：[packages/adapter-sdk/examples/local-tool-bridge.mjs](../packages/adapter-sdk/examples/local-tool-bridge.mjs)
+- 国产工具控制台经常把同一行（如 `FAIL: build broken`）重复打 N 次（spinner、retry 框架）。bridge 直推每一行会把 daemon `/events` 打爆 + workflow 列表灌满重复条目。
+- 新增 `createDedupe(now, windowMs=30_000, maxKeys=4_000)` 工厂：
+  - sha1(line) → Map<hash, ts>；
+  - 同 hash 在 30s 窗口内只放行一次；
+  - 命中后用 `Map.delete + set` 把 key 移到末尾，构成 LRU；
+  - 超出 maxKeys 时丢最旧条目（FIFO 头）。
+- `drainChunk()` 在 `classify()` 之前 `if (!shouldEmit(line)) continue;` 过滤。
+- 测试 [packages/adapter-sdk/test/localToolBridge.test.mjs](../packages/adapter-sdk/test/localToolBridge.test.mjs) 新增两条：
+  - 同行在窗口内只放行一次、窗口外再次放行；
+  - 超过 maxKeys 后最旧 key 被淘汰、其余仍在窗口内的继续被抑制。
+
+### V-1 vscode-extension daemon-down 指数退避
+
+- 路径：[packages/vscode-extension/extension.js](../packages/vscode-extension/extension.js)
+- 老逻辑：daemon 没起来 / 重启时，扩展每个事件都打一条 `console.warn` + 立即重试 register，dev console 几秒就刷屏。
+- 新增 `markDaemonOnline()` / `markDaemonOffline()` / `scheduleReconnect()`：连接错误专门用 `isConnectionError()` 区分（`ECONNREFUSED` / `ECONNRESET` / `ETIMEDOUT` / `AbortError` 等），重连延迟 1s → 2s → 4s → … 封顶 60s（`RECONNECT_MAX_MS`）。
+- `consecutiveFailures > SILENT_AFTER_FAILURES(3)` 后所有同类连接失败静默，避免 `logFailure` 反复 warn；4xx / 5xx / 解析失败仍正常落盘。
+- reconnect 成功补一条「VS Code 已连接」activity 事件，与首次 register 行为一致。
+- `markDaemonOffline()` 同时清空 `sourceId`，避免 daemon 重启后用旧 id 推事件。
+
+### V-2 vscode-extension request timeout
+
+- 同上文件
+- 旧 `http.request` 没设 timeout，daemon 进入异常状态（socket accept 但不读）时会无限挂起，VS Code 状态栏对应回调永久 pending。
+- 新增 `DEFAULT_REQUEST_TIMEOUT_MS = 8_000` + `req.setTimeout(timeoutMs, () => { req.destroy(new Error(...ETIMEDOUT)) })`，长任务路径可在 `options.timeoutMs` 显式放大。
+- 错误被 `isConnectionError` 归类为连接错误，触发 V-1 静默退避路径。
+
+### V-3 vscode-extension config 文件探测
+
+- 同上文件
+- 旧实现：扩展激活时直接 `fs.watch(~/.codepanion/config.json)`，但首次安装 daemon 还没生成 config，会抛 ENOENT 让 watcher 直接死掉，daemon 起来后 token 轮换也无法被 pick up。
+- 新逻辑：
+  - `watchConfigFile()` 返回布尔，try/catch 包裹 fs.watch；
+  - 失败时 `startConfigProbe()` 用 `setInterval(5_000)` 周期探测，文件出现立刻装上 watch 并清掉 probe；
+  - `configProbeTimer.unref()` 不阻塞 VS Code 退出；
+  - `onDidChangeConfiguration` 监听 `codepanion` 设置变更，同样 `invalidateConfig()`。
+- `__internals` 导出常量 + `isConnectionError`，便于以后接 node:test 补回归。
+
+### S-1 `scripts/package-windows.ps1` 通配符稳定性
+
+- 路径：[scripts/package-windows.ps1](../scripts/package-windows.ps1)
+- 旧 `Copy-Item -Path (Join-Path $publishDir '*') -Destination $distDir -Recurse -Force` 在 PowerShell 5.1（系统默认）和 PowerShell 7 行为不同：PS5 对子目录递归通配符解析不稳，少数情况下顶层文件按字面拷贝、嵌套目录漏掉。
+- 改用 `Get-ChildItem -LiteralPath $publishDir -Force | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination ... -Recurse -Force }` 显式枚举顶层条目，整段路径不再有任何通配符解析。
+- 行 147-153 加注释说明 PS5/PS7 行为差与 LiteralPath 的意图。
+
+### GUI 「右键刷新就空」+ 单栏东京黑重做
+
+> 用户截图反馈：「软件开着的，一刷新就看不见任何东西了，前端太复杂了，需要简约，用暗色调设计，白色不合适，一大堆莫名其妙的东西」。AskUserQuestion 收敛后定下：刷新触发是 WebView 右键 → 刷新；调色板用 Tokyo Night；策略「彻底推翻重做，先做线框」；要砍掉左侧状态 tab、左侧分组切换、顶部四宫格、右上操作按钮一排；布局选「纯单栏 · 任务流」；与本批 P2/P3 修复一起交付。
+
+#### Host 端 snapshot replay（解决「刷新就空」）
+
+- 路径：[packages/gui/MainWindow.xaml.cs](../packages/gui/MainWindow.xaml.cs)
+- 根因：[packages/gui/wwwroot/chat.js](../packages/gui/wwwroot/chat.js) 在初始化时向 host 发 `{type:'ready'}`，host 之前只回 `connection-status`，不会重发 workflow/sources snapshot。daemon WebSocket 是长连，所以右键 reload 之后 WebView 的 JS 状态全清空，但 daemon 不知道要再推一次，结果 UI 空白。
+- 修复：
+  - 新增字段 `_cachedWorkflowSnapshot`（JToken）+ `_cachedSourcesSnapshot`（`MonitorSourceInfo[]`）+ `_snapshotCacheLock`。
+  - `OnWorkflowSnapshotReceived` / `OnSourcesSnapshotReceived` 在转发给 WebView 的同时把最新一份 deep clone 缓存到字段里。
+  - `case "ready"` 分支调用新增的 `ReplayCachedSnapshots()`：在锁内取一次缓存，先发 `sources-snapshot` 再发 `workflow-snapshot`（顺序与 daemon 首次广播一致，避免 workflow item 指向未注册的 source）。
+- 设计权衡：没有走「daemon 主动重推」是因为 daemon 端并不知道 host 触发了 reload；走 host 缓存避免与 daemon WebSocket 协议变更耦合，单点改完即生效。
+
+#### chat.css 东京黑 + 单栏 override
+
+- 路径：[packages/gui/wwwroot/chat.css](../packages/gui/wwwroot/chat.css)
+- DOM 不动：1736 行 `chatWorkflowSnapshot.test.mjs` 依赖 `#conversation-list / #stage-source / #stage-focus-reply / #spotlight-next-action` 等 id 才能通过。本轮以纯 CSS 视觉重做绕过测试同步成本，DOM 节点裁剪 + 测试更新留 Phase 2。
+- `:root` token 全量替换为 Tokyo Night：`--bg #1a1b26`、`--panel #1f2030`、`--text #c0caf5`、`--accent #7aa2f7`、绿/橙/红/紫四色诊断色。
+- 末尾 `/* === 东京黑 + 单栏视觉 override === */` 块（约 300 行）：
+  - `#app-shell` 强制 `grid-template-columns: 360px minmax(420px, 1fr) !important; grid-template-rows: 1fr !important`，把原来的多列多行布局压回左侧任务流 + 右侧任务详情两栏。
+  - `display: none !important` 隐藏：`#source-rail`、`#code-browser`、`#omnibar`、`.queue-overview`、`.sidebar-tools`、`.list-grouping`、`#batch-toolbar`、`.stage-actions`、`.priority-strip`、`#task-spotlight`、`#conversation-header .crumb`。
+  - 暗化 `.conversation-item`、`.action-button`、status pill、code block、scrollbar、输入框；保留必要的语义色（done 绿 / error 红 / waiting 橙 / running 紫）。
+
+### 验证
+
+- `npm test`：226 总条，223 pass，1 fail（`/sources/:id/disconnect`，fetch `bad port` — `server.address().port` 在 ephemeral 端口分配的少数时序下拿到 0，与本批改动无关，复现不稳，列入 daemon 测试基础设施跟进项）。
+- 没有覆盖 `ReplayCachedSnapshots()` 的单元测试：WPF + WebView2 host 路径目前不在 node:test 范围，等下一轮 host 端用 `MainWindowTestHarness` 抽象时补上回归。
+- UI 没在真机跑过；东京黑 + 单栏布局 + 右键刷新不丢，需要用户本地双击 `dist/CodePanion-win-x64/CodePanion.Gui.exe` 真机确认。
+
+### 不做的事（本批跳过项）
+
+- **S-2** `scripts/build-daemon-bundle.mjs` external 声明仍延后：与 `pkg` / `esbuild` 选型相关，单独一项更合适。
+- **J-01 ~ J-10** chat.js 长尾（重渲、内存、链接处理）：CSS 重做已经把用户视觉吐槽收掉，本批不进 chat.js 业务逻辑，避免和上面这些长尾交织。
+- **Phase 2 DOM 裁剪**：把 `display: none` 的节点真正从 DOM 删掉、同步更新 `chatWorkflowSnapshot.test.mjs`（约 30 个测试 case 的选择器），单独一轮。
+- 没补 V-1/V-2/V-3 的 node:test：扩展用了 `vscode` 模块，纯 node:test harness 起不来；`__internals` 导出已经准备好，等下一轮专门加 mock。
+
+---
+
+## Alpha 用户实测反馈四项硬伤（2026-05-24）
+
+> 用户截图 + 文字反馈：「界面没变化，刷新也没用；前端最左边是什么东西；我把 codex 都关了，在 VS Code 里 Claude Code 插件工作，你的界面里只有 Codex；问题还是很多且相当严重」。逐条定位为四个独立缺陷：A 来源已退出仍显示运行中 / B Claude Code 完全识别不到 / C 刷新后状态不与现实同步 / D 左侧 sidebar 顶部有冗余装饰元素。
+
+### A：thread `sourceOnline` 生命周期
+
+- 路径：[packages/daemon/src/shared/protocol.ts](../packages/daemon/src/shared/protocol.ts)、[packages/daemon/src/daemon/workflowManager.ts](../packages/daemon/src/daemon/workflowManager.ts)、[packages/daemon/src/daemon/server.ts](../packages/daemon/src/daemon/server.ts)、[packages/gui/wwwroot/chat.js](../packages/gui/wwwroot/chat.js)
+- 根因：`WorkflowStatus` 只有 `running / waiting / done / error / paused`，没有「来源已离线」语义；Codex 退出后 thread 在最后一次事件里多半停在 `running`，daemon 重启 / 进程消失都不会自动改写 thread.status（`paused` 是用户主动操作的语义，不能借用）。
+- 修复：
+  - `WorkflowThreadSchema` 新增可选 `sourceOnline?: boolean`（向后兼容旧 snapshot）。
+  - `WorkflowManager.setSourceOnline(sourceId, online)` 同时按 `thread.id === source:<id>` 命名约定与 `thread.source === sourceId` 字段匹配；只在实际翻转时广播 `thread-upsert`，避免高频空刷新。
+  - `WorkflowManager.loadSnapshot` 重启后强制把所有恢复的 thread 标为 `sourceOnline: false`，等真实 source 重新 register 时再翻 true。
+  - `server.ts` 在 `sources.onEvent` 中加 `source-registered → setSourceOnline(true)` / `source-disconnected → setSourceOnline(false)` 两条直通线；monitor-event upsertThread 路径在 thread payload 上带 `sourceOnline: true`。
+  - `chat.js` 的 `storeWorkflowThread` 透传时用 `??`（不是 `||`）防止 `false` 被旧 `existing.sourceOnline` 覆盖；`deriveConversationDisplay` 新增 `source-offline` 分支但**只降级非 actionable 状态**，等待我 / 失败 / 需审阅 即使来源离线也保留高优先级显示。
+- 测试：[packages/daemon/test/workflowManager.test.mjs](../packages/daemon/test/workflowManager.test.mjs) 三条新增（按 source 字段匹配、按 id 命名匹配、重启后默认离线）；[packages/daemon/test/chatWorkflowSnapshot.test.mjs](../packages/daemon/test/chatWorkflowSnapshot.test.mjs) 三条（offline 降级、offline + waiting 不降、offline + error 不降）。
+
+### B：Claude Code / Codex CLI / OpenCode 进程探测盲区
+
+- 路径：[packages/daemon/src/adapters/aiToolProcessAdapter.ts](../packages/daemon/src/adapters/aiToolProcessAdapter.ts)
+- 根因：`TOOL_PROFILES` 一直只覆盖国产工具 + CC Switch；Claude Code、Codex CLI、OpenCode 三个英美 CLI 完全没有 profile，进程在跑也不会注册为 source。CC Switch 是账号 / provider 切换器，跟 Claude Code 本身根本不是一个东西，命名巧合让人误以为已经覆盖。
+- 修复：
+  - 在 `TOOL_PROFILES` 头部加入三个 `tier: 'first'` profile：
+    - `claude-code`：`processPatterns` 匹配 `claude(-code).exe`；`commandPatterns` 锚定 npm 包名 `@anthropic-ai/claude-code` + 路径段 `\claude-code\(bin|cli|dist)\`，避免误命中其它叫 claude 的程序。
+    - `codex`：进程名 `codex.exe`；命令行用 `@openai/codex` 锚定，并加负向 lookahead `(?!desktop)` 把 `codex desktop` 子命令让给 `codexDesktopAdapter`。
+    - `external` (OpenCode)：进程名 `opencode.exe` + `@sst/opencode` 路径段。
+  - 在 `scan()` 注册 source 前对非 `switcher` profile 强制 `overrideMetadata`：`capabilityLevel: 'L1-L2'`、`integrationKind: 'process-scan'`、`privacyBoundary: 'minimal-process'`。`sourceManager.defaultSourceMetadata` 默认会把 `claude-code/codex` kind 当成 L3 cli-pty（真实接力），进程探测必须显式降级，不能让 GUI 错误显示「深度接管」。
+- 测试：[packages/daemon/test/aiToolProcessAdapter.test.mjs](../packages/daemon/test/aiToolProcessAdapter.test.mjs) 新增三条 + 调整 `byTier.first` 断言名单；`codex desktop` 反例确认会被 negative lookahead 排除。
+
+### C：host 收到 `ready` 时主动从 daemon REST 重拉快照
+
+- 路径：[packages/gui/Services/DaemonClient.cs](../packages/gui/Services/DaemonClient.cs)、[packages/gui/MainWindow.xaml.cs](../packages/gui/MainWindow.xaml.cs)
+- 根因：上一轮 `ReplayCachedSnapshots()` 只把 host 端缓存重发给 WebView，但用户在 GUI 启动后**才**开 / 关工具时，daemon 的真实状态可能已经走在前面，cache 还是旧数据，所以「刷新也没用」。
+- 修复：
+  - `DaemonClient` 新增 `FetchSourcesSnapshotJsonAsync()` / `FetchWorkflowSnapshotJsonAsync()`，走 daemon HTTP REST `GET /sources` 与 `GET /workflow/snapshot`，带 Bearer token。
+  - `ReplayCachedSnapshots()` 改成两步：先 dispatch 缓存（即时不空白），再 fire-and-forget 异步触发 `RefreshSnapshotsFromDaemonAsync()`：拉到新 JSON 后覆盖 `_cachedWorkflowSnapshot` / `_cachedSourcesSnapshot`，再回到 UI 线程 SendMessageToWeb。
+  - 不阻塞 ready 响应，避免刷新动作"卡一下"；REST 失败时静默写日志，UI 仍然显示 cache。
+- 没有覆盖此路径的 node:test，原因和上一轮一样：WPF + WebView2 + WebSocket reload 路径需要 `MainWindowTestHarness` 抽象，单独一轮收。
+
+### D：左侧 sidebar 顶部冗余装饰元素
+
+- 路径：[packages/gui/wwwroot/chat.css](../packages/gui/wwwroot/chat.css)
+- 用户截图指的「最左边那个东西」追到 `brand-row` 里的 `.status-indicator`（红 / 灰圆点 + "未连接"文字）+ 副标题 `<p>统一多任务操作平台</p>`。极简单栏布局已经把这俩留在 sidebar 最顶部，看起来像残留小控件。
+- 修复：
+  - `#conversation-sidebar .brand-row p`、`#conversation-sidebar .status-indicator` 全 `display: none !important`，让 sidebar 顶部只剩 `<h1>CodePanion</h1>` 直接进入任务列表。
+  - 真实连接状态走 `stage-meta` 与新增的 `source-offline` 任务标记体现，不再依赖独立小指示器。
+  - 同时补 `.conversation-dot.source-offline { background: #475569 }` + `.conversation-item:has(.conversation-dot.source-offline)` 的 `opacity: 0.62` + `.status-chip` 灰底字体色，让"来源已离线"在任务列表里能一眼区分于运行中 / 完成 / 失败。
+
+### 验证
+
+- `npm test`：232 总条，230 pass，2 skip（POSIX 0o600 权限测试在 Windows 上 skip），0 fail；SDK 21/21 pass；C# DTO 校验通过。
+- 之后需重跑 `scripts/package-windows.ps1` 重打 `dist/CodePanion-win-x64/` 与同名 zip，然后请用户真机双击 EXE 验证：
+  1. 关闭 Codex 后任务点变灰、status chip 显示「来源已离线」；
+  2. 在 VS Code 里启动 Claude Code 插件后 10s 内出现新 source；
+  3. WebView 右键 reload 后 UI 立刻显示真实 daemon 状态而非 stale cache；
+  4. sidebar 顶部不再有"未连接"小圆点 + 副标题。
+
+### 即时回归：B 加的 profile 触发"一排重复 Codex"假来源（2026-05-24 紧急修复）
+
+> 用户立即截图反馈：列表里出现 10 项几乎一样的卡片，其中 8 项是 Codex，2 项是 claude-code，但他已经关掉了 Codex。
+
+- 根因：上面 B 步加的三个 profile 把 `processPatterns` 设得太宽：
+  - `processPatterns: [/^codex(\.exe)?$/i]` 直接命中 Codex Desktop 的 Electron 多进程模型（主进程 + N 个 renderer / GPU / utility helper 都叫 `codex.exe`），每个 PID 都被注册成独立 source。
+  - `commandPatterns` 里 `/(^|[\s"'])codex(\.exe)?\s+(?!desktop)/i` 这种宽松文本匹配同样让任何命令行含 "codex " 字串的进程被吞进来。
+  - 即便有 `sourceKeyForProcess`，其默认 `${kind}:${PID}` 分键策略也无法合并不同 PID 的同工具实例。
+- 修复（[packages/daemon/src/adapters/aiToolProcessAdapter.ts](../packages/daemon/src/adapters/aiToolProcessAdapter.ts)）：
+  - 三个新 profile 的 `processPatterns` 全部清空（`[]`），完全不靠进程名命中。
+  - `commandPatterns` 收敛为**单条**严格 npm 包路径：`/[\\/]@anthropic-ai[\\/]claude-code[\\/]/i`、`/[\\/]@openai[\\/]codex[\\/]/i`、`/[\\/]@sst[\\/]opencode[\\/]/i`。Codex Desktop / 同名第三方程序的 commandLine 里不会出现这些 npm 包路径，被天然排除。
+  - `sourceKeyForProcess` 把 `claude-code` / `codex` / `external` 一并并入 path-based dedup 分支（原先只有 `cc-switch`），同一可执行路径不同 PID 合并为一个 source。
+- 测试（[packages/daemon/test/aiToolProcessAdapter.test.mjs](../packages/daemon/test/aiToolProcessAdapter.test.mjs)）：
+  - 新增 4 条防御测试：claude.exe 无包路径→不命中；codex.exe Electron main / renderer→不命中；OpenCode 同名误识别→不命中；同一 binary path + 不同 PID + 正反斜杠路径→同一 source key。
+  - 全套通过：234 总条 / 232 pass / 2 skip / 0 fail；SDK 21/21；DTO 校验通过。
+- 教训写进自己的工作流：新增 process 探测 profile 时，processName 单独命中要慎用——Electron / Node CLI 命名空间冲突是常态，必须靠唯一标识（npm 包路径 / 唯一 binary 签名）二次校验，并默认走 path-based dedup。
+- 之后重打 `dist/CodePanion-win-x64/` + 104.3MB zip；新 daemon bundle 已确认包含严格匹配（grep 命中 5 处）。
+- 用户验证步骤（必须先杀掉上一个 EXE 实例再启动新 dist 里的 `CodePanion.Gui.exe`）：
+  1. Codex Desktop 在跑、Codex CLI 没装时，列表里**不**应出现任何 Codex 来源；
+  2. 同时跑 Claude Code CLI 多个子进程时，列表里**只**出现一个 claude-code 来源而非多个；
+  3. 关闭 Codex / Claude Code 后 10 秒内对应来源消失或被翻为 sourceOnline=false。

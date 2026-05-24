@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -40,6 +41,12 @@ namespace CodePanion.Gui
         private bool _isConnected;
         private bool _isReconnectInProgress;
         private int _reconnectAttempts;
+        // 用户右键 → 刷新 WebView 时 JS state 会清空。daemon WebSocket 不会重发 snapshot，
+        // 于是页面看起来一片空。这里缓存最后一次拿到的 workflow-snapshot / sources-snapshot
+        // / sessions snapshot，WebView ready 时一次性 replay，保证刷新后任务列表立刻回来。
+        private JToken? _cachedWorkflowSnapshot;
+        private MonitorSourceInfo[]? _cachedSourcesSnapshot;
+        private readonly object _snapshotCacheLock = new object();
 
         public MainWindow()
         {
@@ -105,9 +112,10 @@ namespace CodePanion.Gui
         {
             try
             {
-                await InitializeWebView();
                 AddLog("正在连接到 CodePanion daemon...");
-                await ConnectToDaemon();
+                var connectTask = ConnectToDaemon();
+                await InitializeWebView();
+                await connectTask;
             }
             catch (Exception ex)
             {
@@ -204,6 +212,7 @@ namespace CodePanion.Gui
                 {
                     case "ready":
                         SendMessageToWeb(new { type = "connection-status", connected = _isConnected });
+                        ReplayCachedSnapshots();
                         break;
 
                     case "reply":
@@ -708,6 +717,7 @@ namespace CodePanion.Gui
             {
                 // 一次性投递整份 snapshot，让 web 端做 reset+merge，
                 // 否则只发 source-registered 会保留已下线但 disconnect 事件丢失的来源。
+                lock (_snapshotCacheLock) { _cachedSourcesSnapshot = sources; }
                 SendMessageToWeb(new { type = "sources-snapshot", sources });
             });
         }
@@ -716,12 +726,72 @@ namespace CodePanion.Gui
         {
             Dispatcher.Invoke(() =>
             {
+                lock (_snapshotCacheLock) { _cachedWorkflowSnapshot = snapshot?.DeepClone(); }
                 SendMessageToWeb(new
                 {
                     type = "workflow-snapshot",
                     snapshot
                 });
             });
+        }
+
+        // WebView 刷新（右键 / F5）后 JS 状态被清空，daemon WS 没断不会重推。
+        // 两步策略：
+        //   1) 先 replay host 端缓存的最近一份 snapshot，让 UI 立刻有内容，不黑屏；
+        //   2) 然后异步走 daemon REST 重拉一次权威 snapshot 覆盖。这一步关键 ——
+        //      host 缓存可能跟 daemon 真实状态脱节（用户在 GUI 启动后启停了工具），
+        //      只 replay cache 会出现"我刷新了也没用"的状态滞后。
+        private void ReplayCachedSnapshots()
+        {
+            JToken? workflow;
+            MonitorSourceInfo[]? sources;
+            lock (_snapshotCacheLock)
+            {
+                workflow = _cachedWorkflowSnapshot;
+                sources = _cachedSourcesSnapshot;
+            }
+            if (sources != null && sources.Length > 0)
+            {
+                SendMessageToWeb(new { type = "sources-snapshot", sources });
+            }
+            if (workflow != null)
+            {
+                SendMessageToWeb(new { type = "workflow-snapshot", snapshot = workflow });
+            }
+
+            // 异步刷新：fire-and-forget，REST 失败时保留 cache replay 的结果，不让 UI 倒退到空。
+            _ = RefreshSnapshotsFromDaemonAsync();
+        }
+
+        private async Task RefreshSnapshotsFromDaemonAsync()
+        {
+            try
+            {
+                var sourcesJson = await _daemonClient.FetchSourcesSnapshotJsonAsync();
+                if (!string.IsNullOrWhiteSpace(sourcesJson))
+                {
+                    var sources = JsonConvert.DeserializeObject<MonitorSourceInfo[]>(sourcesJson!);
+                    if (sources != null)
+                    {
+                        lock (_snapshotCacheLock) { _cachedSourcesSnapshot = sources; }
+                        await Dispatcher.InvokeAsync(() =>
+                            SendMessageToWeb(new { type = "sources-snapshot", sources }));
+                    }
+                }
+
+                var workflowJson = await _daemonClient.FetchWorkflowSnapshotJsonAsync();
+                if (!string.IsNullOrWhiteSpace(workflowJson))
+                {
+                    var snapshot = JToken.Parse(workflowJson!);
+                    lock (_snapshotCacheLock) { _cachedWorkflowSnapshot = snapshot.DeepClone(); }
+                    await Dispatcher.InvokeAsync(() =>
+                        SendMessageToWeb(new { type = "workflow-snapshot", snapshot }));
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"刷新 daemon 快照失败：{ex.Message}");
+            }
         }
 
         private void OnWorkflowEventReceived(object? sender, JToken workflowEvent)

@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Threading;
 using System.Windows;
 using CodePanion.Gui.Services;
 
@@ -7,8 +8,37 @@ namespace CodePanion.Gui
 {
     public partial class App : Application
     {
+        private const string SingleInstanceMutexName = @"Local\CodePanion.Gui.SingleInstance";
+        private const string ShowMainWindowEventName = @"Local\CodePanion.Gui.ShowMainWindow";
+        private Mutex? _singleInstanceMutex;
+        private EventWaitHandle? _showMainWindowEvent;
+        private RegisteredWaitHandle? _showMainWindowRegistration;
+
         protected override void OnStartup(StartupEventArgs e)
         {
+            _singleInstanceMutex = new Mutex(true, SingleInstanceMutexName, out var createdNew);
+            if (!createdNew)
+            {
+                try
+                {
+                    using var signal = EventWaitHandle.OpenExisting(ShowMainWindowEventName);
+                    signal.Set();
+                }
+                catch
+                {
+                }
+                Shutdown();
+                return;
+            }
+
+            _showMainWindowEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShowMainWindowEventName);
+            _showMainWindowRegistration = ThreadPool.RegisterWaitForSingleObject(
+                _showMainWindowEvent,
+                (_, _) => Dispatcher.BeginInvoke(new Action(ShowMainWindowFromSignal)),
+                null,
+                Timeout.Infinite,
+                false);
+
             base.OnStartup(e);
 
             // N-21：未捕获异常先落 gui-crash.log（不依赖 MessageBox），再异步弹一个不阻塞主线程的提示框。
@@ -51,6 +81,23 @@ namespace CodePanion.Gui
                 {
                 }
             };
+        }
+
+        protected override void OnExit(ExitEventArgs e)
+        {
+            _showMainWindowRegistration?.Unregister(null);
+            _showMainWindowEvent?.Dispose();
+            _singleInstanceMutex?.ReleaseMutex();
+            _singleInstanceMutex?.Dispose();
+            base.OnExit(e);
+        }
+
+        private void ShowMainWindowFromSignal()
+        {
+            if (MainWindow == null) return;
+            MainWindow.Show();
+            MainWindow.WindowState = WindowState.Normal;
+            MainWindow.Activate();
         }
 
         private static void WriteCrashLog(string source, Exception ex)

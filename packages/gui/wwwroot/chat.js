@@ -37,6 +37,25 @@ function updateConnectionStatus(connected) {
         dot.dataset.state = state.connected ? 'online' : 'offline';
     });
     if (statusText) statusText.textContent = state.connected ? '已连接' : '未连接';
+    renderSourceStatusPanel();
+}
+
+function renderSourceStatusPanel() {
+    const vscodeText = document.getElementById('vscode-source-status');
+    const vscodeDot = document.querySelector('[data-source-kind="vscode"] .source-status-dot');
+    if (!vscodeText || !vscodeDot) return;
+    const sources = Array.from(state.sources.values());
+    const vscodeSources = sources.filter(source => String(source.kind || source.Kind || '').toLowerCase() === 'vscode');
+    const online = vscodeSources.find(source => String(source.status || source.Status || '').toLowerCase() === 'online');
+    vscodeDot.dataset.state = online ? 'online' : 'offline';
+    if (online) {
+        const workspace = online.workspace || online.Workspace || online.windowTitle || online.WindowTitle || '';
+        vscodeText.textContent = workspace ? `在线：${shortPath(workspace)}` : '在线';
+        return;
+    }
+    vscodeText.textContent = state.connected
+        ? '未连接：VS Code 扩展未加载或未连到 daemon'
+        : 'daemon 未连接';
 }
 
 function normalizeMessage(message) {
@@ -91,6 +110,7 @@ function shortPath(path) {
 function sourceLabel(message) {
     if (message.source === 'user') return '你';
     if (message.source === 'codex-desktop' || message.source === 'codex') return 'Codex';
+    if (message.source === 'claude-code') return 'Claude Code';
     if (message.source === 'opencode') return 'OpenCode';
     if (message.source === 'cli') return '终端';
     if (message.source === 'vscode') return 'VS Code';
@@ -213,6 +233,7 @@ function clearMessages() {
 }
 
 function renderAll() {
+    renderSourceStatusPanel();
     renderConversationList();
     renderChat();
     renderCodeBrowser();
@@ -250,7 +271,7 @@ function renderConversationList() {
         conversations = allConversations.filter(isCurrentConversation);
         if (conversations.length === 0) {
             conversations = allConversations
-                .filter(item => isRecentConversation(item) && isUserFacingConversation(item) && !isArchivedTask(item) && !isSnoozedTask(item) && item.status !== 'done')
+                .filter(item => isRecentConversation(item) && isUserFacingConversation(item) && !isArchivedTask(item) && !isSnoozedTask(item))
                 .slice(0, 12);
         }
     }
@@ -276,7 +297,7 @@ function renderConversationList() {
             : activeView === 'later'
                 ? '当前没有稍后或已归档任务'
                 : activeView === 'active'
-                    ? '当前没有待处理任务'
+                    ? '当前没有正在同步的任务'
                     : '当前没有可显示的任务';
         list.appendChild(empty);
         return;
@@ -450,7 +471,7 @@ function matchesActiveView(item, activeView) {
     if (activeView === 'done') return item.status === 'done';
     if (activeView === 'later') return isArchivedTask(item) || isSnoozedTask(item);
     if (activeView === 'code') return state.codeBlocks.some(block => block.conversationId === item.id);
-    return item.status !== 'done';
+    return true;
 }
 
 function updateQueueMetrics(conversations) {
@@ -468,7 +489,7 @@ function updateQueueMetrics(conversations) {
 function isCurrentConversation(item) {
     if (!isUserFacingConversation(item)) return false;
     if (isArchivedTask(item) || isSnoozedTask(item)) return false;
-    if (item.status === 'done') return false;
+    if (item.sourceOnline === false && !isActionableStatus(item.status)) return false;
     if (!isRecentConversation(item)) return false;
     if (isArchivedConversation(item)) return false;
     return true;
@@ -545,10 +566,9 @@ function isActionableStatus(status) {
 }
 
 function isPassiveSourceKind(source) {
-    // P2.1：VS Code 扩展只读 L2，窗口/终端/调试 activity 事件能进入来源视图，
-    // 但不应在主任务队列里制造假任务；只有显式的 prompt / error 才抬升入队。
+    // VS Code 现在承载 Claude Code / Codex 终端输出，必须进入主运行列表；
+    // 其它 IDE/切换器来源仍只在 prompt / error 时抬升。
     return [
-        'vscode',
         'cc-switch',
         'qwen-code',
         'trae',
@@ -755,6 +775,12 @@ function deriveConversationDisplay(item) {
         return reviewable
             ? { kind: 'review', label: '需审阅', action: '查看新产物' }
             : { kind: 'done', label: '完成', action: '执行已结束' };
+    }
+    // 来源离线时，把"运行中 / 来源在线"统一降级为"来源已离线"，避免 Codex/Claude Code
+    // 已退出 GUI 仍显示绿点这种和现实脱节的状态。等待我 / 失败 / 需审阅 不在这里降级——
+    // 那些是需要用户处理的高优先级状态，即使来源离线也应当继续突出。
+    if (item.sourceOnline === false && !isActionableStatus(status)) {
+        return { kind: 'source-offline', label: '来源已离线', action: '请确认对应工具是否仍在运行' };
     }
     if (isPassiveSourceKind(item.source) && !isActionableStatus(status)) {
         return { kind: 'source-online', label: '来源在线', action: '等待新事件' };
@@ -1079,7 +1105,7 @@ function privacyBoundaryText(source) {
 function latestActionablePrompt(messages) {
     return messages.slice().reverse().find(message => {
         if (message.type !== 'prompt') return false;
-        if (message.sessionId) return Array.isArray(message.options) && message.options.length > 0;
+        if (message.sessionId) return true;
         return Boolean(message.eventId);
     });
 }
@@ -1967,7 +1993,7 @@ function visibleWorkflowQueue() {
         conversations = allConversations.filter(isCurrentConversation);
         if (conversations.length === 0) {
             conversations = allConversations
-                .filter(item => isRecentConversation(item) && isUserFacingConversation(item) && !isArchivedTask(item) && !isSnoozedTask(item) && item.status !== 'done')
+                .filter(item => isRecentConversation(item) && isUserFacingConversation(item) && !isArchivedTask(item) && !isSnoozedTask(item))
                 .slice(0, 12);
         }
     }
@@ -2119,15 +2145,14 @@ function wireOmnibar(prompt) {
     const submit = document.getElementById('omnibar-submit');
     if (!input || !submit) return;
 
-    const enabled = Boolean(prompt);
-    const allowTextReply = Boolean(prompt && !prompt.sessionId);
+    const allowTextReply = Boolean(prompt && (prompt.sessionId || prompt.eventId));
     if (omnibar) {
-        omnibar.hidden = !allowTextReply;
-        document.getElementById('app-shell')?.classList.toggle('omnibar-hidden', !allowTextReply);
+        omnibar.hidden = false;
+        document.getElementById('app-shell')?.classList.remove('omnibar-hidden');
     }
     input.disabled = !allowTextReply;
     submit.disabled = !allowTextReply;
-    input.placeholder = allowTextReply ? '输入回复，按 Enter 发送到当前等待任务' : '当前会话只能点选提示选项';
+    input.placeholder = allowTextReply ? '输入回复，按 Enter 发送到当前等待任务' : '当前任务没有可写回的回复目标';
 
     submit.onclick = allowTextReply ? () => {
         const value = input.value.trim();
@@ -2172,6 +2197,7 @@ function handleMessage(message) {
             if (message.source) {
                 const sourceId = message.source.id || message.source.Id || generateId();
                 state.sources.set(sourceId, message.source);
+                renderSourceStatusPanel();
                 renderContextDrawer();
             }
             break;
@@ -2189,6 +2215,7 @@ function handleMessage(message) {
             for (const id of Array.from(state.sources.keys())) {
                 if (!nextIds.has(id)) state.sources.delete(id);
             }
+            renderSourceStatusPanel();
             renderContextDrawer();
             break;
         }
@@ -2198,6 +2225,7 @@ function handleMessage(message) {
             if (source) {
                 source.status = 'offline';
                 source.Status = 'offline';
+                renderSourceStatusPanel();
                 renderContextDrawer();
             }
             break;
@@ -2274,6 +2302,9 @@ function storeWorkflowThread(thread) {
     if (!id) return;
     const existing = state.workflowThreads.get(id) || {};
     const taskState = normalizeTaskStatePayload(thread.taskState || thread.TaskState || existing.taskState || existing.TaskState);
+    // sourceOnline 是 daemon 加的新字段，旧 snapshot 没有；缺省 undefined ≠ false，
+    // 不能用 || existing.sourceOnline，否则一旦 daemon 推 false 会被旧 undefined 顶回去。
+    const rawSourceOnline = thread.sourceOnline ?? thread.SourceOnline;
     state.workflowThreads.set(id, {
         ...existing,
         id,
@@ -2283,6 +2314,7 @@ function storeWorkflowThread(thread) {
         status: thread.status || thread.Status || existing.status || 'running',
         updatedAt: Number(thread.updatedAt || thread.UpdatedAt || existing.updatedAt || Date.now()),
         itemCount: Number(thread.itemCount || thread.ItemCount || existing.itemCount || 0),
+        sourceOnline: typeof rawSourceOnline === 'boolean' ? rawSourceOnline : existing.sourceOnline,
         taskState
     });
     pruneWorkflowThreads();
@@ -2532,6 +2564,9 @@ function refreshWorkflowConversation(threadId) {
         messageCount: summary.messageCount,
         toolCount: summary.toolCount,
         commandCount: summary.commandCount,
+        // sourceOnline 透传到 conversation item，给 deriveConversationDisplay 用：
+        // false 时把"运行中/来源在线"显示降级为"来源已离线"，避免 Codex 关了仍显示绿点。
+        sourceOnline: thread.sourceOnline,
         taskState: normalizeTaskStatePayload(thread.taskState)
     });
 }
@@ -2553,6 +2588,9 @@ function deriveWorkflowTitle(threadId, fallback) {
 
     const assistant = items.find(item => item.kind === 'message' && String(item.role || item.title).toLowerCase() === 'assistant' && item.content.trim());
     if (assistant) return compactTitle(assistant.content);
+
+    const execution = items.find(item => item.kind === 'message' && isAssistantExecutionSource(item.source) && item.content.trim());
+    if (execution) return compactTitle(execution.title || execution.content);
 
     const cleanFallback = String(fallback || '').replace(/^Codex\s+/i, '').trim();
     if (/^[0-9a-f-]{20,}$/i.test(cleanFallback)) return 'Codex 工作流';
@@ -2734,7 +2772,12 @@ function normalizeWorkflowRole(item) {
     const role = String(item.role || item.title || '').toLowerCase();
     if (role === 'user') return 'user';
     if (role === 'assistant' || role === 'codex') return 'assistant';
+    if (isAssistantExecutionSource(item.source)) return 'assistant';
     return '';
+}
+
+function isAssistantExecutionSource(source) {
+    return ['claude-code', 'codex', 'opencode', 'vscode'].includes(String(source || '').toLowerCase());
 }
 
 function summarizeWorkflow(threadId) {

@@ -167,6 +167,10 @@ export const WorkflowThreadSchema = z.object({
   updatedAt: z.number().int().positive(),
   itemCount: z.number().int().nonnegative().default(0),
   taskState: WorkflowTaskStateSchema.optional(),
+  // 来源是否在线。不影响 status 语义（任务管理逻辑保持不变），仅用于让 GUI 把"运行中"
+  // 状态在来源离线时显示为「来源已离线」灰色，避免出现「Codex 已关但 GUI 仍显示运行中」
+  // 这种与现实不符的状态。可选字段——旧 snapshot 没有时视作 undefined（GUI 默认按在线）。
+  sourceOnline: z.boolean().optional(),
 });
 export type WorkflowThread = z.infer<typeof WorkflowThreadSchema>;
 

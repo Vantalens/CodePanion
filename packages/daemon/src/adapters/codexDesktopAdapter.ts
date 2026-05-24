@@ -186,6 +186,7 @@ export class CodexDesktopAdapter {
         status: isFreshTimestamp(timestamp) ? 'running' : 'done',
         updatedAt: timestamp,
         itemCount: 0,
+        sourceOnline: true,
       });
       return;
     }
@@ -204,6 +205,9 @@ export class CodexDesktopAdapter {
     if (existing) {
       // Already known. Don't clobber terminal status (done/error) set by task_complete
       // and don't reset a meaningful title back to the degraded path-derived form.
+      if (existing.sourceOnline !== true) {
+        return this.workflows.upsertThread({ ...existing, sourceOnline: true });
+      }
       return existing;
     }
     const thread: WorkflowThread = {
@@ -213,6 +217,7 @@ export class CodexDesktopAdapter {
       status: isFreshTimestamp(timestamp) ? 'running' : 'done',
       updatedAt: timestamp,
       itemCount: 0,
+      sourceOnline: true,
     };
     return this.workflows.upsertThread(thread);
   }

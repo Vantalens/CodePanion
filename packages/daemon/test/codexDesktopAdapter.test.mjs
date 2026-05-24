@@ -120,6 +120,39 @@ test('session_meta creates a thread with workspace and fresh status', async () =
     assert.equal(thread.title, 'example');
     assert.equal(thread.workspace, '/repo/example');
     assert.equal(thread.status, 'running');
+    assert.equal(thread.sourceOnline, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('CodexDesktopAdapter marks restored codex threads online when session files are consumed', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'codex-adapter-online-'));
+  try {
+    const subDir = join(root, '2026', '01');
+    mkdirSync(subDir, { recursive: true });
+    const sessionPath = join(subDir, 'rollout-2026-01-15T12-00-00-019online-1234.jsonl');
+    writeJsonl(sessionPath, [
+      { timestamp: freshIso(), type: 'session_meta', payload: { cwd: '/repo/example' } },
+      { timestamp: freshIso(10), type: 'event_msg', payload: { type: 'user_message', message: 'current visible task' } },
+    ]);
+
+    const workflows = new WorkflowManager();
+    workflows.upsertThread({
+      id: '019online-1234',
+      source: 'codex-desktop',
+      title: 'example',
+      workspace: '/repo/example',
+      status: 'paused',
+      updatedAt: Date.now() - 1000,
+      itemCount: 0,
+      sourceOnline: false,
+    });
+
+    const adapter = new CodexDesktopAdapter(workflows, { root });
+    await adapter.scanOnce();
+    const thread = workflows.snapshot().threads.find((item) => item.id === '019online-1234');
+    assert.equal(thread?.sourceOnline, true);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

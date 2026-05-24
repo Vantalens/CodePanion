@@ -81,13 +81,13 @@ function Stop-RunningPortableGui {
 
     $resolvedPackageDir = [System.IO.Path]::GetFullPath($PackageDir)
     $escapedPackageDir = $resolvedPackageDir.Replace("\", "\\")
-    $running = Get-Process -Name "CodePanion.Gui" -ErrorAction SilentlyContinue |
+    $running = Get-Process -ErrorAction SilentlyContinue |
         Where-Object {
             $_.Path -and [System.IO.Path]::GetFullPath($_.Path).StartsWith($resolvedPackageDir, [System.StringComparison]::OrdinalIgnoreCase)
         }
 
     foreach ($process in $running) {
-        Write-Host "[package] Stopping running portable GUI. PID: $($process.Id)"
+        Write-Host "[package] Stopping running portable process. PID: $($process.Id), Name: $($process.ProcessName)"
         Stop-Process -Id $process.Id -Force
         Wait-Process -Id $process.Id -Timeout 5 -ErrorAction SilentlyContinue
     }
@@ -144,7 +144,13 @@ if (Test-Path $distDir) {
     Remove-DirectoryWithRetry -Path $distDir
 }
 New-Item -ItemType Directory -Path $distDir -Force | Out-Null
-Copy-Item -Path (Join-Path $publishDir "*") -Destination $distDir -Recurse -Force
+# S-1: PS 5.1 与 PS 7 对 `Copy-Item -Path "<dir>\*" -Recurse` 的通配符行为不一致
+# （PS 5 会按字面拷贝顶层文件，对子目录递归不稳）。改用 Get-ChildItem -Force 显式
+# 枚举顶层条目，再用 Copy-Item -LiteralPath 一项一项递归拷贝，避免任何 wildcard 解析。
+Get-ChildItem -LiteralPath $publishDir -Force | ForEach-Object {
+    $destination = Join-Path $distDir $_.Name
+    Copy-Item -LiteralPath $_.FullName -Destination $destination -Recurse -Force
+}
 
 $runtimeDir = Join-Path $distDir "runtime"
 New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null

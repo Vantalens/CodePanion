@@ -21,12 +21,49 @@
 //
 // 把"监控什么 / 怎么解析"换成你工具的真实产出，是把 L1 升 L2 的最短路径。
 
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 import { createAdapter } from '../src/index.js';
+
+// 同一行内容在 30s 窗口内只上报一次，避免 burst 中重复 classify。
+const DEDUPE_WINDOW_MS = 30_000;
+// 上限保护：万一日志真的产生几万条不同的行，LRU 截断防止内存爬升。
+const DEDUPE_MAX_KEYS = 4_000;
+
+function hashLine(line) {
+  return crypto.createHash('sha1').update(line).digest('hex');
+}
+
+function createDedupe(now = () => Date.now(), windowMs = DEDUPE_WINDOW_MS, maxKeys = DEDUPE_MAX_KEYS) {
+  // Map 维护插入顺序，到上限直接砍最旧的一批。
+  const seen = new Map();
+  return function shouldEmit(line) {
+    const key = hashLine(line);
+    const ts = now();
+    const last = seen.get(key);
+    if (last !== undefined && ts - last < windowMs) {
+      // 同一行 30s 内重复，刷新时间戳但不上报，避免抖动期间结果忽明忽暗。
+      seen.delete(key);
+      seen.set(key, ts);
+      return false;
+    }
+    seen.set(key, ts);
+    if (seen.size > maxKeys) {
+      const dropCount = seen.size - maxKeys;
+      const iterator = seen.keys();
+      for (let i = 0; i < dropCount; i += 1) {
+        const oldest = iterator.next();
+        if (oldest.done) break;
+        seen.delete(oldest.value);
+      }
+    }
+    return true;
+  };
+}
 
 const KNOWN_KINDS = new Set([
   'lingma',
@@ -104,6 +141,7 @@ async function main() {
   // pending 拼接出来的行顺序错乱，进而被 classify 错判 prompt/error。
   let reading = false;
   let pendingRescan = false;
+  const shouldEmit = createDedupe();
 
   function drainChunk(chunk) {
     pending += chunk;
@@ -112,6 +150,7 @@ async function main() {
     for (const raw of lines) {
       const line = raw.trim();
       if (!line) continue;
+      if (!shouldEmit(line)) continue;
       const { type, level } = classify(line);
       adapter
         .emitEvent({
@@ -191,4 +230,4 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
 }
 
 // 导出用于单元测试。
-export { classify, parseArgs, KNOWN_KINDS };
+export { classify, parseArgs, KNOWN_KINDS, createDedupe, DEDUPE_WINDOW_MS, DEDUPE_MAX_KEYS };

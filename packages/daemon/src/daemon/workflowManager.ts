@@ -11,6 +11,10 @@ export type WorkflowRetentionOptions = {
   itemsPerThread?: number;
   seenItems?: number;
 };
+export type WorkflowSnapshotOptions = {
+  maxThreads?: number;
+  maxItemsPerThread?: number;
+};
 type WorkflowManagerOptions = {
   snapshotPath?: string;
   /** Debounce window for async snapshot persistence. Set to 0 to write synchronously (tests only). */
@@ -88,6 +92,29 @@ export class WorkflowManager {
     return thread;
   }
 
+  /**
+   * 把指定 source 关联的所有 thread 的 sourceOnline 字段刷新一遍，
+   * 用于响应 sourceManager 广播的 source-registered / source-disconnected。
+   * thread.id === `source:${sourceId}` 或 thread.source 匹配 sourceId 都算关联。
+   * 只在 sourceOnline 实际发生变化时广播 thread-upsert，避免无变更的高频刷新。
+   */
+  setSourceOnline(sourceId: string, online: boolean): WorkflowThread[] {
+    if (!sourceId) return [];
+    const expectedThreadId = `source:${sourceId}`;
+    const updated: WorkflowThread[] = [];
+    for (const thread of Array.from(this.threads.values())) {
+      const matched = thread.id === expectedThreadId || thread.source === sourceId;
+      if (!matched) continue;
+      if (thread.sourceOnline === online) continue;
+      const next: WorkflowThread = { ...thread, sourceOnline: online };
+      this.threads.set(next.id, next);
+      this.broadcast({ type: 'workflow-event', event: { action: 'thread-upsert', thread: next } });
+      updated.push(next);
+    }
+    if (updated.length > 0) this.scheduleSnapshot();
+    return updated;
+  }
+
   appendItem(input: WorkflowItem): boolean {
     if (this.seenItems.has(input.id)) {
       logger.debug({ itemId: input.id, threadId: input.threadId, kind: input.kind }, 'workflow item dedup skipped');
@@ -107,7 +134,7 @@ export class WorkflowManager {
     if (thread) {
       thread.updatedAt = Math.max(thread.updatedAt, item.timestamp);
       thread.itemCount = list.length;
-      if (item.status) thread.status = item.status;
+      if (shouldPropagateItemStatus(item)) thread.status = item.status!;
       this.threads.set(thread.id, thread);
       this.broadcast({ type: 'workflow-event', event: { action: 'thread-upsert', thread } });
     }
@@ -135,9 +162,18 @@ export class WorkflowManager {
     this.writeSnapshotSyncForTests();
   }
 
-  snapshot(): WorkflowSnapshot {
-    const threads = Array.from(this.threads.values()).sort((a, b) => b.updatedAt - a.updatedAt);
-    const items = threads.flatMap((thread) => this.items.get(thread.id) ?? []);
+  snapshot(options: WorkflowSnapshotOptions = {}): WorkflowSnapshot {
+    const maxThreads = options.maxThreads && options.maxThreads > 0 ? options.maxThreads : undefined;
+    const maxItemsPerThread = options.maxItemsPerThread && options.maxItemsPerThread > 0
+      ? options.maxItemsPerThread
+      : undefined;
+    const threads = Array.from(this.threads.values())
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .slice(0, maxThreads);
+    const items = threads.flatMap((thread) => {
+      const list = this.items.get(thread.id) ?? [];
+      return maxItemsPerThread ? list.slice(-maxItemsPerThread) : list;
+    });
     return { threads, items };
   }
 
@@ -213,6 +249,9 @@ export class WorkflowManager {
           ...thread,
           status: thread.status === 'done' || thread.status === 'error' ? thread.status : 'paused',
           taskState: normalizeTaskState(thread.taskState),
+          // daemon 重启后 sources 全为空，所有 thread 默认按来源离线对待；
+          // 真正在线的 source 重新 register 时会通过 setSourceOnline 翻成 true。
+          sourceOnline: false,
         });
       }
 
@@ -296,6 +335,13 @@ export class WorkflowManager {
     mkdirSync(dirname(this.snapshotPath), { recursive: true });
     this.snapshotDirEnsured = true;
   }
+}
+
+function shouldPropagateItemStatus(item: WorkflowItem): boolean {
+  if (!item.status) return false;
+  if (item.status === 'error') return true;
+  if (item.kind === 'command') return false;
+  return true;
 }
 
 function normalizeTaskState(taskState?: Partial<WorkflowTaskState> | null): WorkflowTaskState {

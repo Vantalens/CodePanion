@@ -55,7 +55,7 @@ namespace CodePanion.Gui.Services
         {
             try
             {
-                using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+                using var client = new HttpClient { Timeout = TimeSpan.FromMilliseconds(600) };
                 var response = await client.GetAsync($"{daemonUrl}/health");
                 return response.IsSuccessStatusCode;
             }
