@@ -83,7 +83,9 @@ function Stop-RunningPortableGui {
     $escapedPackageDir = $resolvedPackageDir.Replace("\", "\\")
     $running = Get-Process -ErrorAction SilentlyContinue |
         Where-Object {
-            $_.Path -and [System.IO.Path]::GetFullPath($_.Path).StartsWith($resolvedPackageDir, [System.StringComparison]::OrdinalIgnoreCase)
+            $p = $null
+            try { $p = $_.Path } catch { return $false }
+            $p -and [System.IO.Path]::GetFullPath($p).StartsWith($resolvedPackageDir, [System.StringComparison]::OrdinalIgnoreCase)
         }
 
     foreach ($process in $running) {
