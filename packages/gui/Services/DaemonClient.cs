@@ -383,12 +383,12 @@ namespace CodePanion.Gui.Services
             }
         }
 
-        public async Task<bool> SendReplyAsync(string sessionId, string text)
+        public async Task<bool> SendReplyAsync(string sessionId, string text, string mode = "option")
         {
             try
             {
                 var url = $"{_daemonUrl}/sessions/{sessionId}/reply";
-                var response = await PostJsonAsync(url, new { text });
+                var response = await PostJsonAsync(url, new { text, mode });
                 if (!response.IsSuccessStatusCode)
                 {
                     var error = await response.Content.ReadAsStringAsync();

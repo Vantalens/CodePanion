@@ -234,7 +234,8 @@ export const SessionPromptRequestSchema = z.object({
 export type SessionPromptRequest = z.infer<typeof SessionPromptRequestSchema>;
 
 export const ReplyRequestSchema = z.object({
-  text: z.string(),
+  text: z.string().max(8192),
+  mode: z.enum(['option', 'freeform']).optional().default('option'),
 });
 export type ReplyRequest = z.infer<typeof ReplyRequestSchema>;
 
@@ -268,6 +269,7 @@ export type WsServerEvent =
   | { type: 'session-exited'; sessionId: string; exitCode: number; durationMs: number }
   | { type: 'reply-injected'; sessionId: string; text: string }
   | { type: 'inject-input'; sessionId: string; optionIndex: number }
+  | { type: 'inject-text'; sessionId: string; text: string }
   | { type: 'monitor-event-reply'; eventId: string; sourceId?: string; text: string; timestamp: number }
   | { type: 'notification'; data: MonitorEvent & { title: string; message: string; timestamp: number; threadId?: string } }
   | { type: 'source-registered'; source: MonitorSource }

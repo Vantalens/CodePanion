@@ -141,9 +141,33 @@ export class SessionManager {
     setTimeout(() => this.sessions.delete(id), 60_000).unref();
   }
 
-  injectReply(id: string, text: string): 'ok' | 'not-connected' | 'invalid-reply' {
+  injectReply(
+    id: string,
+    text: string,
+    mode: 'option' | 'freeform' = 'option',
+  ): 'ok' | 'not-connected' | 'invalid-reply' {
     const rec = this.sessions.get(id);
     if (!rec || !rec.cliSocket || rec.cliSocket.readyState !== rec.cliSocket.OPEN) return 'not-connected';
+
+    if (mode === 'freeform') {
+      // 单点剥离会杀进程 / 让 CLI 退出的控制字符：NUL / Ctrl-C / Ctrl-D / Ctrl-Z / Ctrl-\
+      // ESC、Tab、Backspace 等保留——用户需要它们才能在 GUI 里完成 vim、补全、删字等操作。
+      const safe = text.replace(/[\x00\x03\x04\x1A\x1C]/g, '');
+
+      this.appendOutputChunk(rec, {
+        timestamp: Date.now(),
+        content: safe,
+        type: 'reply',
+      });
+
+      const event: WsServerEvent = { type: 'inject-text', sessionId: id, text: safe };
+      rec.cliSocket.send(JSON.stringify(event));
+      this.broadcast({ type: 'reply-injected', sessionId: id, text: safe });
+      rec.status = 'running';
+      // 不清 lastPromptOptions——freeform 期间 prompt 可能仍有效，下一次 prompt 来覆盖即可。
+      return 'ok';
+    }
+
     const optionIndex = this.resolvePromptOption(rec, text);
     if (optionIndex < 0) return 'invalid-reply';
 

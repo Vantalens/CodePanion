@@ -219,9 +219,10 @@ namespace CodePanion.Gui
                     {
                         var sessionId = message["sessionId"]?.Value<string>();
                         var value = message["value"]?.Value<string>();
+                        var mode = message["mode"]?.Value<string>() ?? "option";
                         if (!string.IsNullOrWhiteSpace(sessionId) && !string.IsNullOrWhiteSpace(value))
                         {
-                            HandleUserReply(sessionId!, value!);
+                            HandleUserReply(sessionId!, value!, mode);
                         }
                         break;
                     }
@@ -344,14 +345,14 @@ namespace CodePanion.Gui
             }
         }
 
-        private async void HandleUserReply(string sessionId, string value)
+        private async void HandleUserReply(string sessionId, string value, string mode = "option")
         {
             try
             {
                 // P2-C：换行注入集中在 CLI 侧 replyTextForPromptOption，daemon 端 resolvePromptOption
                 // 已 trim 末尾 \r?\n。GUI 不再追加 \n，避免出现 daemon outputChunks 多吞一个换行。
-                var ok = await _daemonClient.SendReplyAsync(sessionId, value);
-                AddLog(ok ? $"[回复] {sessionId}: {value}" : $"[回复失败] {sessionId}: {value}");
+                var ok = await _daemonClient.SendReplyAsync(sessionId, value, mode);
+                AddLog(ok ? $"[回复 {mode}] {sessionId}: {value}" : $"[回复失败] {sessionId}: {value}");
                 if (!ok)
                 {
                     SendStatusMessage("error", "回复发送失败", $"目标会话不可用或 daemon 未连接：{sessionId}");
@@ -934,6 +935,7 @@ namespace CodePanion.Gui
 
         private void Exit_Click(object sender, RoutedEventArgs e)
         {
+            DaemonProcessManager.Stop(AddLog);
             _daemonClient.Dispose();
             _trayIcon?.Dispose();
             GuiLogWriter.Instance.Dispose();
@@ -948,6 +950,7 @@ namespace CodePanion.Gui
 
         protected override void OnClosed(EventArgs e)
         {
+            DaemonProcessManager.Stop(AddLog);
             _daemonClient.Dispose();
             _trayIcon?.Dispose();
             _soundPlayer.Dispose();

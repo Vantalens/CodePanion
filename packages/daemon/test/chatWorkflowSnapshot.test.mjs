@@ -280,7 +280,8 @@ test('session prompts expose the omnibar for typed replies', async () => {
   assert.equal(win.document.getElementById('omnibar').hidden, false);
   assert.equal(win.document.getElementById('omnibar-input').disabled, false);
   assert.equal(win.document.getElementById('stage-focus-reply').hidden, false);
-  assert.equal(win.document.querySelector('.custom-input'), null);
+  // 自由文本 session prompt 同时渲染 inline custom-input（freeform 注入）+ 启用 omnibar，详见 H4。
+  assert.ok(win.document.querySelector('.custom-input'), 'inline freeform 输入框应存在');
 
   handleMessage({
     type: 'workflow-event',
@@ -306,15 +307,14 @@ test('session prompts expose the omnibar for typed replies', async () => {
   assert.equal(win.document.getElementById('omnibar-input').disabled, false);
   assert.equal(win.document.getElementById('stage-focus-reply').hidden, false);
   assert.equal(win.document.querySelectorAll('.option-button').length, 2);
-  assert.equal(win.document.querySelector('.custom-input'), null);
 
   win.document.querySelector('.option-button').click();
   assert.doesNotMatch(win.document.getElementById('chat-container').textContent, /您的回复/);
 });
 
-test('session prompts without options surface a CLI-direct-input hint', async () => {
-  // H4：自由文本 session prompt（密码、文件名）在 GUI 不可点选/不可输入时，
-  // 必须给用户明确引导回到 CLI 终端输入，否则会看上去"卡住"。
+test('session prompts without options render a freeform input box', async () => {
+  // H4：自由文本 session prompt（密码、文件名）在 PTY 接管会话下，GUI 直接给出输入框，
+  // 用户可在 GUI 内回写到 PTY（mode=freeform），不再要求回到 CLI 终端。
   const win = loadChat();
   const { handleMessage } = win.CodePanion.__test;
   const now = Date.now();
@@ -338,11 +338,11 @@ test('session prompts without options surface a CLI-direct-input hint', async ()
 
   await new Promise(resolve => win.requestAnimationFrame(resolve));
 
-  const hint = win.document.querySelector('.prompt-hint');
-  assert.ok(hint, '应渲染 .prompt-hint 引导用户');
-  assert.match(hint.textContent, /CLI 终端/);
+  const input = win.document.querySelector('.custom-input');
+  assert.ok(input, '应渲染 .custom-input 让用户在 GUI 内回写到 PTY');
+  assert.equal(input.type, 'text');
+  assert.match(input.placeholder, /自由文本|PTY/);
   assert.equal(win.document.querySelector('.option-button'), null);
-  assert.equal(win.document.querySelector('.custom-input'), null);
 });
 
 test('sources-snapshot replaces stale sources after observer reconnect', async () => {

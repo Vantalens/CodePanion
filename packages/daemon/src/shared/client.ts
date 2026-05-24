@@ -165,8 +165,11 @@ export function postExit(id: string, exitCode: number): Promise<unknown> {
   return request('POST', `/sessions/${id}/exit`, { exitCode });
 }
 
-export function postReply(id: string, text: string): Promise<unknown> {
-  return request('POST', `/sessions/${id}/reply`, { text });
+export function postReply(id: string, text: string, mode?: 'option' | 'freeform'): Promise<unknown> {
+  // mode 未传时不写字段，与旧 daemon 兼容；旧 daemon 会忽略并按 option 处理。
+  const payload: { text: string; mode?: 'option' | 'freeform' } = { text };
+  if (mode) payload.mode = mode;
+  return request('POST', `/sessions/${id}/reply`, payload);
 }
 
 export function listSessions(): Promise<SessionInfo[]> {

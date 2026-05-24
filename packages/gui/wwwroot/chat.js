@@ -1110,6 +1110,33 @@ function latestActionablePrompt(messages) {
     });
 }
 
+function activePtySessionIdForConversation(conversationId) {
+    if (!conversationId) return '';
+    if (conversationId.startsWith('session:')) return conversationId.slice('session:'.length);
+    if (conversationId.startsWith('workflow:')) {
+        const threadId = conversationId.slice('workflow:'.length);
+        const thread = state.workflowThreads.get(threadId);
+        if (!thread) return '';
+        const ts = taskStateForConversation(thread);
+        if (ts.handoffStatus === 'active' && ts.handoffSessionId) return ts.handoffSessionId;
+    }
+    return '';
+}
+
+function disabledOmnibarHint(conversationId) {
+    if (!conversationId) return '请先在左侧选择一个任务';
+    if (conversationId.startsWith('source:')) {
+        return '外部 AI 工具（进程扫描源）不支持 GUI 回写，请到对应 IDE 终端内回复';
+    }
+    if (conversationId.startsWith('workflow:')) {
+        return '此 workflow 尚未建立 PTY 接力会话，先转交到 PTY 才能回写';
+    }
+    if (conversationId.startsWith('session:')) {
+        return '会话等待就绪…';
+    }
+    return '当前任务没有可写回的回复目标';
+}
+
 function focusActiveReply() {
     const target = document.querySelector('.message-prompt .custom-input:not(:disabled), .message-prompt .option-button:not(:disabled)');
     if (!target) return false;
@@ -1296,11 +1323,19 @@ function renderOptions(sessionId, eventId, options, messageId) {
         setTimeout(() => input.focus(), 80);
     } else if (options.length === 0) {
         // session prompt 无解析到的选项（自由文本输入：密码、文件名等）：
-        // 出于安全与正确性，daemon 不接受自由文本注入，引导用户回到 CLI 终端。
-        const hint = document.createElement('div');
-        hint.className = 'prompt-hint';
-        hint.textContent = '该提示需要自由文本回复，请在 CLI 终端中直接输入。';
-        container.appendChild(hint);
+        // PTY 接管会话支持 freeform 注入，直接提供输入框。
+        const input = document.createElement('input');
+        input.className = 'custom-input';
+        input.type = 'text';
+        input.placeholder = '输入自由文本回复，按 Enter 发送到 PTY';
+        input.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' && input.value.trim()) {
+                selectOptionFreeform(sessionId, input.value.trim());
+                input.disabled = true;
+            }
+        });
+        container.appendChild(input);
+        setTimeout(() => input.focus(), 80);
     }
 
     return container;
@@ -1330,6 +1365,17 @@ function selectOption(sessionId, eventId, value, promptId) {
         content: sessionId || eventId ? `**您的回复**：${value}` : `**已记录选择**：${value}`
     });
     disableOptionsForPrompt(promptId);
+}
+
+function selectOptionFreeform(sessionId, value) {
+    sendToHost({ type: 'reply', sessionId, value: String(value), mode: 'freeform' });
+    addMessage({
+        type: 'user-reply',
+        sessionId,
+        source: 'user',
+        timestamp: Date.now(),
+        content: `**您的回复**：${value}`
+    });
 }
 
 function disableOptionsForPrompt(promptId) {
@@ -2145,26 +2191,39 @@ function wireOmnibar(prompt) {
     const submit = document.getElementById('omnibar-submit');
     if (!input || !submit) return;
 
-    const allowTextReply = Boolean(prompt && (prompt.sessionId || prompt.eventId));
+    const allowOption = Boolean(prompt && (prompt.sessionId || prompt.eventId));
+    const ptySessionId = activePtySessionIdForConversation(state.activeConversation);
+    const allowFreeform = Boolean(ptySessionId) && !allowOption;
+    const allowAny = allowOption || allowFreeform;
+
     if (omnibar) {
         omnibar.hidden = false;
         document.getElementById('app-shell')?.classList.remove('omnibar-hidden');
     }
-    input.disabled = !allowTextReply;
-    submit.disabled = !allowTextReply;
-    input.placeholder = allowTextReply ? '输入回复，按 Enter 发送到当前等待任务' : '当前任务没有可写回的回复目标';
+    input.disabled = !allowAny;
+    submit.disabled = !allowAny;
+    input.placeholder = allowOption
+        ? '输入回复，按 Enter 发送到当前等待任务'
+        : allowFreeform
+            ? '输入自由文本，按 Enter 发送到 PTY 会话'
+            : disabledOmnibarHint(state.activeConversation);
 
-    submit.onclick = allowTextReply ? () => {
+    const handleSubmit = () => {
         const value = input.value.trim();
         if (!value) return;
-        selectOption(prompt.sessionId, prompt.eventId, value, prompt.id);
+        if (allowOption) {
+            selectOption(prompt.sessionId, prompt.eventId, value, prompt.id);
+        } else if (allowFreeform) {
+            selectOptionFreeform(ptySessionId, value);
+        }
         input.value = '';
-    } : null;
+    };
 
-    input.onkeydown = allowTextReply ? (event) => {
+    submit.onclick = allowAny ? handleSubmit : null;
+
+    input.onkeydown = allowAny ? (event) => {
         if (event.key === 'Enter' && input.value.trim()) {
-            selectOption(prompt.sessionId, prompt.eventId, input.value.trim(), prompt.id);
-            input.value = '';
+            handleSubmit();
         }
     } : null;
 }

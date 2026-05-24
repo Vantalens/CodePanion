@@ -17,8 +17,8 @@ const CONFIG_PROBE_INTERVAL_MS = 5_000;
 
 // V-2: 默认 8s timeout，长任务也不应阻塞 VS Code 状态栏。
 const DEFAULT_REQUEST_TIMEOUT_MS = 8_000;
-const TERMINAL_OUTPUT_FLUSH_MS = 700;
-const TERMINAL_OUTPUT_MAX_CHARS = 12_000;
+const TERMINAL_OUTPUT_FLUSH_MS = 120;
+const TERMINAL_OUTPUT_MAX_CHARS = 2_000;
 
 // V-1: daemon-down 时指数退避 + 静默上限，避免状态栏 / dev console 刷屏。
 const RECONNECT_INITIAL_MS = 1_000;

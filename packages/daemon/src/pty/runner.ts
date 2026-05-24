@@ -164,7 +164,7 @@ export async function runWithPty(input: RunArgs): Promise<number> {
 
   let currentPromptOptions: string[] = [];
 
-  const parseInjectInputEvent = (raw: unknown): { type: 'inject-input'; sessionId: string; optionIndex: number } | null => {
+  const parseWsRecord = (raw: unknown): Record<string, unknown> | null => {
     let parsed: unknown;
     try {
       parsed = JSON.parse(String(raw));
@@ -172,29 +172,43 @@ export async function runWithPty(input: RunArgs): Promise<number> {
       debug('ws message parse failed', (err as Error).message);
       return null;
     }
+    if (!parsed || typeof parsed !== 'object') return null;
+    return parsed as Record<string, unknown>;
+  };
 
-    if (!parsed || typeof parsed !== 'object') {
-      return null;
-    }
-
-    const record = parsed as Record<string, unknown>;
-    if (record.type !== 'inject-input') {
-      return null;
-    }
-    if (typeof record.sessionId !== 'string' || typeof record.optionIndex !== 'number') {
-      return null;
-    }
-    if (!Number.isInteger(record.optionIndex) || record.optionIndex < 0) {
-      return null;
-    }
+  const parseInjectInputEvent = (record: Record<string, unknown>): { type: 'inject-input'; sessionId: string; optionIndex: number } | null => {
+    if (record.type !== 'inject-input') return null;
+    if (typeof record.sessionId !== 'string' || typeof record.optionIndex !== 'number') return null;
+    if (!Number.isInteger(record.optionIndex) || record.optionIndex < 0) return null;
     return { type: 'inject-input', sessionId: record.sessionId, optionIndex: record.optionIndex };
   };
 
+  const parseInjectTextEvent = (record: Record<string, unknown>): { type: 'inject-text'; sessionId: string; text: string } | null => {
+    if (record.type !== 'inject-text') return null;
+    if (typeof record.sessionId !== 'string' || typeof record.text !== 'string') return null;
+    // 长度上限与 daemon HTTP schema 对齐（ReplyRequestSchema.text 上限 8192）。
+    // 多一层 runner 本地校验，避免畸形或被中间人改写的 WS 消息把超长串塞进 PTY parser。
+    if (record.text.length > 8192) return null;
+    return { type: 'inject-text', sessionId: record.sessionId, text: record.text };
+  };
+
   ws.on('message', (raw) => {
-    const event = parseInjectInputEvent(raw);
-    if (event && event.sessionId === session.id && event.optionIndex < currentPromptOptions.length) {
-      term.write(replyTextForPromptOption(currentPromptOptions[event.optionIndex]));
+    const record = parseWsRecord(raw);
+    if (!record) return;
+
+    const optionEvent = parseInjectInputEvent(record);
+    if (optionEvent && optionEvent.sessionId === session.id && optionEvent.optionIndex < currentPromptOptions.length) {
+      term.write(replyTextForPromptOption(currentPromptOptions[optionEvent.optionIndex]));
       currentPromptOptions = [];
+      return;
+    }
+
+    const textEvent = parseInjectTextEvent(record);
+    if (textEvent && textEvent.sessionId === session.id) {
+      // P2-C 换行不变量：daemon HTTP / WS 不碰换行；runner 收到 freeform 文本后兜底加 \n，
+      // 让等价于用户在终端敲回车。已带 \n 的不重复追加，避免双换行。
+      term.write(textEvent.text.endsWith('\n') ? textEvent.text : `${textEvent.text}\n`);
+      // 不清 currentPromptOptions——下一次 onPrompt 会覆盖。
     }
   });
 

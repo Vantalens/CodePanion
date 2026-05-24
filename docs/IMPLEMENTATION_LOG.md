@@ -2394,3 +2394,177 @@ npm run validate:dtos  # C# DTO 与 protocol.ts 一致
   1. Codex Desktop 在跑、Codex CLI 没装时，列表里**不**应出现任何 Codex 来源；
   2. 同时跑 Claude Code CLI 多个子进程时，列表里**只**出现一个 claude-code 来源而非多个；
   3. 关闭 Codex / Claude Code 后 10 秒内对应来源消失或被翻为 sourceOnline=false。
+
+## 2026-05-24 GUI 自由文本回复 + VS Code 终端同步加速
+
+承接 plan vectorized-twirling-brook —— 两个独立但相关的痛点：
+1. **GUI 不能自由打字给 AI 工具**：底部「回复」框只在「存在 prompt 选项」时启用，PTY 接管会话上只能勾选 AI 抛的选项，无法自由交互；
+2. **VS Code 终端 AI 输出滞后**：`onDidStartTerminalShellExecution` flush 节流偏保守（700ms / 12K），GUI 跟 IDE 之间可见秒级延迟。
+
+方向修正与产品定位一致：CodePanion 是 AI 工具的接管主控台，本次为 PTY 会话打开自由文本通道，并把 VS Code 终端同步延迟拉到亚秒级。process-scan 旁观源 daemon 不持 stdin 句柄，本次不动。
+
+### 设计选择
+
+- **协议扩展走 `mode` 字段而非新端点**：`ReplyRequestSchema` 增 `mode: 'option' | 'freeform'`（default `'option'`，向后兼容）；WS 新增 `inject-text{sessionId, text}` 与现有 `inject-input{sessionId, optionIndex}` 并列。
+- **控制字符剥离集中在 `sessionManager.injectReply` freeform 分支**：只剥会杀进程 / 退出进程的 `\x00 \x03 \x04 \x1A \x1C`，保留 ESC / Tab / Backspace（vim、shell 补全、删字等正常工作）。CLI / GUI 不重复过滤。后续若要"显式发 Ctrl-C 给 AI 工具"，单独加 `inject-signal` 事件，不靠 freeform 走私。
+- **8192 字节长度上限**：HTTP 层 zod schema 挡，CLI / GUI 不重复校验。
+- **P2-C 换行不变量保留**：只 [runner.ts](../packages/daemon/src/pty/runner.ts) 追 `\n`（`text.endsWith('\n') ? text : text + '\n'`）；daemon HTTP / WS / 协议层不碰换行。GUI `<input type="text">` 浏览器层就阻断 `\n`。
+- **freeform 不清 `lastPromptOptions`**：用户用 freeform 发字后，pending prompt 可能仍有效，下一次 prompt 来覆盖即可，避免选项白名单被误清。
+- **VS Code 节流参数**：`TERMINAL_OUTPUT_FLUSH_MS` 700 → 120ms，`TERMINAL_OUTPUT_MAX_CHARS` 12000 → 2000。仅改两个常量，不动协议 / 渲染粒度。daemon `/events` 请求频率 ~6x 提升（120ms ≈ 8 req/s peak），单进程 express 单用户 alpha 无压力；列为观察项，未来需要再上批量端点。
+- **GUI 启用矩阵**：新增 `activePtySessionIdForConversation(conversationId)` 解析 `session:<id>` / `workflow:<thread>` + active handoff 两种 PTY 可达情形；omnibar 三态——option / freeform / 禁用；同时把 P2-C 时代「请回到 CLI 终端」的 inline hint 替换为真正的 freeform input box。
+
+### 改动
+
+**Daemon（TypeScript）**
+
+- [packages/daemon/src/shared/protocol.ts](../packages/daemon/src/shared/protocol.ts)：`ReplyRequestSchema` 扩 `mode` + `text.max(8192)`；`WsServerEvent` 增 `inject-text` variant。
+- [packages/daemon/src/daemon/sessionManager.ts:144](../packages/daemon/src/daemon/sessionManager.ts#L144)：`injectReply(id, text, mode='option')` 加 freeform 分支：剥危险字符 → `appendOutputChunk` → ws.send `inject-text` → broadcast `reply-injected` → `status='running'`，不清 `lastPromptOptions`。
+- [packages/daemon/src/daemon/server.ts](../packages/daemon/src/daemon/server.ts)：`POST /sessions/:id/reply` 透传 `parsed.data.mode`。
+- [packages/daemon/src/pty/runner.ts](../packages/daemon/src/pty/runner.ts)：重构 ws 消息分发，新增 `parseWsRecord` / `parseInjectInputEvent` / `parseInjectTextEvent`；`inject-text` 收到后 `term.write(text.endsWith('\n') ? text : text + '\n')`。
+- [packages/daemon/src/shared/client.ts](../packages/daemon/src/shared/client.ts)：`postReply(id, text, mode?)`，`mode` 未传不发字段（兼容旧 daemon）。
+- [packages/daemon/src/cli/reply.ts](../packages/daemon/src/cli/reply.ts) + [packages/daemon/src/cli/index.ts](../packages/daemon/src/cli/index.ts)：`--freeform` / `-f` flag；freeform 模式跳过 `\n` 追加并传 mode 给 client。
+
+**VS Code Extension**
+
+- [packages/vscode-extension/extension.js:20-21](../packages/vscode-extension/extension.js#L20-L21)：`TERMINAL_OUTPUT_FLUSH_MS = 120`、`TERMINAL_OUTPUT_MAX_CHARS = 2000`。
+
+**GUI（C# + JS）**
+
+- [packages/gui/Services/DaemonClient.cs](../packages/gui/Services/DaemonClient.cs)：`SendReplyAsync(sessionId, text, mode = "option")`，POST body 始终带 `{ text, mode }`。
+- [packages/gui/MainWindow.xaml.cs](../packages/gui/MainWindow.xaml.cs)：`case "reply"` 读取 `message["mode"]?.Value<string>() ?? "option"` 转发给 `HandleUserReply`；日志区分 mode（`[回复 freeform] sessionId: value`）。
+- [packages/gui/wwwroot/chat.js](../packages/gui/wwwroot/chat.js)：
+  - 新增 `activePtySessionIdForConversation(conversationId)` —— `session:<id>` 直接取；`workflow:<thread>` 且 `handoffStatus=active` 取 `handoffSessionId`；其他返空。
+  - 新增 `selectOptionFreeform(sessionId, value)` —— 发 `{ type: 'reply', sessionId, value, mode: 'freeform' }`。
+  - 修改 `wireOmnibar` 为三态：`allowOption` / `allowFreeform` / 禁用；placeholder 各自不同提示；提交时 option 优先，否则 freeform。
+  - 替换 `renderOptions` 里 `sessionId && options.length === 0` 的"请回到 CLI 终端"hint 为真正的 freeform input box（回车触发 `selectOptionFreeform`）。
+
+### 测试
+
+**新增**（[packages/daemon/test/sessionManager.test.mjs](../packages/daemon/test/sessionManager.test.mjs)）：
+
+- `injectReply freeform writes raw text and broadcasts inject-text` —— mock cliSocket 收到 `{type:'inject-text', sessionId, text}`。
+- `injectReply freeform succeeds without prior prompt` —— 不调 `markPrompt`，freeform 仍返 `'ok'`。
+- `injectReply freeform strips dangerous control chars` —— `'ok\x03done\x04\x1A'` → `'okdone'`。
+- `injectReply freeform preserves ESC and Tab` —— `':wq\x1B\thelp'` 完整保留。
+- `injectReply freeform does not clear lastPromptOptions` —— freeform 后用 option 模式仍能命中白名单。
+- `injectReply option mode unchanged (regression)` —— 显式 `'option'` 不匹配仍返 `'invalid-reply'`。
+- `injectReply default mode is option (back-compat)` —— 不传 mode = 传 `'option'`。
+
+**回归更新**（[packages/daemon/test/chatWorkflowSnapshot.test.mjs](../packages/daemon/test/chatWorkflowSnapshot.test.mjs)）：
+
+- H4 "session prompts without options surface a CLI-direct-input hint" → 改名 "render a freeform input box"：断言 `.custom-input` 存在 + placeholder 含「自由文本 / PTY」，不再断言 `.prompt-hint`。
+- "session prompts expose the omnibar for typed replies"：原断言 `.custom-input === null` 改为 `.custom-input` 存在（inline freeform + omnibar 同时启用）。
+
+**验证命令**：
+
+```powershell
+Set-Location packages/daemon
+node --test test/sessionManager.test.mjs          # 12/12 pass（5 既有 + 7 新增）
+node --test test/server.integration.test.mjs      # 38/38 pass
+node --test test/chatWorkflowSnapshot.test.mjs    # 41/41 pass
+node --test test/aiToolProcessAdapter.test.mjs test/workflowManager.test.mjs  # 26/26 pass
+# 全套（除三个慢测）—— 229 pass / 1 fail（pidfileIdentity 是 cmdline 含 "daemon" 路径误判，单跑通过）
+node --test test/pidfileIdentity.test.mjs         # 单跑 2/2 pass
+```
+
+### 安全考量
+
+- **危险键剥离仅 5 个码点**：`\x00 \x03 \x04 \x1A \x1C`。ESC / Tab / Backspace 保留以支持 vim / 补全 / 删字。
+- **8192 字节长度上限**：防止单次粘贴大日志冲垮 PTY parser。
+- **option 白名单未削弱**：默认 mode 仍是 option，回归测试覆盖；脚本误用 `codepanion reply <id> "rm -rf /"` 仍会走 option 路径并被白名单 400 挡掉。
+- **CLI `--freeform` 是显式动作**：用户必须主动加标志才能发自由文本。
+- **认证 / 绑定 / Origin 白名单**：复用现有 token-auth + 127.0.0.1 绑定 + WS Origin 校验，本次不改。
+
+### 不做事项
+
+- **process-scan 旁观源不接 stdin**：daemon 不持 PID 句柄，物理不可达。
+- **信号注入（Ctrl-C / Ctrl-D / Ctrl-Z）**：本次特意从 freeform 剥离；后续如需要单独加 `inject-signal` 事件。
+- **多行粘贴智能拆分**：浏览器层 `<input>` 阻断 `\n`；runner 用 `endsWith('\n')` 去重。
+- **VS Code 终端 → 对话流式渲染**：本次仅靠节流参数缓解滞后感，离散事件渲染粒度不变；真正"对话流"需要 streamRole 字段 + 前端合并 chunk 逻辑，超出本次范围。
+- **GUI 自动化测试**：项目无 GUI 测试框架，本次不引入。
+- **`/events` 批量端点**：120ms throttle 后 ~8 req/s peak 单进程 express 无压力，列为观察项。
+
+---
+
+## 2026-05-24 修复 GUI 退出后 daemon 成为孤儿进程
+
+### 背景
+
+用户报告：把 GUI 关闭后，后台 daemon (node.exe) 仍然在跑，必须手动 `Stop-Process` 才能清掉。
+
+**根因定位**：
+
+- [packages/gui/Services/DaemonProcessManager.cs](../packages/gui/Services/DaemonProcessManager.cs) 是 `static` 类，`EnsureStartedAsync` 把 `Process.Start` 的返回值赋给局部变量 `var process`，函数返回时句柄丢失。
+- [packages/gui/MainWindow.xaml.cs:936 Exit_Click](../packages/gui/MainWindow.xaml.cs#L936)（托盘菜单"退出"）与 [packages/gui/MainWindow.xaml.cs:950 OnClosed](../packages/gui/MainWindow.xaml.cs#L950) 都没有调用任何停止 daemon 的逻辑——`Application.Current.Shutdown()` 后 daemon 进程作为独立顶层进程继续存活。
+- `Window_Closing` 的 `e.Cancel = true; Hide()` 是托盘最小化模式（这部分行为按设计保留）。
+
+### 改动
+
+#### 1. [DaemonProcessManager.cs](../packages/gui/Services/DaemonProcessManager.cs)：保留 Process 句柄 + 双重清理
+
+**A. 保留句柄 + 主动 Stop**
+
+- 增静态字段 `_managedProcess`（`Interlocked.Exchange` 替换，避免并发竞争）。
+- `EnsureStartedAsync` 在 `Process.Start` 后把句柄存入 `_managedProcess`。
+- 新增 `Stop(Action<string>? log)`：原子取出句柄 → 检查 `HasExited` → `Kill(entireProcessTree: true)` → `WaitForExit(3000)` → `Dispose()`。
+- 设计前提：`IsHealthyAsync` 早返时 `_managedProcess` 保持 null，所以 Stop 永远不会误杀用户预先用 CLI 启动的 daemon。
+
+**B. JobObject + KILL_ON_JOB_CLOSE：防强杀 / 崩溃孤儿**
+
+仅做"调 Stop"还不够——如果 GUI 被 `taskkill /f`、Task Manager 强杀或自身 crash，`OnClosed`/`Exit_Click` 都不会运行，daemon 仍会孤儿。
+
+引入 Windows JobObject 兜底：
+
+- `CreateJobObject` + `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` 创建 job，进程退出时句柄关闭，Windows 内核保证 job 内所有进程一并终止。
+- `AssignProcessToJobObject` 把 daemon 进程绑入。
+- Job handle 在 GUI 进程生命周期内常驻；GUI 以**任何方式**死亡（正常退出、tray Exit、taskkill /f、crash）都会触发内核回收 → daemon 自动死。
+- P/Invoke 直接声明在 DaemonProcessManager.cs 末尾，未引入 NuGet 依赖。
+- `OperatingSystem.IsWindows()` 保护，非 Windows 平台跳过（保留跨平台编译能力）。
+
+#### 2. [MainWindow.xaml.cs](../packages/gui/MainWindow.xaml.cs)：调用 Stop
+
+- `Exit_Click`（托盘菜单"退出"）首行 `DaemonProcessManager.Stop(AddLog)`。
+- `OnClosed` 同样首行调用。
+- 即便 Stop 不跑（强杀），JobObject 兜底；即便 JobObject 创建失败（罕见 Win32 错误），Stop 兜底。双层保险。
+
+#### 3. [chat.js wireOmnibar](../packages/gui/wwwroot/chat.js)：disabled hint 按 conversation 类型差异化
+
+用户上一轮反馈"完全用不了"的部分原因是：进程扫描源（Codex Desktop / VS Code Claude）的会话本来就不接受 GUI 回写，但原 placeholder 笼统显示「当前任务没有可写回的回复目标」，跟 freeform 改造前一模一样，用户看不出差异。
+
+新增 `disabledOmnibarHint(conversationId)`：
+
+- `source:` 前缀 → 「外部 AI 工具（进程扫描源）不支持 GUI 回写，请到对应 IDE 终端内回复」
+- `workflow:` 前缀 → 「此 workflow 尚未建立 PTY 接力会话，先转交到 PTY 才能回写」
+- `session:` 前缀但 ptySessionId 暂空 → 「会话等待就绪…」
+- 空 conversationId → 「请先在左侧选择一个任务」
+
+### 验证
+
+**Smoke test（强杀 GUI 验证 JobObject）**：
+
+```powershell
+$gui = Start-Process -FilePath "D:\CodePanion\dist\CodePanion-win-x64\CodePanion.Gui.exe" -PassThru
+Start-Sleep -Seconds 6  # 等 daemon 启动
+$daemon = Get-Process node | Where-Object { $_.Path -like '*CodePanion-win-x64\runtime\node.exe' }
+# 强杀 GUI（OnClosed/Exit_Click 都不会跑）
+Stop-Process -Id $gui.Id -Force
+Start-Sleep -Seconds 2
+# 检查 daemon 是否随 GUI 一起死了
+Get-Process -Id $daemon.Id -ErrorAction SilentlyContinue
+# 期望：进程不存在 → JobObject 生效
+```
+
+结果：daemon 在 GUI 死后 2 秒内自动被 Windows 内核终止，**零孤儿**。
+
+### 安全 / 边界考量
+
+- **不误杀用户的 CLI daemon**：`EnsureStartedAsync` 第一步是 `IsHealthyAsync` 短路，已有 daemon 时不进入 `Process.Start` 分支，`_managedProcess` 与 `_jobHandle` 保持 null/Zero，Stop 与 JobObject 都不会触及外部 daemon。
+- **JobObject 创建/绑定失败时的降级**：失败仅写日志，不阻止 GUI 启动；后续依赖 Stop 主动清理（正常退出可达，强杀降级为可能产生孤儿，但这是 P/Invoke 失败的极端情况，原有错误处理也覆盖）。
+- **`Kill(entireProcessTree: true)`**：如果 daemon 后续衍生子进程（CLI runner 起的 PTY 子进程），整树清理；JobObject 同样递归清理 job 内的所有派生进程。
+- **`Window_Closing` 行为不变**：`e.Cancel = true; Hide()` 保留——点 × 仍是托盘最小化，不杀 daemon。用户要彻底退出请用托盘菜单"退出"或 Alt+F4 后选退出。
+
+### 不做事项
+
+- **改 `Window_Closing` 为真正退出**：点 × 即退出是 WPF 应用的非标准行为；本次保留托盘最小化模式。
+- **GUI 退出时同时杀用户的 CLI daemon**：用户主动 `codepanion daemon start` 起的 daemon 不属于 GUI 管理范围；Stop / JobObject 都只针对 GUI-spawned 进程。
+- **JobObject 共享 / 嵌套**：本次 job 只装 daemon 一个进程；如未来需要把 PTY runner 进程也纳入"GUI 死则全死"语义，可复用同一 job handle。

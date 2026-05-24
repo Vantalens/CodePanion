@@ -72,12 +72,19 @@ export async function runCli(argv: string[]): Promise<void> {
         y
           .positional('sessionId', { type: 'string', demandOption: true })
           .positional('text', { type: 'string', demandOption: true })
-          .option('newline', { type: 'boolean', default: true, describe: '是否末尾补 \\n' }),
+          .option('newline', { type: 'boolean', default: true, describe: '是否末尾补 \\n' })
+          .option('freeform', {
+            alias: 'f',
+            type: 'boolean',
+            default: false,
+            describe: '发送自由文本到 PTY，不要求匹配 prompt 选项',
+          }),
       async (a) => {
         await replyCommand({
           sessionId: a.sessionId as string,
           text: a.text as string,
           newline: a.newline as boolean,
+          freeform: a.freeform as boolean,
         });
       },
     )

@@ -702,7 +702,7 @@ export function createServer(
       res.status(400).json({ error: parsed.error.message });
       return;
     }
-    const result = sessions.injectReply(req.params.id, parsed.data.text);
+    const result = sessions.injectReply(req.params.id, parsed.data.text, parsed.data.mode);
     if (result === 'not-connected') {
       res.status(404).json({ error: 'session not connected' });
       return;

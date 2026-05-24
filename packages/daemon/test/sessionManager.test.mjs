@@ -99,3 +99,121 @@ test('SessionManager resets waiting → running when real output crosses the pro
   assert.equal(info.status, 'running');
   assert.equal(info.lastPromptOptions, undefined);
 });
+
+// --- freeform mode tests ---
+
+test('injectReply freeform writes raw text and broadcasts inject-text', () => {
+  const manager = new SessionManager();
+  const session = registerSession(manager);
+  const sent = [];
+  manager.attachCliSocket(session.id, {
+    readyState: 1,
+    OPEN: 1,
+    send: (data) => sent.push(JSON.parse(data)),
+  });
+
+  const events = [];
+  manager.onEvent((event) => events.push(event));
+
+  const result = manager.injectReply(session.id, 'hello world', 'freeform');
+  assert.equal(result, 'ok');
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].type, 'inject-text');
+  assert.equal(sent[0].sessionId, session.id);
+  assert.equal(sent[0].text, 'hello world');
+
+  const broadcast = events.find((e) => e.type === 'reply-injected');
+  assert.ok(broadcast);
+  assert.equal(broadcast.text, 'hello world');
+});
+
+test('injectReply freeform succeeds without prior prompt', () => {
+  const manager = new SessionManager();
+  const session = registerSession(manager);
+  manager.attachCliSocket(session.id, {
+    readyState: 1,
+    OPEN: 1,
+    send: () => {},
+  });
+
+  // No markPrompt call — freeform should still succeed
+  const result = manager.injectReply(session.id, 'arbitrary text', 'freeform');
+  assert.equal(result, 'ok');
+});
+
+test('injectReply freeform strips dangerous control chars', () => {
+  const manager = new SessionManager();
+  const session = registerSession(manager);
+  const sent = [];
+  manager.attachCliSocket(session.id, {
+    readyState: 1,
+    OPEN: 1,
+    send: (data) => sent.push(JSON.parse(data)),
+  });
+
+  // \x03=Ctrl-C, \x04=Ctrl-D, \x1A=Ctrl-Z
+  const result = manager.injectReply(session.id, 'ok\x03done\x04\x1A', 'freeform');
+  assert.equal(result, 'ok');
+  assert.equal(sent[0].text, 'okdone');
+});
+
+test('injectReply freeform preserves ESC and Tab', () => {
+  const manager = new SessionManager();
+  const session = registerSession(manager);
+  const sent = [];
+  manager.attachCliSocket(session.id, {
+    readyState: 1,
+    OPEN: 1,
+    send: (data) => sent.push(JSON.parse(data)),
+  });
+
+  // \x1B=ESC, \t=Tab
+  const result = manager.injectReply(session.id, ':wq\x1B\thelp', 'freeform');
+  assert.equal(result, 'ok');
+  assert.equal(sent[0].text, ':wq\x1B\thelp');
+});
+
+test('injectReply freeform does not clear lastPromptOptions', () => {
+  const manager = new SessionManager();
+  const session = registerSession(manager);
+  manager.attachCliSocket(session.id, {
+    readyState: 1,
+    OPEN: 1,
+    send: () => {},
+  });
+
+  manager.markPrompt(session.id, 'Continue?', ['yes', 'no']);
+  manager.injectReply(session.id, 'something else', 'freeform');
+
+  // lastPromptOptions should still be intact for a subsequent option-mode reply
+  const result = manager.injectReply(session.id, 'yes', 'option');
+  assert.equal(result, 'ok');
+});
+
+test('injectReply option mode unchanged (regression)', () => {
+  const manager = new SessionManager();
+  const session = registerSession(manager);
+  manager.attachCliSocket(session.id, {
+    readyState: 1,
+    OPEN: 1,
+    send: () => {},
+  });
+
+  manager.markPrompt(session.id, 'Continue?', ['yes', 'no']);
+  const result = manager.injectReply(session.id, 'maybe', 'option');
+  assert.equal(result, 'invalid-reply');
+});
+
+test('injectReply default mode is option (back-compat)', () => {
+  const manager = new SessionManager();
+  const session = registerSession(manager);
+  manager.attachCliSocket(session.id, {
+    readyState: 1,
+    OPEN: 1,
+    send: () => {},
+  });
+
+  // No prompt set — default mode (option) should fail with invalid-reply
+  const result = manager.injectReply(session.id, 'hello');
+  assert.equal(result, 'invalid-reply');
+});
