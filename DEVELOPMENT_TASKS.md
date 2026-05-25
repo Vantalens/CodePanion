@@ -55,8 +55,14 @@
 - [x] **V-2** vscode-extension request timeout → `DEFAULT_REQUEST_TIMEOUT_MS=8000`，`req.setTimeout()` socket 级兜底，异常 socket 不再无限挂起。
 - [x] **V-3** vscode-extension socket 探测重试 → `watchConfigFile()` 返回布尔；config 文件不存在时 `startConfigProbe()` 用 `setInterval(5s).unref()` 周期探测，daemon 起来后自动装上 fs.watch。
 - [x] **S-1** `scripts/package-windows.ps1` 通配符行为 → 改用 `Get-ChildItem -LiteralPath | ForEach-Object { Copy-Item -LiteralPath ... -Recurse }` 显式枚举顶层条目，绕开 PS5/PS7 `"$dir\*"` 通配符语义差异。
-- [ ] **S-2** `scripts/build-daemon-bundle.mjs` external 声明（仍延后）。
-- [ ] **J-01 ~ J-10** GUI 前端 chat.js 长跑内存 / 重渲 / 链接处理 → 本轮以东京黑单栏 CSS 重做 + host 端 snapshot replay 临时收尾「刷新就空」与「布局太杂」两个最痛点；DOM 节点裁剪与 chatWorkflowSnapshot.test 同步更新放下一轮 Phase 2。
+- [x] **S-2** `scripts/build-daemon-bundle.mjs` external 声明 + 打包脚本运行时依赖拷贝 → esbuild 标 `node-pty / pino / pino-pretty / sonic-boom / thread-stream / bufferutil / utf-8-validate` 为 external；`package-windows.ps1` 新增 `Copy-DaemonRuntimeDependencies`，把 node-pty（仅当前 RID 的 prebuild）+ node-addon-api + pino 链拷到 `dist/daemon/node_modules/`，Node `require` 向上解析自动命中。bundle 由 2.04MB 缩到 1.9MB。
+- [-] **J-01 ~ J-10** GUI 前端 chat.js 长跑内存 / 重渲 / 链接处理 → 已闭环：
+  - [x] **J-01** conversation 列表 click 改 `#conversation-list` delegated handler，按 `dataset.conversationId` 派发，rerender 不再累积逐项监听器。
+  - [x] **J-02** 引入 `conversationButtonCache`（cap 256）+ `updateConversationButton`，button 节点按 id 复用、字段走 `textContent` / `classList.toggle` 更新；renderConversationList 末尾 `pruneConversationButtonCache(visibleIds)`，避免分配。
+  - [x] **J-09** 助手内容里的 `<a>` 移除 `target=_blank`，前端全局 `click` 委托命中 `a[href]` 时 `event.preventDefault()` + `sendToHost({ type: 'open-external', href })`，host 端 `AllowedWebMessageTypes` 加 `open-external` 复用 N-19 `OpenExternalLink`。
+  - [x] **J-10** 切到 code 视图不再无条件覆盖 `activeConversation`，仅在空 / 非 `'all'` 且当前任务没有 code block 时才回退，保留 P0.1 不抢焦点。
+  - [ ] **DOM 节点裁剪 / chatWorkflowSnapshot.test 同步更新（Phase 2）** 仍延后，等真机 8h 稳态曲线再决定。
+  - 详见 [docs/IMPLEMENTATION_LOG.md](docs/IMPLEMENTATION_LOG.md#2026-05-25-第三轮审计-j-系列长尾修复j-01--j-02--j-09--j-10)。
 
 > 修复完成后逐项 `[x]`，并在 [docs/IMPLEMENTATION_LOG.md](docs/IMPLEMENTATION_LOG.md) 追加 `2026-05-XX 第三轮审计修复` 段落。
 

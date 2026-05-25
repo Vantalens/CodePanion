@@ -31,6 +31,7 @@ namespace CodePanion.Gui
             "event-reply",
             "task-action",
             "handoff-launch",
+            "open-external",
         };
 
         private readonly DaemonClient _daemonClient;
@@ -254,6 +255,22 @@ namespace CodePanion.Gui
                         if (!string.IsNullOrWhiteSpace(threadId))
                         {
                             HandleHandoffLaunch(threadId!, message);
+                        }
+                        break;
+                    }
+
+                    // J-09：前端 click 拦截后把外链 href 转给 host 端，统一走 OpenExternalLink
+                    // （仍复用 N-19 弹确认 + http(s) 白名单的兜底逻辑）。
+                    case "open-external":
+                    {
+                        var href = message["href"]?.Value<string>();
+                        if (!string.IsNullOrWhiteSpace(href) && Uri.TryCreate(href, UriKind.Absolute, out var uri))
+                        {
+                            OpenExternalLink(uri);
+                        }
+                        else
+                        {
+                            AddLog($"忽略非法 open-external href：{href ?? "<empty>"}");
                         }
                         break;
                     }

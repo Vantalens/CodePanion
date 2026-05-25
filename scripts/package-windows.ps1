@@ -123,6 +123,92 @@ function Remove-DirectoryWithRetry {
     }
 }
 
+# S-2：把 build-daemon-bundle.mjs 标 external 的包从仓库根 node_modules 拷到 dist 包的
+# daemon/node_modules 旁边。Node 的 require 解析会自动从 daemon.cjs 所在目录向上找
+# node_modules，所以放在 daemon/ 子目录的 node_modules 即可被命中。
+function Copy-RuntimeModule {
+    param(
+        [string]$ModuleName,
+        [string]$DestinationRoot,
+        [string]$RepoRoot,
+        [string[]]$ExcludeDirs = @()
+    )
+
+    $source = Join-Path $RepoRoot "node_modules\$ModuleName"
+    if (-not (Test-Path -LiteralPath $source)) {
+        throw "Runtime module not found in repo root node_modules: $ModuleName"
+    }
+    $destination = Join-Path $DestinationRoot $ModuleName
+    if (Test-Path -LiteralPath $destination) {
+        Remove-Item -LiteralPath $destination -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path $destination -Force | Out-Null
+
+    Get-ChildItem -LiteralPath $source -Force | ForEach-Object {
+        if ($ExcludeDirs -contains $_.Name) {
+            return
+        }
+        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $destination $_.Name) -Recurse -Force
+    }
+}
+
+# 把 native binding 包 + pino transport 链拷过去；node-pty 体积绝大部分是其它平台的 prebuilds，
+# 只保留当前 RuntimeIdentifier 对应那一份。
+function Copy-DaemonRuntimeDependencies {
+    param(
+        [string]$DaemonRuntimeDir,
+        [string]$RepoRoot,
+        [string]$RuntimeIdentifier
+    )
+
+    $nodeModules = Join-Path $DaemonRuntimeDir "node_modules"
+    if (-not (Test-Path -LiteralPath $nodeModules)) {
+        New-Item -ItemType Directory -Path $nodeModules -Force | Out-Null
+    }
+
+    # node-pty + 它的 transitive deps
+    $platformPrebuild = switch ($RuntimeIdentifier) {
+        "win-x64"   { "win32-x64" }
+        "win-arm64" { "win32-arm64" }
+        default     { "win32-x64" }
+    }
+    $allPrebuilds = @("darwin-arm64", "darwin-x64", "win32-arm64", "win32-x64")
+    $excludePrebuilds = @($allPrebuilds | Where-Object { $_ -ne $platformPrebuild })
+
+    Copy-RuntimeModule -ModuleName "node-pty" -DestinationRoot $nodeModules -RepoRoot $RepoRoot
+    $unwantedPrebuildRoot = Join-Path $nodeModules "node-pty\prebuilds"
+    if (Test-Path -LiteralPath $unwantedPrebuildRoot) {
+        Get-ChildItem -LiteralPath $unwantedPrebuildRoot -Directory -Force | ForEach-Object {
+            if ($excludePrebuilds -contains $_.Name) {
+                Remove-Item -LiteralPath $_.FullName -Recurse -Force
+            }
+        }
+    }
+    Copy-RuntimeModule -ModuleName "node-addon-api" -DestinationRoot $nodeModules -RepoRoot $RepoRoot
+
+    # pino 链：sync:false destination 当前不会触发 worker，但保持磁盘路径完整可以让未来切到 transport
+    # 模式也不会爆 MODULE_NOT_FOUND。
+    $pinoModules = @(
+        "pino",
+        "sonic-boom",
+        "thread-stream",
+        "atomic-sleep",
+        "on-exit-leak-free",
+        "pino-abstract-transport",
+        "pino-std-serializers",
+        "process-warning",
+        "quick-format-unescaped",
+        "real-require",
+        "safe-stable-stringify",
+        "@pinojs/redact"
+    )
+    foreach ($module in $pinoModules) {
+        Copy-RuntimeModule -ModuleName $module -DestinationRoot $nodeModules -RepoRoot $RepoRoot
+    }
+
+    Write-Host "[package] Daemon runtime deps copied to $nodeModules"
+}
+
 Set-Location -LiteralPath $root
 
 Write-Host "[1/4] Building daemon bundle..."
@@ -160,6 +246,16 @@ $packagedNodePath = Join-Path $runtimeDir "node.exe"
 Copy-Item -LiteralPath $nodePath -Destination $packagedNodePath -Force
 Assert-NodeRuntime -NodePath $packagedNodePath | Out-Null
 Write-Host "[package] Node runtime: $($nodeInfo.Version), SHA256=$($nodeInfo.Sha256)"
+
+# S-2：daemon.cjs 旁的 daemon/ 目录被 dotnet publish 拷过来（含 daemon.cjs），现在补上 external
+# 依赖。FindDaemonEntry 已经认准 baseDir/daemon/daemon.cjs，所以 node_modules 放在
+# daemon/node_modules 下即可被 Node require 解析命中（向上查找规则）。
+$daemonRuntimeDir = Join-Path $distDir "daemon"
+if (Test-Path -LiteralPath $daemonRuntimeDir) {
+    Copy-DaemonRuntimeDependencies -DaemonRuntimeDir $daemonRuntimeDir -RepoRoot $root -RuntimeIdentifier $RuntimeIdentifier
+} else {
+    Write-Warning "daemon/ subdirectory missing in publish output; skipping runtime dep copy. Investigate csproj layout."
+}
 
 $readmePath = Join-Path $distDir "README_START.txt"
 @(
