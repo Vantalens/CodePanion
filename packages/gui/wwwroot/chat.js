@@ -3236,7 +3236,11 @@ function shouldInterceptAnchor(anchor) {
     if (!href) return false;
     const trimmed = href.trim();
     if (!trimmed || trimmed.startsWith('#')) return false;
-    if (trimmed.startsWith('javascript:')) {
+    if (
+        trimmed.startsWith('javascript:') ||
+        trimmed.startsWith('data:') ||
+        trimmed.startsWith('vbscript:')
+    ) {
         // marked + DOMPurify 已剥除危险 javascript:，但保留兜底丢弃。
         return true;
     }
