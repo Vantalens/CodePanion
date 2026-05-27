@@ -2568,3 +2568,142 @@ Get-Process -Id $daemon.Id -ErrorAction SilentlyContinue
 - **改 `Window_Closing` 为真正退出**：点 × 即退出是 WPF 应用的非标准行为；本次保留托盘最小化模式。
 - **GUI 退出时同时杀用户的 CLI daemon**：用户主动 `codepanion daemon start` 起的 daemon 不属于 GUI 管理范围；Stop / JobObject 都只针对 GUI-spawned 进程。
 - **JobObject 共享 / 嵌套**：本次 job 只装 daemon 一个进程；如未来需要把 PTY runner 进程也纳入"GUI 死则全死"语义，可复用同一 job handle。
+
+## 2026-05-25 第三轮审计 J 系列长尾修复（J-01 / J-02 / J-09 / J-10）
+
+来源：[docs/CODE_REVIEW_2026-05-23.md#gui-前端chatjs](./CODE_REVIEW_2026-05-23.md)。J 系列是 GUI 前端 [packages/gui/wwwroot/chat.js](../packages/gui/wwwroot/chat.js) 的长跑内存 / 重渲 / 链接处理长尾，先解决其中可定点动手且与 N-19 / N-20 安全面耦合的四项。
+
+### 改动
+
+#### 1. J-09 外链 click 前端拦截（与 N-19 同根）
+
+- `messageBody` 内 marked 渲染出的 `<a>` 现在去掉 `target="_blank"`，仅保留 `rel="noopener noreferrer"`：让 host 端弹确认 + 系统浏览器打开走单条路径，不再先触发 WebView2 navigation 再被 NavigationStarting 取消。
+- `initApp` 内全局 `click` 委托新增 `anchor.closest('a[href]')` 分支：命中后 `event.preventDefault()` 并 `sendToHost({ type: 'open-external', href })`。
+- 新增 `shouldInterceptAnchor(anchor)` 工具函数集中放行逻辑：`#hash`、`codepanion.local`、`about:` / `data:` 不拦；其它（含解析失败 / `javascript:`）一律走 host。
+- host 端 [packages/gui/MainWindow.xaml.cs](../packages/gui/MainWindow.xaml.cs) `AllowedWebMessageTypes` 加入 `open-external`，`OnWebMessageReceived` 新增 `case "open-external"`：复用既有 `OpenExternalLink(uri)`（仍保留 N-19 弹确认 + http(s) 白名单兜底），非法 href 写 `gui.log` 丢弃。
+
+#### 2. J-10 切到 code 视图不抢 activeConversation
+
+- `bindViewButtons` 内原本无条件把 `activeConversation` 覆盖为"最近一个有 code 的会话"，违反 P0.1 不抢焦点。
+- 改为：仅在 `activeConversation` 为空，或当前 active 既不是 `'all'` 也没有任何 code block 时才回退；用户已经选中且当前任务有 code 片段时，直接保留 selection。
+- code 视图的 `'all'` 模式不受影响。
+
+#### 3. J-01 conversation 列表事件委托
+
+- 移除 `makeConversationButton` 内 `button.addEventListener('click', ...)` 与 checkbox 的 `addEventListener('click', ...)`：长跑下每次 rerender 不再向 GC 留下逐项监听器闭包。
+- 新增 `bindConversationList()`：在 `#conversation-list` 上一次性挂 delegated `click`，按 `dataset.conversationId` 派发：
+  - 命中 `[data-conversation-checkbox]` 或 `state.batchMode` → `toggleBatchSelection(id)`；
+  - 否则 → `selectConversation(id)`。
+- `initApp` 在 `renderAll` 前先 `bindConversationList()`；监听器只挂一次，靠 `list.dataset.delegated` 幂等保护。
+
+#### 4. J-02 button 节点复用（J 系列长跑性能基底）
+
+- 新增模块级 `conversationButtonCache: Map<id, HTMLButtonElement>`（cap = 256）。
+- `makeConversationButton(item)` 拆为：
+  - 首次按 id 创建空骨架（含 chip 占位、`dataset.conversationId`）。
+  - 调 `updateConversationButton(button, item)` 走全字段刷新：title / status / source / capability / priority / management chip 文本与 class，全部走 `textContent` + `classList.toggle` / `className=`，不再用模板字符串重渲。
+- `renderConversationList` 在拼装 group 时记录 `visibleIds`，渲染完调 `pruneConversationButtonCache(visibleIds)`：cache 超过 256 时只淘汰不在当前可视集合里的节点，保留命中的复用。
+- 配合 J-01：button 节点真正被复用，监听器是 list 上的单条委托，不再随 rerender 重分配。
+
+### 验证
+
+- `npm test`（仓库根）：daemon 246 通过，adapter-sdk 21 通过，`validate:dtos` 通过；`chatWorkflowSnapshot.test.mjs` 41/41 全过，覆盖 conversation 列表渲染、批量操作、handoff、能力 chip 等核心场景，未回归。
+- 手动巡检：`grep` 确认 chat.js 内的 `button.addEventListener('click', ...)` 仅剩任务管理动作、option / code 子组件等无关组件；conversation 列表不再有 per-item 监听器。
+
+### 不做事项
+
+- J-02 真正的"任务级 dirty diff"（按 conversation lastAt / status 跳过 update）放下一轮：当前 button 复用已经避免分配，更细的 diff 收益有限且会让批量动作 / 能力 chip 状态机更难推理。
+- 助手内容 chat 区域的 `marked.parse` + `DOMPurify.sanitize` 链路本身不动；J-09 只在外链点击的入口拦截。
+
+---
+
+## 2026-05-25 S-2 收口 + config.ts 损坏隔离
+
+### 背景
+
+- S-2 是 [docs/CODE_REVIEW_2026-05-23.md](CODE_REVIEW_2026-05-23.md) 第三轮审计的最后一项 P2，长期延后是因为修这条会改动构建链 + 打包脚本两处。
+- 在 J 系列闭环后做一轮 `grep` 体检：`config.ts` 仍存在与 N-9 / N-16 同类的"JSON.parse 无 try/catch + Zod 失败直接抛"路径，单独修一并归到本轮。
+
+### S-2：daemon bundle external + 打包脚本运行时依赖拷贝
+
+**路径**：[scripts/build-daemon-bundle.mjs](../scripts/build-daemon-bundle.mjs)、[scripts/package-windows.ps1](../scripts/package-windows.ps1)
+
+**问题**：
+
+- `node-pty` 是 native binding 包：`utils.loadNativeModule('../build/Release/<name>.node')` 走相对路径解析；forked agent (`conpty_console_list_agent.js`) 也是真实磁盘文件。两条路径在 esbuild bundle 后都失效，运行时 `MODULE_NOT_FOUND`。
+- `pino / sonic-boom / thread-stream` 的 transport 与 worker 入口同样依赖磁盘路径；当前 daemon 走 `sync:false destination` 不触发 worker，但 bundle 把 require 静态化会让未来切回 transport 直接爆炸。
+- `bufferutil / utf-8-validate` 是 `ws` 的可选 native 加速，缺失时 ws 自己降级；bundle 把 require 静态化反而让降级路径失活。
+
+**修法**：
+
+- esbuild 增加 external 列表：`node-pty / pino / pino-pretty / sonic-boom / thread-stream / bufferutil / utf-8-validate`。
+- `package-windows.ps1` 新增 `Copy-RuntimeModule`（按模块名拷贝，支持 ExcludeDirs 跳过子目录）+ `Copy-DaemonRuntimeDependencies`：
+  - `node-pty` + `node-addon-api`：只保留当前 RID 对应平台的 prebuild（win-x64 → `win32-x64`，win-arm64 → `win32-arm64`），其余 darwin / 另一 windows 架构的 prebuild 拷完后立即 `Remove-Item`，避免无意义体积。
+  - pino 链：`pino / sonic-boom / thread-stream / atomic-sleep / on-exit-leak-free / pino-abstract-transport / pino-std-serializers / process-warning / quick-format-unescaped / real-require / safe-stable-stringify / @pinojs/redact` 全量拷过去；磁盘路径完整是关键，sync 模式不依赖 worker 也不要省。
+- 落点：`dist/CodePanion-<RID>/daemon/node_modules/`。`daemon.cjs` 由 dotnet publish 拷到 `daemon/` 子目录，Node `require` 解析从 `daemon.cjs` 所在目录向上找 `node_modules`，第一跳就命中。
+- 主流程：`Copy-DaemonRuntimeDependencies` 在 node.exe 拷贝之后调用；如果 `daemon/` 子目录不存在则 `Write-Warning` 而非直接抛错，便于将来 csproj 布局改动时排查。
+
+**验证**：
+
+- `npm run build` 通过；esbuild logLevel=info 输出确认 external 生效，`packages/daemon/bundle/daemon.cjs` 从 2.04 MB 缩到 1.9 MB。
+- `npm test` 通过（246 + 21 + dtos）；bundle 缩小后所有 daemon 单元测试照旧绿。
+- 不做事项：尚未在真机解 zip 验证 `dist/daemon/node_modules/node-pty/build/Release/conpty.node` 实际可被 require 命中 —— 这一步归入 [DEVELOPMENT_TASKS.md](../DEVELOPMENT_TASKS.md) 阻塞 Alpha 收口的"Windows 便携版双击启动录屏"真机项，自动化不重复造轮。
+
+### config.ts：损坏的 config.json 不再阻塞 daemon 启动
+
+**路径**：[packages/daemon/src/config.ts](../packages/daemon/src/config.ts#L163-L235)
+
+**问题**：
+
+- `loadConfig()` 原版直接 `JSON.parse(readFileSync(CONFIG_PATH, 'utf8'))` + `ConfigSchema.parse(raw)`，两条路径任一抛错 daemon 全局起不来。
+- 与 N-9（workflow 定义损坏）/ N-16（workflow history 单行坏）的处理风格不一致：那两处都已经走"隔离 + 默认值 + warn"。
+- 触发场景真实存在：用户手动编辑 `~/.codepanion/config.json` 出错、断电写入中断、未来字段格式变更但用户跑了旧版 daemon。
+
+**修法**：
+
+- 抽 `buildDefaultConfig()`：`ConfigSchema.parse({ token: randomBytes(16).toString('hex') })`，让 Zod 自己补齐所有 default。
+- 抽 `quarantineConfigFile(reason)`：`renameSync(CONFIG_PATH, ${CONFIG_PATH}.broken-<ts>.json)`，与 N-9 / N-16 的 `*.broken-*.json` 命名一致。
+- `loadConfig()` 三处包 try/catch：
+  - `JSON.parse` 失败 → 隔离 → 写新默认 config → 返回 default。
+  - 非 object 顶层（如用户写了一个数字 / 字符串）→ 隔离 → 返回 default。
+  - `ConfigSchema.parse` 失败 → 隔离 → 返回 default。
+- 不 import `logger.ts`：logger 自己依赖 config 的 `LOG_PATH`，引入会形成循环依赖；改 `console.warn` 写 stderr，daemon 进入正常运行循环后 logger 也起来，后续走正常日志通道。
+
+**验证**：
+
+- `npm test` 全绿（246 通过，2 跳过 —— 跳过项是已有的 darwin-only 测试，跟本改动无关）。
+- 测试输出中可见 `[config] config.json 已隔离到 ...` 的 warn 行 —— 是 daemon 启动期的隔离测试故意触发的（N-9 / N-16 同类用例），不是回归。
+- 未新增 `loadConfig` 自身的回归测试：现有 `configPermissions.test.mjs` 只覆盖 `writeOwnerOnly`，给 `loadConfig` 加单测需要把 `HOME_DIR / CONFIG_PATH` 改成可注入；那是更大的重构，本轮不做。隔离路径与 N-9 / N-16 共享同一份测试模式（已覆盖），逻辑等价。
+
+### 不做事项
+
+- 没有把 `migrateLegacyDefaults` 一起塞 try/catch：那段只读 `raw?.retention?.workflow` 子树，所有访问都是可选链，不会抛。
+- 没有改 `saveConfig`：写入路径已经走 `writeOwnerOnly`，失败会向上抛由 caller 处理，不需要隔离逻辑。
+- 未触及 J 系列里仍挂在 backlog 的 chat 区域 DOM 节点裁剪（按 `MAX_MESSAGES` 截尾即可），等真机 8h 稳态曲线再决定是否动手。
+
+---
+
+## 2026-05-27 Alpha 稳定性阶段收口（R-1 至 R-5）
+
+### 可靠性与边界修复
+
+- `packages/daemon/test/server.integration.test.mjs` 的请求 helper 从 `fetch` 改为 `node:http`，避免操作系统随机端口撞上 Fetch blocked-port 列表导致无代码回归时测试随机失败。
+- `packages/gui/MainWindow.xaml.cs` 与 `packages/gui/wwwroot/chat.js` 收紧 WebView 导航：只将 `https://codepanion.local/` 和精确 `about:blank` 作为内部导航，`data:` URI 不再在 WebView 内直接执行。
+- `packages/daemon/src/config.ts` 导出 `loadConfigFromPath()` 作为可测试加载路径；`configPermissions.test.mjs` 新增损坏 JSON 与 schema 非法配置的隔离、默认配置重建回归。
+
+### 便携包发布契约
+
+- 新增 `scripts/validate-portable-package.ps1` 与 `npm run validate:portable`：检查 GUI / daemon / Node 入口、运行时模块白名单、唯一目标平台 `node-pty` prebuild，并使用打包内 Node 实际 `require()` 原生与日志依赖。
+- `scripts/package-windows.ps1` 将上述验证纳入构建门禁，并从便携目录剔除 `.ts` / `.map` / `.pdb`、测试、示例、文档、脚本与 benchmark 目录；`node-addon-api` 等仅编译期资产不再复制。保留的 `daemon/node_modules` 是 daemon 启动所需运行时资产，不再按“禁止任何 node_modules”误判。
+
+### 产品口径
+
+- `package.json`、`packages/daemon/package.json` 以及 API / 架构 / 文档入口 / 监控来源 / Claude Code 接入说明统一使用“跨软件、跨窗口、跨项目的多任务完整操作台”定位；技术层语义改称“事件协议”。
+
+### 验证
+
+- `npm test`：通过，覆盖新增的 `data:` 导航拒绝与 config 隔离重建回归。
+- `npm run gui:build`：通过。
+- `node --test packages/daemon/test/server.integration.test.mjs`：连续运行 10 次，每次 38/38 通过。
+- `npm run package:windows`：通过，构建过程自动执行 portable package validation。
+- `npm run validate:portable`：通过，输出 `portable runtime deps ok`。

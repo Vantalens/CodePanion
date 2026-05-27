@@ -31,6 +31,7 @@ namespace CodePanion.Gui
             "event-reply",
             "task-action",
             "handoff-launch",
+            "open-external",
         };
 
         private readonly DaemonClient _daemonClient;
@@ -257,6 +258,22 @@ namespace CodePanion.Gui
                         }
                         break;
                     }
+
+                    // J-09：前端 click 拦截后把外链 href 转给 host 端，统一走 OpenExternalLink
+                    // （仍复用 N-19 弹确认 + http(s) 白名单的兜底逻辑）。
+                    case "open-external":
+                    {
+                        var href = message["href"]?.Value<string>();
+                        if (!string.IsNullOrWhiteSpace(href) && Uri.TryCreate(href, UriKind.Absolute, out var uri))
+                        {
+                            OpenExternalLink(uri);
+                        }
+                        else
+                        {
+                            AddLog($"忽略非法 open-external href：{href ?? "<empty>"}");
+                        }
+                        break;
+                    }
                 }
             }
             catch (Exception ex)
@@ -274,14 +291,15 @@ namespace CodePanion.Gui
                 if (string.IsNullOrEmpty(e.Uri)) return;
                 if (!Uri.TryCreate(e.Uri, UriKind.Absolute, out var uri)) return;
 
-                if (uri.IsAbsoluteUri && uri.Host.Equals("codepanion.local", StringComparison.OrdinalIgnoreCase))
+                if (uri.Scheme == Uri.UriSchemeHttps &&
+                    uri.Host.Equals("codepanion.local", StringComparison.OrdinalIgnoreCase))
                 {
                     return; // 应用自身静态资源
                 }
 
-                if (uri.Scheme == "about" || uri.Scheme == "data")
+                if (string.Equals(uri.AbsoluteUri, "about:blank", StringComparison.OrdinalIgnoreCase))
                 {
-                    return; // about:blank / data: 占位允许
+                    return; // WebView 空占位页
                 }
 
                 e.Cancel = true;

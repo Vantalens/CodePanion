@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mkdtempSync, rmSync } from 'node:fs';
+import { request as httpRequest } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import WebSocket from 'ws';
@@ -58,19 +59,31 @@ async function withServerSnapshot(snapshotPath, run) {
 }
 
 async function request(port, token, method, path, body, authorized = true) {
-  const res = await fetch(`http://127.0.0.1:${port}${path}`, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(authorized ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
+  const payload = body === undefined ? undefined : JSON.stringify(body);
+  return new Promise((resolve, reject) => {
+    const req = httpRequest({
+      hostname: '127.0.0.1',
+      port,
+      path,
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(authorized ? { Authorization: `Bearer ${token}` } : {}),
+        ...(payload ? { 'Content-Length': Buffer.byteLength(payload) } : {}),
+      },
+    }, (res) => {
+      let text = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => { text += chunk; });
+      res.on('end', () => resolve({
+        status: res.statusCode,
+        body: text ? JSON.parse(text) : undefined,
+      }));
+    });
+    req.on('error', reject);
+    if (payload) req.write(payload);
+    req.end();
   });
-  const text = await res.text();
-  return {
-    status: res.status,
-    body: text ? JSON.parse(text) : undefined,
-  };
 }
 
 function waitForMessage(ws, predicate, timeoutMs = 1000) {

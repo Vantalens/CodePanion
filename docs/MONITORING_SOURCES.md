@@ -1,6 +1,6 @@
 # CodePanion 监控源说明
 
-CodePanion 采用多源工作流事件中心模型。作为本地优先、供应商中立的 AI 开发工作流控制台 / 控制平面，daemon 不只接收 `codepanion run --` 包装的 PTY 会话，也会统一接收 Codex Desktop、本地 AI 编程工具扫描、VS Code 扩展和外部适配器上报的本地工作流事件。
+CodePanion 采用多源工作流事件中心模型。作为本地优先、供应商中立、跨软件 / 跨窗口 / 跨项目的多任务完整操作台，daemon 不只接收 `codepanion run --` 包装的 PTY 会话，也会统一接收 Codex Desktop、本地 AI 编程工具扫描、VS Code 扩展和外部适配器上报的本地工作流事件。
 
 现有来源能力保留并继续演进，但必须按真实能力分层描述，不把进程级识别包装成深度集成。
 

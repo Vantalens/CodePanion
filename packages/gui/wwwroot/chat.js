@@ -27,6 +27,10 @@ const ACTIVE_CONVERSATION_WINDOW_MS = 1000 * 60 * 60 * 24 * 3;
 const ARCHIVE_CONVERSATION_WINDOW_MS = 1000 * 60 * 60 * 24 * 14;
 let renderScheduled = false;
 let renderSmoothScroll = false;
+// J-01 / J-02：conversation button 节点缓存。renderConversationList 通过 id 复用 DOM，
+// 配合 #conversation-list 的 delegated click，避免长跑下每次 rerender 都重分配 button 节点 / 监听器。
+const conversationButtonCache = new Map();
+const CONVERSATION_BUTTON_CACHE_CAP = 256;
 const AUTO_SCROLL_THRESHOLD_PX = 96;
 
 function updateConnectionStatus(connected) {
@@ -304,6 +308,7 @@ function renderConversationList() {
     }
 
     const groups = buildConversationGroups(conversations, activeView);
+    const visibleIds = new Set();
     groups.forEach(group => {
         const section = document.createElement('section');
         section.className = 'conversation-group';
@@ -316,9 +321,13 @@ function renderConversationList() {
         header.querySelector('.conversation-group-title').textContent = group.label;
         header.querySelector('.conversation-group-count').textContent = `${group.items.length} 项`;
         section.appendChild(header);
-        group.items.forEach(item => section.appendChild(makeConversationButton(item)));
+        group.items.forEach(item => {
+            visibleIds.add(item.id);
+            section.appendChild(makeConversationButton(item));
+        });
         list.appendChild(section);
     });
+    pruneConversationButtonCache(visibleIds);
 }
 
 function selectConversation(conversationId, options = {}) {
@@ -600,67 +609,87 @@ function isArchivedConversation(item) {
     return /<turn_aborted>|<environment_context>|Context from my IDE setup/i.test(title);
 }
 
+// J-01：每个 conversation button 不再自己挂 click 监听器，统一由 #conversation-list 上的
+// delegated handler 通过 dataset.conversationId 派发。
+// J-02：button 节点按 id 缓存复用，只更新文字 / class，避免 500+ 任务时全量重建 DOM。
 function makeConversationButton(item) {
-    const button = document.createElement('button');
-    button.className = `conversation-item ${state.activeConversation === item.id ? 'active' : ''}`;
-    if (state.batchMode) button.classList.add('batch-mode');
-    if (state.selectedBatchConversationIds.has(item.id)) button.classList.add('selected');
-    button.type = 'button';
-    button.addEventListener('click', () => {
-        if (state.batchMode) {
-            toggleBatchSelection(item.id);
-            return;
-        }
-        selectConversation(item.id);
-    });
+    let button = conversationButtonCache.get(item.id);
+    if (!button) {
+        button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'conversation-item';
+        button.dataset.conversationId = item.id;
+        button.innerHTML = `
+            <div class="conversation-select" hidden>
+                <input type="checkbox" data-conversation-checkbox>
+            </div>
+            <div class="conversation-body">
+                <div class="conversation-name">
+                    <span class="conversation-dot"></span>
+                    <span class="conversation-title-text"></span>
+                </div>
+                <div class="conversation-meta">
+                    <span class="conversation-chip status-chip"></span>
+                    <span class="conversation-chip source-chip"></span>
+                    <span class="conversation-chip capability-chip"></span>
+                    <span class="conversation-chip priority-chip"></span>
+                    <span class="conversation-chip management-chip" hidden></span>
+                </div>
+                <div class="conversation-preview"></div>
+            </div>
+        `;
+        conversationButtonCache.set(item.id, button);
+    }
+    updateConversationButton(button, item);
+    return button;
+}
 
-    // P0.3：摘要走 displayStatus（等待我/运行中/失败/需审阅/完成/来源在线），
-    // preview 显示下一步动作而不是最近一条原始输出，避免命令片段刷屏。
+function updateConversationButton(button, item) {
     const display = deriveConversationDisplay(item);
     const taskState = taskStateForConversation(item);
-    button.innerHTML = `
-        <div class="conversation-select" ${state.batchMode ? '' : 'hidden'}>
-            <input type="checkbox" ${state.selectedBatchConversationIds.has(item.id) ? 'checked' : ''}>
-        </div>
-        <div class="conversation-body">
-            <div class="conversation-name">
-                <span class="conversation-dot ${display.kind}"></span>
-                <span class="conversation-title-text"></span>
-            </div>
-            <div class="conversation-meta">
-                <span class="conversation-chip status-chip"></span>
-                <span class="conversation-chip source-chip"></span>
-                <span class="conversation-chip capability-chip"></span>
-                <span class="conversation-chip priority-chip"></span>
-                <span class="conversation-chip management-chip" hidden></span>
-            </div>
-            <div class="conversation-preview"></div>
-        </div>
-    `;
-    const checkbox = button.querySelector('.conversation-select input');
-    if (checkbox) {
-        checkbox.addEventListener('click', (event) => {
-            event.stopPropagation();
-            toggleBatchSelection(item.id);
-        });
-    }
+    const selected = state.selectedBatchConversationIds.has(item.id);
+
+    // class 设置走 toggle，避免每次拼接新字符串（DOM diff 友好）。
+    button.classList.toggle('active', state.activeConversation === item.id);
+    button.classList.toggle('batch-mode', state.batchMode);
+    button.classList.toggle('selected', selected);
+
+    const selectWrap = button.querySelector('.conversation-select');
+    selectWrap.hidden = !state.batchMode;
+    const checkbox = button.querySelector('input[data-conversation-checkbox]');
+    if (checkbox.checked !== selected) checkbox.checked = selected;
+
     button.dataset.displayStatus = display.kind;
-    if (item.source) button.dataset.source = item.source;
+    if (item.source) {
+        button.dataset.source = item.source;
+    } else if (button.dataset.source) {
+        delete button.dataset.source;
+    }
+
+    const dot = button.querySelector('.conversation-dot');
+    dot.className = `conversation-dot ${display.kind}`;
+
     button.querySelector('.conversation-title-text').textContent = item.title;
     button.querySelector('.status-chip').textContent = display.label;
     button.querySelector('.source-chip').textContent = sourceLabel({ source: item.source });
+
     // P1.3：能力 chip 同步显示文案与颜色，让用户一眼区分只读 / 弱接入 / 可回写。
     const capability = capabilityForMessage(item);
     const capChip = button.querySelector('.capability-chip');
+    capChip.className = 'conversation-chip capability-chip';
     capChip.textContent = capability.level;
     const capClass = capabilityChipClass(capability.rawLevel);
     if (capClass) {
         capChip.classList.add(capClass);
         capChip.dataset.capabilityLevel = capability.rawLevel || '';
+    } else if (capChip.dataset.capabilityLevel) {
+        delete capChip.dataset.capabilityLevel;
     }
+
     const priorityChip = button.querySelector('.priority-chip');
+    priorityChip.className = `conversation-chip priority-chip priority-${taskState.priority}`;
     priorityChip.textContent = taskPriorityLabel(taskState.priority);
-    priorityChip.classList.add(`priority-${taskState.priority}`);
+
     const managementChip = button.querySelector('.management-chip');
     if (taskState.archived) {
         managementChip.hidden = false;
@@ -680,9 +709,21 @@ function makeConversationButton(item) {
     } else if (taskState.pinned) {
         managementChip.hidden = false;
         managementChip.textContent = '已置顶';
+    } else {
+        managementChip.hidden = true;
+        managementChip.textContent = '';
     }
     button.querySelector('.conversation-preview').textContent = display.action;
-    return button;
+}
+
+function pruneConversationButtonCache(visibleIds) {
+    if (conversationButtonCache.size <= CONVERSATION_BUTTON_CACHE_CAP) return;
+    for (const id of Array.from(conversationButtonCache.keys())) {
+        if (!visibleIds.has(id)) {
+            conversationButtonCache.delete(id);
+            if (conversationButtonCache.size <= CONVERSATION_BUTTON_CACHE_CAP) break;
+        }
+    }
 }
 
 function toggleBatchSelection(conversationId) {
@@ -1195,8 +1236,10 @@ function renderMessage(message) {
     const body = document.createElement('div');
     body.className = 'message-content';
     body.innerHTML = DOMPurify.sanitize(marked.parse(formatMessageContent(message)));
+    // J-09：让所有 marked 渲染出的链接走前端拦截 → host open-external，
+    // 不再设置 target=_blank（避免 WebView2 NavigationStarting 兜底带来的取消/重做）。
     body.querySelectorAll('a').forEach(link => {
-        link.target = '_blank';
+        link.removeAttribute('target');
         link.rel = 'noopener noreferrer';
     });
     card.appendChild(body);
@@ -3127,11 +3170,42 @@ function bindViewButtons() {
             state.activeView = nextView;
             state.batchMode = false;
             state.selectedBatchConversationIds.clear();
+            // J-10：切到 code 视图不再强制覆盖 activeConversation；
+            // 只在用户没有选中任何任务或当前任务没有任何 code block 时，才回退到最近一个含代码的任务，
+            // 保留用户在其它视图选定的会话焦点（P0.1 不抢焦点）。
             if (state.activeView === 'code' && state.codeBlocks.length > 0) {
-                state.activeConversation = state.codeBlocks[state.codeBlocks.length - 1].conversationId;
+                const hasActiveBlocks = state.activeConversation
+                    && state.activeConversation !== 'all'
+                    && state.codeBlocks.some(block => block.conversationId === state.activeConversation);
+                if (!state.activeConversation || (!hasActiveBlocks && state.activeConversation !== 'all')) {
+                    state.activeConversation = state.codeBlocks[state.codeBlocks.length - 1].conversationId;
+                }
             }
             renderAll();
         });
+    });
+}
+
+// J-01：conversation 列表点击走事件委托，rerender 时无需 add/remove listener，
+// 列表里的 button 节点也是从 conversationButtonCache 复用，没有累积监听器。
+function bindConversationList() {
+    const list = document.getElementById('conversation-list');
+    if (!list || list.dataset.delegated === '1') return;
+    list.dataset.delegated = '1';
+    list.addEventListener('click', (event) => {
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+        const button = target.closest('.conversation-item');
+        if (!button) return;
+        const conversationId = button.dataset.conversationId;
+        if (!conversationId) return;
+        // 批量模式下点 checkbox 或卡片任意位置都视为切换选中。
+        if (target.closest('[data-conversation-checkbox]') || state.batchMode) {
+            event.preventDefault();
+            toggleBatchSelection(conversationId);
+            return;
+        }
+        selectConversation(conversationId);
     });
 }
 
@@ -3154,6 +3228,32 @@ function sendToHost(message) {
     }
 }
 
+// J-09：判断 click 命中的 anchor 是否需要走 host open-external。
+// 应用内部锚点（#hash / https://codepanion.local）放行；其它协议交由 host 端处理或拒绝。
+function shouldInterceptAnchor(anchor) {
+    if (!anchor) return false;
+    const href = anchor.getAttribute('href');
+    if (!href) return false;
+    const trimmed = href.trim();
+    if (!trimmed || trimmed.startsWith('#')) return false;
+    if (
+        trimmed.startsWith('javascript:') ||
+        trimmed.startsWith('data:') ||
+        trimmed.startsWith('vbscript:')
+    ) {
+        // marked + DOMPurify 已剥除危险 javascript:，但保留兜底丢弃。
+        return true;
+    }
+    try {
+        const url = new URL(trimmed, document.baseURI);
+        if (url.protocol === 'https:' && url.host === 'codepanion.local') return false;
+        if (url.href === 'about:blank') return false;
+    } catch {
+        return true;
+    }
+    return true;
+}
+
 function generateId() {
     return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -3161,11 +3261,19 @@ function generateId() {
 function initApp() {
     bindViewButtons();
     bindGroupButtons();
+    bindConversationList();
     renderAll();
     updateConnectionStatus(false);
     document.addEventListener('click', (event) => {
         const target = event.target;
         if (!(target instanceof Element)) return;
+        // J-09：拦截助手内容里的外链 click，统一让 host 端弹确认 + 系统默认浏览器打开。
+        const anchor = target.closest('a[href]');
+        if (anchor && shouldInterceptAnchor(anchor)) {
+            event.preventDefault();
+            sendToHost({ type: 'open-external', href: anchor.getAttribute('href') });
+            return;
+        }
         if (target.closest('#stage-snooze-task, #drawer-snooze-task, .task-action-menu')) return;
         hideAllSnoozeMenus();
     });

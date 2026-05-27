@@ -1,10 +1,10 @@
 # CodePanion API 文档
 
-CodePanion daemon 是本地 AI 开发工作流控制台 / 控制平面的数据与事件中枢。它默认监听 `http://127.0.0.1:7777`，WebSocket 默认路径为 `ws://127.0.0.1:7777/ws`。
+CodePanion daemon 是跨软件、跨窗口、跨项目的多任务完整操作台的数据与事件中枢。它默认监听 `http://127.0.0.1:7777`，WebSocket 默认路径为 `ws://127.0.0.1:7777/ws`。
 
 除 `GET /health` 外，所有 HTTP API 都需要 `Authorization: Bearer <token>`。token 位于 `~/.codepanion/config.json`。
 
-## 控制平面语义
+## 事件协议语义
 
 本轮策略修订保留现有 API，不引入破坏性接口。`source`、`session`、`workflow`、`event` 是 CodePanion 后续适配器 SDK、审计快照和 provider adapter 的稳定语义基础：
 

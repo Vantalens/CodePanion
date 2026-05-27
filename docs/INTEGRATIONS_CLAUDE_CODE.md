@@ -116,7 +116,7 @@ CC Switch 在 GUI 中显示为 `CC Switch` 来源（tier=switcher），不参与
 - **不读取** `~/.claude/credentials.json`、`~/.claude/conversation/**` 等账号 / 历史文件。
 - **不调用** Claude Code 私有内部状态或未公开 API。
 - **不**把进程级识别（仅看到 `claude` 进程运行）描述为「深度接管」；CodePanion 只有 PTY 包装路径才能保证 L3 回复。
-- **不**做 Claude 模型对话客户端：CodePanion 是控制平面，对话仍交给 Claude Code 自己处理。
+- **不**做 Claude 模型对话客户端：CodePanion 是多任务操作台，对话仍交给 Claude Code 自己处理。
 
 ## 故障排查
 

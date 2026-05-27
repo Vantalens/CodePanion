@@ -2,7 +2,7 @@
   "name": "codepanion-monorepo",
   "version": "0.1.0",
   "private": true,
-  "description": "Local-first, vendor-neutral AI coding workflow control plane",
+  "description": "Local-first multi-task console across software, windows, and projects",
   "workspaces": [
     "packages/daemon"
   ],
@@ -13,6 +13,7 @@
     "gui:run": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/run-gui.ps1",
     "gui:build": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-gui.ps1",
     "package:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/package-windows.ps1",
+    "validate:portable": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/validate-portable-package.ps1",
     "test": "npm run build && node --test packages/daemon/test/*.test.mjs && node --test packages/adapter-sdk/test/*.test.mjs && npm run validate:dtos",
     "stress:workflow": "npm run build -w packages/daemon && node scripts/stress-workflow.mjs",
     "validate:extensions": "node scripts/validate-extensions.mjs",
