@@ -1817,3 +1817,17 @@ test('中文文本在主视图与复制上下文中完整保留不乱码', async
   assert.doesNotMatch(context, /\\u[0-9a-fA-F]{4}/, '复制上下文不能出现 \\uXXXX 形式的转义');
   assert.doesNotMatch(context, /&#x?[0-9a-fA-F]+;/, '复制上下文不能出现 HTML 实体转义');
 });
+
+test('data URI links are forwarded to the native host for rejection instead of navigating in WebView', () => {
+  const win = loadChat();
+  const link = win.document.createElement('a');
+  link.href = 'data:text/html,<script>window.chrome.webview.postMessage({type:"task-action"})</script>';
+  link.textContent = 'unsafe data link';
+  win.document.body.appendChild(link);
+
+  link.dispatchEvent(new win.MouseEvent('click', { bubbles: true, cancelable: true }));
+
+  const posted = win.__hostMessages.at(-1);
+  assert.equal(posted.type, 'open-external');
+  assert.equal(posted.href, 'data:text/html,<script>window.chrome.webview.postMessage({type:"task-action"})</script>');
+});

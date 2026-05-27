@@ -2680,3 +2680,30 @@ Get-Process -Id $daemon.Id -ErrorAction SilentlyContinue
 - 没有把 `migrateLegacyDefaults` 一起塞 try/catch：那段只读 `raw?.retention?.workflow` 子树，所有访问都是可选链，不会抛。
 - 没有改 `saveConfig`：写入路径已经走 `writeOwnerOnly`，失败会向上抛由 caller 处理，不需要隔离逻辑。
 - 未触及 J 系列里仍挂在 backlog 的 chat 区域 DOM 节点裁剪（按 `MAX_MESSAGES` 截尾即可），等真机 8h 稳态曲线再决定是否动手。
+
+---
+
+## 2026-05-27 Alpha 稳定性阶段收口（R-1 至 R-5）
+
+### 可靠性与边界修复
+
+- `packages/daemon/test/server.integration.test.mjs` 的请求 helper 从 `fetch` 改为 `node:http`，避免操作系统随机端口撞上 Fetch blocked-port 列表导致无代码回归时测试随机失败。
+- `packages/gui/MainWindow.xaml.cs` 与 `packages/gui/wwwroot/chat.js` 收紧 WebView 导航：只将 `https://codepanion.local/` 和精确 `about:blank` 作为内部导航，`data:` URI 不再在 WebView 内直接执行。
+- `packages/daemon/src/config.ts` 导出 `loadConfigFromPath()` 作为可测试加载路径；`configPermissions.test.mjs` 新增损坏 JSON 与 schema 非法配置的隔离、默认配置重建回归。
+
+### 便携包发布契约
+
+- 新增 `scripts/validate-portable-package.ps1` 与 `npm run validate:portable`：检查 GUI / daemon / Node 入口、运行时模块白名单、唯一目标平台 `node-pty` prebuild，并使用打包内 Node 实际 `require()` 原生与日志依赖。
+- `scripts/package-windows.ps1` 将上述验证纳入构建门禁，并从便携目录剔除 `.ts` / `.map` / `.pdb`、测试、示例、文档、脚本与 benchmark 目录；`node-addon-api` 等仅编译期资产不再复制。保留的 `daemon/node_modules` 是 daemon 启动所需运行时资产，不再按“禁止任何 node_modules”误判。
+
+### 产品口径
+
+- `package.json`、`packages/daemon/package.json` 以及 API / 架构 / 文档入口 / 监控来源 / Claude Code 接入说明统一使用“跨软件、跨窗口、跨项目的多任务完整操作台”定位；技术层语义改称“事件协议”。
+
+### 验证
+
+- `npm test`：通过，覆盖新增的 `data:` 导航拒绝与 config 隔离重建回归。
+- `npm run gui:build`：通过。
+- `node --test packages/daemon/test/server.integration.test.mjs`：连续运行 10 次，每次 38/38 通过。
+- `npm run package:windows`：通过，构建过程自动执行 portable package validation。
+- `npm run validate:portable`：通过，输出 `portable runtime deps ok`。

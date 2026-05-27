@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtempSync, rmSync, statSync, existsSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, existsSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir, platform, userInfo } from 'node:os';
-import { writeOwnerOnly } from '../dist/config.js';
+import { loadConfigFromPath, writeOwnerOnly } from '../dist/config.js';
 
 const POSIX = platform() !== 'win32';
 const WINDOWS = platform() === 'win32';
@@ -67,6 +67,40 @@ test('writeOwnerOnly creates a readable file on every platform', () => {
     const stat = statSync(target);
     assert.ok(stat.isFile(), 'expected a regular file');
     assert.ok(stat.size > 0, 'expected non-empty file');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('loadConfigFromPath quarantines malformed JSON and recreates usable config', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'codepanion-config-broken-json-'));
+  try {
+    const target = join(dir, 'config.json');
+    writeFileSync(target, '{"token":', 'utf8');
+
+    const config = loadConfigFromPath(target);
+    const entries = readdirSync(dir);
+
+    assert.equal(config.token.length, 32);
+    assert.ok(entries.some((name) => name.startsWith('config.json.broken-')));
+    assert.equal(JSON.parse(readFileSync(target, 'utf8')).token, config.token);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('loadConfigFromPath quarantines schema-invalid JSON and restores defaults', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'codepanion-config-broken-schema-'));
+  try {
+    const target = join(dir, 'config.json');
+    writeFileSync(target, JSON.stringify({ token: 'short', port: 80 }), 'utf8');
+
+    const config = loadConfigFromPath(target);
+    const entries = readdirSync(dir);
+
+    assert.equal(config.port, 7777);
+    assert.equal(config.token.length, 32);
+    assert.ok(entries.some((name) => name.startsWith('config.json.broken-')));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

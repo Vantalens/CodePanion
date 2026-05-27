@@ -1,5 +1,5 @@
 import { homedir, platform, userInfo } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { chmodSync, mkdirSync, readFileSync, writeFileSync, existsSync, renameSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -139,14 +139,14 @@ export type Config = z.infer<typeof ConfigSchema>;
 export type Template = z.infer<typeof TemplateSchema>;
 export type RetentionConfig = z.infer<typeof RetentionSchema>;
 
-function ensureDir() {
-  if (!existsSync(HOME_DIR)) {
-    mkdirSync(HOME_DIR, { recursive: true, mode: OWNER_ONLY_DIR_MODE });
+function ensureDir(homeDir = HOME_DIR) {
+  if (!existsSync(homeDir)) {
+    mkdirSync(homeDir, { recursive: true, mode: OWNER_ONLY_DIR_MODE });
     if (platform() === 'win32') {
-      lockdownWindowsAcl(HOME_DIR);
+      lockdownWindowsAcl(homeDir);
     } else {
       try {
-        chmodSync(HOME_DIR, OWNER_ONLY_DIR_MODE);
+        chmodSync(homeDir, OWNER_ONLY_DIR_MODE);
       } catch {
         // best-effort
       }
@@ -160,14 +160,14 @@ function buildDefaultConfig(): Config {
   });
 }
 
-function quarantineConfigFile(reason: string): void {
+function quarantineConfigFile(configPath: string, reason: string): void {
   // 与 N-9 / N-16 工作流定义和模板的损坏隔离策略保持一致：把损坏的 config.json 改名为
-  // `config.broken-<ts>.json`，把 daemon 启动路径从「crash」改成「降级到默认 config 并写一条 warn」。
+  // `config.json.broken-<ts>.json`，把 daemon 启动路径从「crash」改成「降级到默认 config 并写一条 warn」。
   // 这样用户手动编辑 config.json 出错、断电写入中断都不会让 daemon 整体起不来。
   try {
     const ts = new Date().toISOString().replace(/[:.]/g, '-');
-    const target = `${CONFIG_PATH}.broken-${ts}.json`;
-    renameSync(CONFIG_PATH, target);
+    const target = `${configPath}.broken-${ts}.json`;
+    renameSync(configPath, target);
     // 不能 import logger.ts（循环依赖：logger.ts 用 config 的 LOG_PATH），写到 stderr 即可，
     // logger 起来后 daemon 的运行循环里只会读到 default config，不再触碰损坏文件。
     console.warn(`[config] config.json 已隔离到 ${target}（${reason}），使用默认配置继续。`);
@@ -177,25 +177,29 @@ function quarantineConfigFile(reason: string): void {
 }
 
 export function loadConfig(): Config {
-  ensureDir();
-  if (!existsSync(CONFIG_PATH)) {
+  return loadConfigFromPath(CONFIG_PATH);
+}
+
+export function loadConfigFromPath(configPath: string): Config {
+  ensureDir(dirname(configPath));
+  if (!existsSync(configPath)) {
     const initial = buildDefaultConfig();
-    writeOwnerOnly(CONFIG_PATH, JSON.stringify(initial, null, 2));
+    writeOwnerOnly(configPath, JSON.stringify(initial, null, 2));
     return initial;
   }
   let raw: any;
   try {
-    raw = JSON.parse(readFileSync(CONFIG_PATH, 'utf8'));
+    raw = JSON.parse(readFileSync(configPath, 'utf8'));
   } catch (err) {
-    quarantineConfigFile(`JSON 解析失败：${(err as Error).message}`);
+    quarantineConfigFile(configPath, `JSON 解析失败：${(err as Error).message}`);
     const fresh = buildDefaultConfig();
-    writeOwnerOnly(CONFIG_PATH, JSON.stringify(fresh, null, 2));
+    writeOwnerOnly(configPath, JSON.stringify(fresh, null, 2));
     return fresh;
   }
   if (!raw || typeof raw !== 'object') {
-    quarantineConfigFile('JSON 顶层不是对象');
+    quarantineConfigFile(configPath, 'JSON 顶层不是对象');
     const fresh = buildDefaultConfig();
-    writeOwnerOnly(CONFIG_PATH, JSON.stringify(fresh, null, 2));
+    writeOwnerOnly(configPath, JSON.stringify(fresh, null, 2));
     return fresh;
   }
   if (!raw.token) raw.token = randomBytes(16).toString('hex');
@@ -203,14 +207,14 @@ export function loadConfig(): Config {
   try {
     parsed = ConfigSchema.parse(raw);
   } catch (err) {
-    quarantineConfigFile(`schema 校验失败：${(err as Error).message}`);
+    quarantineConfigFile(configPath, `schema 校验失败：${(err as Error).message}`);
     const fresh = buildDefaultConfig();
-    writeOwnerOnly(CONFIG_PATH, JSON.stringify(fresh, null, 2));
+    writeOwnerOnly(configPath, JSON.stringify(fresh, null, 2));
     return fresh;
   }
   const migrated = migrateLegacyDefaults(raw, parsed);
-  if (raw.token !== parsed.token || migrated || !existsSync(CONFIG_PATH)) {
-    writeOwnerOnly(CONFIG_PATH, JSON.stringify(parsed, null, 2));
+  if (raw.token !== parsed.token || migrated || !existsSync(configPath)) {
+    writeOwnerOnly(configPath, JSON.stringify(parsed, null, 2));
   }
   return parsed;
 }

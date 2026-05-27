@@ -291,14 +291,15 @@ namespace CodePanion.Gui
                 if (string.IsNullOrEmpty(e.Uri)) return;
                 if (!Uri.TryCreate(e.Uri, UriKind.Absolute, out var uri)) return;
 
-                if (uri.IsAbsoluteUri && uri.Host.Equals("codepanion.local", StringComparison.OrdinalIgnoreCase))
+                if (uri.Scheme == Uri.UriSchemeHttps &&
+                    uri.Host.Equals("codepanion.local", StringComparison.OrdinalIgnoreCase))
                 {
                     return; // 应用自身静态资源
                 }
 
-                if (uri.Scheme == "about" || uri.Scheme == "data")
+                if (string.Equals(uri.AbsoluteUri, "about:blank", StringComparison.OrdinalIgnoreCase))
                 {
-                    return; // about:blank / data: 占位允许
+                    return; // WebView 空占位页
                 }
 
                 e.Cancel = true;

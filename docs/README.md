@@ -1,8 +1,8 @@
 # CodePanion 文档中心
 
-欢迎来到 CodePanion 文档中心！这里包含了围绕“本地优先、供应商中立、单入口多出口的 AI 开发工作流控制台 / 控制平面”所需的文档资源。
+欢迎来到 CodePanion 文档中心！这里包含了围绕“本地优先、供应商中立、跨软件、跨窗口、跨项目的多任务完整操作台”所需的文档资源。
 
-当前战略采用 `D:\Owen\Documents\OneDrive\桌面\deep-research-report.md` 的核心判断：保留现有 Windows Alpha 产品和本地 daemon 架构，不推倒重做；把现有提醒、多源监控和 workflow 模型收束为本地 AI 编程工作流控制平面。旧路线报告已从仓库中清理，当前路线以 [产品定位契约](POSITIONING.md)、[产品路线](PRODUCT_ROADMAP.md)、[架构设计](ARCHITECTURE.md)、[监控源说明](MONITORING_SOURCES.md) 和根目录 [开发任务清单](../DEVELOPMENT_TASKS.md) 为准。
+当前战略采用 `D:\Owen\Documents\OneDrive\桌面\deep-research-report.md` 的核心判断：保留现有 Windows Alpha 产品和本地 daemon 架构，不推倒重做；把现有提醒、多源监控和 workflow 模型收束为跨软件、跨窗口、跨项目的多任务完整操作台。旧路线报告已从仓库中清理，当前路线以 [产品定位契约](POSITIONING.md)、[产品路线](PRODUCT_ROADMAP.md)、[架构设计](ARCHITECTURE.md)、[监控源说明](MONITORING_SOURCES.md) 和根目录 [开发任务清单](../DEVELOPMENT_TASKS.md) 为准。
 
 ## 📚 文档导航
 
@@ -114,7 +114,7 @@
 - [什么是 CodePanion？](USER_GUIDE.md#什么是-codepanion)
 - [产品路线](PRODUCT_ROADMAP.md)
 - [工作原理](ARCHITECTURE.md#核心组件)
-- [控制平面语义](API.md#控制平面语义)
+- [事件协议语义](API.md#事件协议语义)
 - [监控源能力分层](MONITORING_SOURCES.md#能力分层)
 - [提示检测机制](ARCHITECTURE.md#提示检测)
 - [会话管理](ARCHITECTURE.md#会话管理)

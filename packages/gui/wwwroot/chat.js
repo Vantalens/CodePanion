@@ -3229,7 +3229,7 @@ function sendToHost(message) {
 }
 
 // J-09：判断 click 命中的 anchor 是否需要走 host open-external。
-// 应用内部锚点（#hash / codepanion.local）放行；其它 http(s)/外部协议交由 host 端弹确认。
+// 应用内部锚点（#hash / https://codepanion.local）放行；其它协议交由 host 端处理或拒绝。
 function shouldInterceptAnchor(anchor) {
     if (!anchor) return false;
     const href = anchor.getAttribute('href');
@@ -3242,8 +3242,8 @@ function shouldInterceptAnchor(anchor) {
     }
     try {
         const url = new URL(trimmed, document.baseURI);
-        if (url.host === 'codepanion.local') return false;
-        if (url.protocol === 'about:' || url.protocol === 'data:') return false;
+        if (url.protocol === 'https:' && url.host === 'codepanion.local') return false;
+        if (url.href === 'about:blank') return false;
     } catch {
         return true;
     }

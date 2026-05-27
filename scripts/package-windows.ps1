@@ -166,7 +166,7 @@ function Copy-DaemonRuntimeDependencies {
         New-Item -ItemType Directory -Path $nodeModules -Force | Out-Null
     }
 
-    # node-pty + 它的 transitive deps
+    # node-pty loads lib and the selected prebuild at runtime; node-addon-api only provides build headers.
     $platformPrebuild = switch ($RuntimeIdentifier) {
         "win-x64"   { "win32-x64" }
         "win-arm64" { "win32-arm64" }
@@ -175,7 +175,7 @@ function Copy-DaemonRuntimeDependencies {
     $allPrebuilds = @("darwin-arm64", "darwin-x64", "win32-arm64", "win32-x64")
     $excludePrebuilds = @($allPrebuilds | Where-Object { $_ -ne $platformPrebuild })
 
-    Copy-RuntimeModule -ModuleName "node-pty" -DestinationRoot $nodeModules -RepoRoot $RepoRoot
+    Copy-RuntimeModule -ModuleName "node-pty" -DestinationRoot $nodeModules -RepoRoot $RepoRoot -ExcludeDirs @("src", "deps", "scripts")
     $unwantedPrebuildRoot = Join-Path $nodeModules "node-pty\prebuilds"
     if (Test-Path -LiteralPath $unwantedPrebuildRoot) {
         Get-ChildItem -LiteralPath $unwantedPrebuildRoot -Directory -Force | ForEach-Object {
@@ -184,8 +184,6 @@ function Copy-DaemonRuntimeDependencies {
             }
         }
     }
-    Copy-RuntimeModule -ModuleName "node-addon-api" -DestinationRoot $nodeModules -RepoRoot $RepoRoot
-
     # pino 链：sync:false destination 当前不会触发 worker，但保持磁盘路径完整可以让未来切到 transport
     # 模式也不会爆 MODULE_NOT_FOUND。
     $pinoModules = @(
@@ -203,28 +201,48 @@ function Copy-DaemonRuntimeDependencies {
         "@pinojs/redact"
     )
     foreach ($module in $pinoModules) {
-        Copy-RuntimeModule -ModuleName $module -DestinationRoot $nodeModules -RepoRoot $RepoRoot
+        Copy-RuntimeModule -ModuleName $module -DestinationRoot $nodeModules -RepoRoot $RepoRoot -ExcludeDirs @(".github", ".vscode", "coverage", "fixtures", "scripts", "test", "tests", "docs", "example", "examples", "benchmark", "benchmarks")
     }
 
     Write-Host "[package] Daemon runtime deps copied to $nodeModules"
 }
 
+function Remove-PortableDevelopmentFiles {
+    param([string]$PackageDir)
+
+    Get-ChildItem -LiteralPath $PackageDir -Recurse -File -Force |
+        Where-Object {
+            $_.Extension -in @(".pdb", ".map") -or
+            $_.Extension -eq ".ts" -or
+            $_.Name -match "\.(test|spec)\.(js|mjs|cjs|ts)$"
+        } |
+        Remove-Item -Force
+
+    $nodeModules = Join-Path $PackageDir "daemon\node_modules"
+    if (Test-Path -LiteralPath $nodeModules) {
+        Get-ChildItem -LiteralPath $nodeModules -Recurse -Directory -Force |
+            Where-Object { $_.Name -match "^(\.github|\.vscode|coverage|fixtures|scripts|test|tests|docs|example|examples|benchmark|benchmarks)$" } |
+            Sort-Object { $_.FullName.Length } -Descending |
+            Remove-Item -Recurse -Force
+    }
+}
+
 Set-Location -LiteralPath $root
 
-Write-Host "[1/4] Building daemon bundle..."
+Write-Host "[1/5] Building daemon bundle..."
 npm run build
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-Write-Host "[2/4] Publishing GUI ($RuntimeIdentifier)..."
+Write-Host "[2/5] Publishing GUI ($RuntimeIdentifier)..."
 New-Item -ItemType Directory -Path $publishRoot -Force | Out-Null
 dotnet publish $project -c Release -r $RuntimeIdentifier --self-contained true -p:PublishSingleFile=false -m:1 "-p:BaseIntermediateOutputPath=$(Join-Path $publishRoot 'obj\')" "-p:MSBuildProjectExtensionsPath=$(Join-Path $publishRoot 'obj\')" "-p:BaseOutputPath=$(Join-Path $publishRoot 'bin\')" "-p:PublishDir=$publishDir\"
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-Write-Host "[3/4] Preparing portable package..."
+Write-Host "[3/5] Preparing portable package..."
 Stop-RunningPortableGui -PackageDir $distDir
 if (Test-Path $distDir) {
     Remove-DirectoryWithRetry -Path $distDir
@@ -269,6 +287,14 @@ $readmePath = Join-Path $distDir "README_START.txt"
     "Uninstall: close the GUI and remove this directory."
 ) | Set-Content -LiteralPath $readmePath -Encoding UTF8
 
-Write-Host "[4/4] Done."
+Remove-PortableDevelopmentFiles -PackageDir $distDir
+
+Write-Host "[4/5] Validating portable package..."
+& (Join-Path $PSScriptRoot "validate-portable-package.ps1") -RuntimeIdentifier $RuntimeIdentifier
+if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+}
+
+Write-Host "[5/5] Done."
 Write-Host "Portable package: $distDir"
 Write-Host "Entry: $(Join-Path $distDir 'CodePanion.Gui.exe')"
