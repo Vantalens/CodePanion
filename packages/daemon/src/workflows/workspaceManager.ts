@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { z } from 'zod';
+import { HOME_DIR, pathSep } from '../config.js';
 import { logger } from '../logger.js';
 
 export const WORKSPACE_CONFIG_DIR = '.codepanion';
@@ -137,7 +138,12 @@ export class CodePanionWorkspaceManager {
   private readonly root: string;
 
   constructor(root: string) {
-    this.root = resolve(root);
+    const resolvedRoot = resolve(root);
+    const relToHome = relative(HOME_DIR, resolvedRoot);
+    if (relToHome === '..' || relToHome.startsWith(`..${pathSep}`) || relToHome.startsWith('/') || relToHome.startsWith('\\')) {
+      throw new Error('workspace root must be inside HOME_DIR');
+    }
+    this.root = resolvedRoot;
   }
 
   initialize(): WorkspaceLayout {
