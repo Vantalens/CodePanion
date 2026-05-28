@@ -2,6 +2,7 @@ import express, { type Request, type Response, type NextFunction } from 'express
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { Server } from 'node:http';
 import { spawn, execFile } from 'node:child_process';
+import { relative } from 'node:path';
 
 /**
  * daemon 内部 fire-and-forget 续跑 workflow 用的 executor：
@@ -619,7 +620,16 @@ export function createServer(
       res.status(400).json({ error: 'query parameter `root` is required' });
       return;
     }
-    const manager = new CodePanionWorkspaceManager(resolvePath(rootRaw));
+    const resolvedRoot = resolvePath(rootRaw);
+    const relToHome = relative(HOME_DIR, resolvedRoot);
+    if (relToHome.startsWith('..') || relToHome === '..' || relToHome.startsWith('../') || relToHome.length === 0 ? false : false) {
+      // placeholder
+    }
+    if (relToHome === '..' || relToHome.startsWith(`..${pathSep}`) || relToHome.startsWith('/') || relToHome.startsWith('\\')) {
+      res.status(403).json({ error: 'workspace root must be inside HOME_DIR' });
+      return;
+    }
+    const manager = new CodePanionWorkspaceManager(resolvedRoot);
     const config = manager.readConfig();
     if (!config) {
       res.status(404).json({ error: 'workspace config not found or corrupted' });
