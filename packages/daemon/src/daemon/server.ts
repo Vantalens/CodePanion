@@ -589,8 +589,12 @@ export function createServer(
 
   // W-32 起手：列出当前所有 paused workflow run 中的 checkpoint step，供 GUI 渲染「人工审核门」面板。
   app.get('/workflow/gates', (req, res) => {
-    const stores = workspaceFor(typeof req.query.workspace === 'string' ? req.query.workspace : undefined);
-    res.json({ gates: collectPausedGates(stores.history.list(), stores.artifactStore) });
+    try {
+      const stores = workspaceFor(typeof req.query.workspace === 'string' ? req.query.workspace : undefined);
+      res.json({ gates: collectPausedGates(stores.history.list(), stores.artifactStore) });
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message ?? 'invalid workspace' });
+    }
   });
 
   // W-10/W-11 接线：暴露 workspace 初始化与读取，供 GUI 在用户选择项目根目录后落 .codepanion/ 结构。
@@ -633,8 +637,13 @@ export function createServer(
     artifactStore: WorkflowArtifactStore;
   };
   const workspaceStoresCache = new Map<string, WorkspaceStores>();
-  const workspaceKey = (raw?: string | null): string =>
-    typeof raw === 'string' && raw.trim().length > 0 ? resolvePath(raw) : '';
+  const workspaceKey = (raw?: string | null): string => {
+    if (typeof raw !== 'string' || raw.trim().length === 0) return '';
+    if (raw.includes('\0')) throw new Error('invalid workspace: contains NUL byte');
+    const resolved = resolvePath(raw);
+    if (!isAbsolute(resolved)) throw new Error('invalid workspace: must resolve to an absolute path');
+    return resolved;
+  };
   const workspaceFor = (raw?: string | null): WorkspaceStores => {
     const key = workspaceKey(raw);
     let stores = workspaceStoresCache.get(key);
@@ -786,49 +795,57 @@ export function createServer(
   // W-33：列出某次 workflow run 的全部 artifact（plan / patch-summary / test-result / review-report /
   // human-decision / delivery-note），供 GUI 渲染人工审核门面板和交付摘要。
   app.get('/workflow/runs/:runId/artifacts', (req, res) => {
-    const stores = workspaceFor(typeof req.query.workspace === 'string' ? req.query.workspace : undefined);
-    res.json({ artifacts: stores.artifactStore.list(req.params.runId) });
+    try {
+      const stores = workspaceFor(typeof req.query.workspace === 'string' ? req.query.workspace : undefined);
+      res.json({ artifacts: stores.artifactStore.list(req.params.runId) });
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message ?? 'invalid workspace' });
+    }
   });
 
   // W-20 起手：一个 endpoint 聚合 GUI 主面板所需的 board 视图——可选执行的 workflow definitions、
   // 最近若干次 run、当前等待人工审核的 gates。GUI 渲染左侧 workflow 列表 + 中央 board + 右侧人工门。
   app.get('/workflow/board', (req, res) => {
-    const stores = workspaceFor(typeof req.query.workspace === 'string' ? req.query.workspace : undefined);
-    const definitions = stores.definitions.list();
-    const allRuns = stores.history.list();
-    const recentRuns = allRuns.slice(0, 30);
-    const gates = collectPausedGates(allRuns, stores.artifactStore);
-    // 把 daemon 内活跃的 run 合并到 runs 列表前面，status='running'，让 GUI 立刻看到运行态。
-    // 已 append 到历史的 run 已被 .then 从 activeRuns 删除，因此不会与历史条目重复。
-    const activeEntries = Array.from(activeRuns.values()).map((snapshot) => ({
-      id: snapshot.id,
-      workflowName: snapshot.workflowName,
-      status: 'running' as const,
-      startedAt: snapshot.startedAt,
-      endedAt: snapshot.startedAt,
-      stepCount: snapshot.stepsFinished,
-      currentStepId: snapshot.currentStepId,
-      currentStepStatus: snapshot.currentStepStatus,
-      currentStepRole: snapshot.currentStepRole,
-    }));
-    const historicalEntries = recentRuns.map((run) => ({
-      id: run.id,
-      workflowName: run.workflowName,
-      status: run.status,
-      startedAt: run.startedAt,
-      endedAt: run.endedAt,
-      stepCount: run.steps.length,
-    }));
-    res.json({
-      workflows: definitions.map((definition) => ({
-        name: definition.name,
-        description: definition.description,
-        stepCount: definition.steps.length,
-        updatedAt: definition.updatedAt,
-      })),
-      runs: [...activeEntries, ...historicalEntries],
-      gates,
-    });
+    try {
+      const stores = workspaceFor(typeof req.query.workspace === 'string' ? req.query.workspace : undefined);
+      const definitions = stores.definitions.list();
+      const allRuns = stores.history.list();
+      const recentRuns = allRuns.slice(0, 30);
+      const gates = collectPausedGates(allRuns, stores.artifactStore);
+      // 把 daemon 内活跃的 run 合并到 runs 列表前面，status='running'，让 GUI 立刻看到运行态。
+      // 已 append 到历史的 run 已被 .then 从 activeRuns 删除，因此不会与历史条目重复。
+      const activeEntries = Array.from(activeRuns.values()).map((snapshot) => ({
+        id: snapshot.id,
+        workflowName: snapshot.workflowName,
+        status: 'running' as const,
+        startedAt: snapshot.startedAt,
+        endedAt: snapshot.startedAt,
+        stepCount: snapshot.stepsFinished,
+        currentStepId: snapshot.currentStepId,
+        currentStepStatus: snapshot.currentStepStatus,
+        currentStepRole: snapshot.currentStepRole,
+      }));
+      const historicalEntries = recentRuns.map((run) => ({
+        id: run.id,
+        workflowName: run.workflowName,
+        status: run.status,
+        startedAt: run.startedAt,
+        endedAt: run.endedAt,
+        stepCount: run.steps.length,
+      }));
+      res.json({
+        workflows: definitions.map((definition) => ({
+          name: definition.name,
+          description: definition.description,
+          stepCount: definition.steps.length,
+          updatedAt: definition.updatedAt,
+        })),
+        runs: [...activeEntries, ...historicalEntries],
+        gates,
+      });
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message ?? 'invalid workspace' });
+    }
   });
 
   // W-32 收尾：人工对当前停在 checkpoint 的 run/step 做决定，落一条 human-decision artifact。
