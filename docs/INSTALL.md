@@ -153,7 +153,7 @@ npm run package:windows
 
 ### 图形界面无法连接本地 daemon
 
-先完全退出软件后重新启动。若问题持续存在，请参考 [TROUBLESHOOTING.md](TROUBLESHOOTING.md)。
+先完全退出软件后重新启动。若问题持续存在，请按 [../DEVELOPMENT_TASKS.md](../DEVELOPMENT_TASKS.md) 中的当前路线优先级记录现象并排查。
 
 ### 源码构建失败
 

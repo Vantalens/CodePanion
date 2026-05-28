@@ -221,15 +221,7 @@ codepanion notify "测试通知" -m "CodePanion 安装成功！"
 - ✅ 系统托盘显示通知
 - ✅ GUI 中显示通知记录
 
-### 5. 可选：安装 VS Code 监控扩展
-
-**VS Code 扩展**
-
-1. 在 VS Code 中打开 `packages/vscode-extension/`。
-2. 使用开发模式加载扩展。
-3. 扩展会读取 `~/.codepanion/config.json` 中的 `port` 和 `token`，每个 VS Code 窗口都会注册为独立监控源。
-
-### 6. 测试交互式命令
+### 5. 测试交互式命令
 
 ```bash
 # 运行一个需要输入的命令
@@ -367,8 +359,7 @@ node packages/daemon/dist/index.js run -- node -e "const readline=require('readl
   否则可能因原生模块 `node-pty` ABI 不一致导致构建失败。
 - **WebView2 缺失**：安装 [Evergreen Standalone Installer](https://developer.microsoft.com/microsoft-edge/webview2/) 后重启 GUI。
 
-运行期问题（端口、token、WebSocket 鉴权、多源监控、通知等）见
-[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)。
+运行期问题请先确认当前构建产物与 [README.md](README.md) 中的入口一致。
 
 ---
 
@@ -376,7 +367,7 @@ node packages/daemon/dist/index.js run -- node -e "const readline=require('readl
 
 安装完成后，建议：
 
-1. 阅读 [用户手册](docs/USER_GUIDE.md)
+1. 阅读 [项目概述](README.md)
 2. 查看 [API 文档](docs/API.md)
 3. 了解 [架构设计](docs/ARCHITECTURE.md)
 4. 运行示例命令
