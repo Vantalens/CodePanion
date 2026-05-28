@@ -2,6 +2,7 @@ import express, { type Request, type Response, type NextFunction } from 'express
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { Server } from 'node:http';
 import { spawn, execFile } from 'node:child_process';
+import { realpathSync } from 'node:fs';
 import { relative } from 'node:path';
 
 /**
@@ -647,12 +648,18 @@ export function createServer(
     artifactStore: WorkflowArtifactStore;
   };
   const workspaceStoresCache = new Map<string, WorkspaceStores>();
+  const WORKSPACE_ROOT = resolvePath(HOME_DIR);
   const workspaceKey = (raw?: string | null): string => {
     if (typeof raw !== 'string' || raw.trim().length === 0) return '';
     if (raw.includes('\0')) throw new Error('invalid workspace: contains NUL byte');
     const resolved = resolvePath(raw);
     if (!isAbsolute(resolved)) throw new Error('invalid workspace: must resolve to an absolute path');
-    return resolved;
+    const canonical = existsSync(resolved) ? realpathSync.native(resolved) : resolved;
+    const rel = relative(WORKSPACE_ROOT, canonical);
+    if (rel === '..' || rel.startsWith(`..${sep}`) || rel.includes(`..${sep}`)) {
+      throw new Error('invalid workspace: must be under HOME_DIR');
+    }
+    return canonical;
   };
   const workspaceFor = (raw?: string | null): WorkspaceStores => {
     const key = workspaceKey(raw);
