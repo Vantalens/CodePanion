@@ -121,3 +121,113 @@ GUI 的第一屏应从“会话流”转向“workflow board”：
 - 暂不改 daemon / GUI 运行时代码
 
 后续代码实现应优先复用现有 `workflowManager`、`workflowDefinitionManager`、`WorkflowRunHistory`、GUI 任务状态和 handoff 回流结构。
+
+## Step 字段约定
+
+每个 `WorkflowStep` 字段都对应上面的概念模型：
+
+| 字段 | 取值 | 说明 |
+| --- | --- | --- |
+| `id` | 短标识符 | step 在 workflow 内唯一 |
+| `tool` | 任意字符串 | 仅作标签，不决定执行行为，默认 `local` |
+| `role` | 同 `BUILTIN_WORKFLOW_ROLES` | 标记本步骤由哪个角色承担 |
+| `model` | 任意字符串 | 透传给 provider CLI 作 `--model` |
+| `provider` | `local` / `codex` / `claude-code` / `opencode` | 决定 `command/args` 如何被包装成实际 CLI 调用 |
+| `permissions` | `read` / `write` / `command` / `network` / `delegate` / `approve` | 角色权限，给执行端做约束 |
+| `contextPolicy.maxTokens` | 正整数 | 上下文预算 |
+| `contextPolicy.include` / `exclude` | 相对路径 / glob 列表 | 拒绝 `..` 段与绝对路径，防止 traversal |
+| `humanGate` | 短标识符 | 标记此 step 属于哪一道人工门 |
+| `artifacts` | `plan` / `patch-summary` / `test-result` / `review-report` / `human-decision` / `delivery-note` 子集 | step 完成时由 daemon 按此清单落占位 artifact |
+| `checkpoint` | bool | 是否需要人工放行才能继续；触发 paused 状态 |
+
+`provider` 决定 daemon 怎么实际拼 CLI：
+
+- `local`：`command/args` 原样执行
+- `codex`：`codex exec [--model M] [<base-args>...] <prompt>`
+- `claude-code`：`claude -p <prompt> [<base-args>...] [--model M]`
+- `opencode`：`opencode run [--model M] [<base-args>...] <prompt>`
+
+`{var}` 占位先于 provider 包装渲染，所以 prompt 文本里可以用 workflow params。
+
+## Daemon HTTP / WS 契约
+
+下表覆盖 GUI / 外部脚本接 daemon 的全部 workflow 路径。所有 HTTP 端点都需要 `Authorization: Bearer <token>`。
+
+### Workspace 参数
+
+所有 workflow endpoint 都接受 `workspace` 参数指定项目根：
+
+- `GET /workflow/...` 端点：`?workspace=<absolute path>` 作为 query 字符串
+- `POST /workflow/runs` / `POST /workflow/gates/.../resolve` body 加 `workspace: "<absolute path>"` 字段
+
+指定后 daemon 把 `definitions / history / artifacts` 三个文件都落到 `<workspace>/.codepanion/{workflows.json, workflow-runs.ndjson, workflow-artifacts.ndjson}`，跨 workspace 互不可见。未指定时 fallback 到 `HOME_DIR` 全局共享（向后兼容；适合 CLI 单项目场景）。
+
+`POST /workflow/runs/:runId/cancel` 不需要 workspace，因为 runId 全局唯一并由 daemon 内 `runCancellers` 直接索引。
+
+### Workspace 初始化
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| `POST` | `/workspace/initialize` | 在指定根目录落 `.codepanion/{workflow.json, roles/*.md, artifacts/}` |
+| `GET` | `/workspace/config?root=...` | 读 workspace 配置；JSON 损坏走 Zod schema 校验 + 文件改名隔离 |
+
+请求体：`{ "root": "<absolute path>" }`。响应：`{ layout }` 包含目录布局。
+
+### Workflow board 与运行
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| `GET` | `/workflow/board` | 一次性返回 `{ workflows, runs, gates }`，runs 含活跃 `status: 'running'` 条目 + 最近 30 条历史 |
+| `POST` | `/workflow/runs` | 从头启动 workflow：`{ workflow, values?, yes?, dryRun? }`，立即返回 `{ accepted, workflowName }`，进度走 WS |
+| `POST` | `/workflow/runs/:runId/cancel` | SIGTERM 当前 step 子进程，run-finish 事件随后到达；非活跃 run 返回 404 |
+| `GET` | `/workflow/runs/:runId/artifacts` | 该 run 全部 artifact（plan/patch-summary/test-result/review-report/human-decision/delivery-note） |
+
+`runs` 数组里 `status` 取值：
+
+- `running`（来自 daemon 内存活跃表，含 `currentStepId / currentStepRole / currentStepStatus`）
+- `success` / `failed` / `paused` / `dry-run`（来自历史）
+
+### 人工审核门
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| `GET` | `/workflow/gates` | 列出当前 paused + 未被 approve/reject 的 run；已 retry 的保留并附 `lastDecision` |
+| `POST` | `/workflow/gates/:runId/:stepId/resolve` | 落一条 `human-decision` artifact；`decision=approve` 同时触发 daemon 内续跑 |
+
+`resolve` 请求体：`{ decision: 'approve' \| 'reject' \| 'retry', message?, constraints? }`。响应：
+
+- approve：`{ artifact, resumed: true }`，新一轮 run 走 WS run-event 流
+- reject：`{ artifact }`，gate 消失
+- retry：`{ artifact }`，gate 仍可见、`lastDecision.decision = 'retry'`，等下一轮
+
+### Delivery-note
+
+每次 `runWorkflow` 末尾（含 paused / failed）自动落一条 `delivery-note` artifact，content 是 markdown：
+
+```text
+workflow=<name>
+runId=<id>
+status=<success|failed|paused|dry-run>
+steps=<n>
+
+## Steps
+- <id> [<tool> provider=<p> role=<r> model=<m>] <status> :: <message>
+
+## Artifacts
+- <type> @ <stepId> (<role>): <title>
+```
+
+`files` 字段是所有 prior artifact `files` 的去重并集，方便 GUI 一条记录拿到完整文件清单。
+
+### WS workflow-run-event
+
+订阅 `ws://<daemon>/ws?role=observer`，daemon 内 fire-and-forget 跑 workflow 时推送四种事件：
+
+| action | 字段 |
+| --- | --- |
+| `run-start` | `runId, workflowName, startedAt` |
+| `step-start` | `runId, workflowName, stepId, tool, role?, status` |
+| `step-finish` | `runId, workflowName, stepId, status, exitCode?, message?` |
+| `run-finish` | `runId, workflowName, status, stepCount, endedAt` |
+
+GUI 收到 `run-finish` 后再 GET `/workflow/board` 或 `/workflow/runs/:runId/artifacts` 即可拿到完整结果，不必 polling 历史文件。

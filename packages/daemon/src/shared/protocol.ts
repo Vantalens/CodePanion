@@ -135,6 +135,10 @@ export const WorkflowTaskStateSchema = z.object({
   snoozedUntil: z.number().int().positive().nullable().optional(),
   priority: z.enum(['high', 'normal', 'low']).optional().default('normal'),
   sortOrder: z.number().finite().optional(),
+  assignmentStatus: z.enum(['idle', 'planned', 'assigned', 'running', 'returned']).optional().default('idle'),
+  assignedRole: z.string().nullable().optional(),
+  executor: z.string().nullable().optional(),
+  executorRunId: z.string().nullable().optional(),
   handoffStatus: z.enum(['idle', 'pending', 'active', 'returned']).optional().default('idle'),
   handoffTarget: HandoffTargetSchema.nullable().optional(),
   handoffSessionId: z.string().nullable().optional(),
@@ -185,6 +189,10 @@ export const UpdateWorkflowTaskStateRequestSchema = z.object({
   snoozedUntil: z.number().int().positive().nullable().optional(),
   priority: z.enum(['high', 'normal', 'low']).optional(),
   sortOrder: z.number().finite().optional(),
+  assignmentStatus: z.enum(['idle', 'planned', 'assigned', 'running', 'returned']).optional(),
+  assignedRole: z.string().nullable().optional(),
+  executor: z.string().nullable().optional(),
+  executorRunId: z.string().nullable().optional(),
   handoffStatus: z.enum(['idle', 'pending', 'active', 'returned']).optional(),
   handoffTarget: HandoffTargetSchema.nullable().optional(),
   handoffSessionId: z.string().nullable().optional(),
@@ -208,6 +216,29 @@ export const LaunchHandoffResponseSchema = z.object({
   args: z.array(z.string()),
 });
 export type LaunchHandoffResponse = z.infer<typeof LaunchHandoffResponseSchema>;
+
+export const InitializeWorkspaceRequestSchema = z.object({
+  root: z.string().min(1).max(4096),
+});
+export type InitializeWorkspaceRequest = z.infer<typeof InitializeWorkspaceRequestSchema>;
+
+export const ResolveWorkflowGateRequestSchema = z.object({
+  decision: z.enum(['approve', 'reject', 'retry']),
+  message: z.string().max(8000).optional(),
+  constraints: z.array(z.string().min(1).max(500)).max(20).optional(),
+  // 可选 workspace：指定后 daemon 读 / 写该 workspace 下的 history + artifacts；不指定走 HOME_DIR fallback。
+  workspace: z.string().min(1).max(4096).optional(),
+});
+export type ResolveWorkflowGateRequest = z.infer<typeof ResolveWorkflowGateRequestSchema>;
+
+export const StartWorkflowRunRequestSchema = z.object({
+  workflow: z.string().min(1).max(120),
+  values: z.record(z.string().min(1).max(80), z.string().max(4000)).optional(),
+  yes: z.boolean().optional(),
+  dryRun: z.boolean().optional(),
+  workspace: z.string().min(1).max(4096).optional(),
+});
+export type StartWorkflowRunRequest = z.infer<typeof StartWorkflowRunRequestSchema>;
 
 export const RegisterSessionRequestSchema = z.object({
   id: z.string().optional(),
@@ -277,6 +308,15 @@ export type WsServerEvent =
   | { type: 'monitor-event'; event: MonitorEvent & { id: string; timestamp: number } }
   | { type: 'workflow-snapshot'; snapshot: WorkflowSnapshot }
   | { type: 'workflow-event'; event: { action: 'thread-upsert' | 'item-append' | 'status'; thread?: WorkflowThread; item?: WorkflowItem } }
+  // daemon 内部 runWorkflow（含 W-32 approve 续跑）通过这条事件把 run 级进度推给 GUI，
+  // 解开当前必须靠 polling 历史文件才能看到「续跑完成」的循环依赖。
+  | { type: 'workflow-run-event'; event:
+      | { action: 'run-start'; runId: string; workflowName: string; startedAt: number }
+      | { action: 'step-start'; runId: string; workflowName: string; stepId: string; tool: string; role?: string; status: string }
+      | { action: 'step-output'; runId: string; workflowName: string; stepId: string; stream: 'stdout' | 'stderr'; chunk: string; truncated?: boolean }
+      | { action: 'step-finish'; runId: string; workflowName: string; stepId: string; status: string; exitCode?: number; message?: string }
+      | { action: 'run-finish'; runId: string; workflowName: string; status: string; stepCount: number; endedAt: number }
+    }
   | { type: 'sessions-snapshot'; sessions: SessionInfo[] }
   | { type: 'sources-snapshot'; sources: MonitorSource[] }
   | { type: 'hello'; pid: number; version: string };

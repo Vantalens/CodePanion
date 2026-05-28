@@ -51,17 +51,17 @@ CodePanion 后续专注：
 
 ## P1：建立本地 workflow 模型
 
-- [ ] **W-10** 定义 workspace 级配置目录：`.codepanion/workflow.json`、`.codepanion/roles/*.md`、`.codepanion/artifacts/`。
-- [ ] **W-11** 扩展 workflow definition schema，支持 role、model、permissions、contextPolicy、humanGate、artifact 输出契约。
-- [ ] **W-12** 新增内置角色模板：Orchestrator、Planner、Builder、Tester、Reviewer、Docs Writer。
-- [ ] **W-13** 将现有 handoff 状态收敛为 role assignment / executor run 状态，避免继续围绕“转交给外部工具”组织主概念。
-- [ ] **W-14** 新增 workflow run artifact 历史：计划、变更摘要、测试结果、审查报告、人工决策、交付摘要。
+- [x] **W-10** 定义 workspace 级配置目录：`.codepanion/workflow.json`、`.codepanion/roles/*.md`、`.codepanion/artifacts/`。
+- [x] **W-11** 扩展 workflow definition schema，支持 role、model、permissions、contextPolicy、humanGate、artifact 输出契约。
+- [x] **W-12** 新增内置角色模板：Orchestrator、Planner、Builder、Tester、Reviewer、Docs Writer。
+- [x] **W-13** 将现有 handoff 状态收敛为 role assignment / executor run 状态，避免继续围绕“转交给外部工具”组织主概念。
+- [x] **W-14** 新增 workflow run artifact 历史：计划、变更摘要、测试结果、审查报告、人工决策、交付摘要。
 
 ---
 
 ## P2：GUI 从会话流转向 workflow board
 
-- [ ] **W-20** 将主界面第一层重排为 workspace / workflow 列表，而不是外部会话列表。
+- [-] **W-20** 将主界面第一层重排为 workspace / workflow 列表，而不是外部会话列表。
 - [ ] **W-21** 中央区域展示 workflow 节点、当前角色、状态、阻塞点和人工审核门。
 - [ ] **W-22** 右侧抽屉展示角色、模型、权限、artifact 和原始执行记录。
 - [ ] **W-23** 保留 `等待我 / 失败 / 需审阅 / 运行中 / 完成`，但状态挂到 workflow 节点和 artifact。
@@ -70,7 +70,7 @@ CodePanion 后续专注：
 
 ## P3：多模型与多角色执行闭环
 
-- [ ] **W-30** 支持同一模型绑定不同角色 prompt、权限和上下文策略。
-- [ ] **W-31** 支持不同 provider / model 在同一 workflow 中协作。
-- [ ] **W-32** 支持人工在计划、审查、交付门中批准、拒绝、要求重试或追加约束。
+- [x] **W-30** 支持同一模型绑定不同角色 prompt、权限和上下文策略。
+- [-] **W-31** 支持不同 provider / model 在同一 workflow 中协作。
+- [-] **W-32** 支持人工在计划、审查、交付门中批准、拒绝、要求重试或追加约束。
 - [ ] **W-33** 每次完成 workflow 后生成可复盘交付摘要，并能复制给 Codex / Claude Code / OpenCode 继续处理。

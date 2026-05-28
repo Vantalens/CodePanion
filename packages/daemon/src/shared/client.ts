@@ -198,6 +198,96 @@ export function getAuditSnapshot(options: { since?: number } = {}): Promise<Audi
   return request<AuditSnapshot>('GET', `/audit/snapshot${query}`);
 }
 
+// ---- workflow daemon-driven endpoints（W-22/W-23/W-32/cancel）----
+// CLI 镜像供 `codepanion workflow start/board/cancel/gates` 使用。
+
+export type WorkflowBoardSnapshot = {
+  workflows: Array<{ name: string; description?: string; stepCount: number; updatedAt: number }>;
+  runs: Array<{
+    id: string;
+    workflowName: string;
+    status: string;
+    startedAt: number;
+    endedAt: number;
+    stepCount: number;
+    currentStepId?: string;
+    currentStepStatus?: string;
+    currentStepRole?: string;
+  }>;
+  gates: Array<{
+    runId: string;
+    workflowName: string;
+    stepId: string;
+    role?: string;
+    tool?: string;
+    command?: string;
+    args: string[];
+    message?: string;
+    artifacts: string[];
+    pausedAt: number;
+    lastDecision?: { decision: string; content: string; at: number };
+  }>;
+};
+
+function workspaceQuery(workspace?: string): string {
+  return workspace ? `?workspace=${encodeURIComponent(workspace)}` : '';
+}
+
+export function getWorkflowBoard(workspace?: string): Promise<WorkflowBoardSnapshot> {
+  return request<WorkflowBoardSnapshot>('GET', `/workflow/board${workspaceQuery(workspace)}`);
+}
+
+export function getWorkflowGates(workspace?: string): Promise<{ gates: WorkflowBoardSnapshot['gates'] }> {
+  return request('GET', `/workflow/gates${workspaceQuery(workspace)}`);
+}
+
+export function startWorkflowRun(payload: {
+  workflow: string;
+  values?: Record<string, string>;
+  yes?: boolean;
+  dryRun?: boolean;
+  workspace?: string;
+}): Promise<{ accepted: boolean; workflowName: string }> {
+  return request('POST', '/workflow/runs', payload);
+}
+
+export function cancelWorkflowRun(runId: string): Promise<{ cancelled: boolean; runId: string }> {
+  return request('POST', `/workflow/runs/${encodeURIComponent(runId)}/cancel`, {});
+}
+
+export type WorkflowArtifactRecord = {
+  id: string;
+  runId: string;
+  workflowName: string;
+  stepId?: string;
+  role?: string;
+  type: 'plan' | 'patch-summary' | 'test-result' | 'review-report' | 'human-decision' | 'delivery-note';
+  title: string;
+  content: string;
+  files: string[];
+  createdAt: number;
+};
+
+export function listWorkflowArtifacts(runId: string, workspace?: string): Promise<{ artifacts: WorkflowArtifactRecord[] }> {
+  return request('GET', `/workflow/runs/${encodeURIComponent(runId)}/artifacts${workspaceQuery(workspace)}`);
+}
+
+export function resolveWorkflowGate(payload: {
+  runId: string;
+  stepId: string;
+  decision: 'approve' | 'reject' | 'retry';
+  message?: string;
+  constraints?: string[];
+  workspace?: string;
+}): Promise<{ artifact: unknown; resumed?: boolean; resumeError?: string }> {
+  const { runId, stepId, ...body } = payload;
+  return request(
+    'POST',
+    `/workflow/gates/${encodeURIComponent(runId)}/${encodeURIComponent(stepId)}/resolve`,
+    body,
+  );
+}
+
 export function wsUrl(role: 'observer' | 'cli', sessionId?: string): string {
   const cfg = loadConfig();
   const params = new URLSearchParams({ role });

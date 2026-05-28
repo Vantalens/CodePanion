@@ -2,6 +2,63 @@ import express, { type Request, type Response, type NextFunction } from 'express
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { Server } from 'node:http';
 import { spawn, execFile } from 'node:child_process';
+
+/**
+ * daemon 内部 fire-and-forget 续跑 workflow 用的 executor：
+ * 直接 child_process.spawn 跑命令，stdio 输出进 daemon log。
+ *
+ * 为什么不走 PTY：
+ * - daemon-side resume 默认是非交互的（fire-and-forget），各 AI CLI 的 `-p` / `exec` / `run`
+ *   子命令本来就是给脚本化场景设计的，能在 non-TTY stdin 下正常完成。
+ * - Windows ConPTY 在 PTY 终端 onExit 后会留 native handle，导致测试 / 短任务进程不能立即退出。
+ * - 未来真要做 daemon-driven 交互式续跑（GUI 输入回流），可以切到 runWithPtyHeadless（runner.ts 里已经
+ *   留好）+ 配套 stdin 转发，但不在本段范围。
+ */
+const STEP_OUTPUT_CHUNK_LIMIT = 4096;
+
+function daemonWorkflowExecutor(
+  command: string,
+  args: string[],
+  signal?: AbortSignal,
+  onOutput?: (stream: 'stdout' | 'stderr', chunk: string, truncated: boolean) => void,
+): Promise<number> {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    const onAbort = () => {
+      try { child.kill('SIGTERM'); } catch { /* 子进程可能已退出，忽略 */ }
+    };
+    if (signal) {
+      if (signal.aborted) onAbort();
+      else signal.addEventListener('abort', onAbort, { once: true });
+    }
+    const wireStream = (stream: 'stdout' | 'stderr', src: NodeJS.ReadableStream | null) => {
+      if (!src) return;
+      src.on('data', (raw: Buffer) => {
+        const text = raw.toString('utf8');
+        logger.debug({ command, stream, bytes: text.length }, 'workflow step output');
+        if (!onOutput) return;
+        // 截断到 4KB 防止单条 WS 帧爆掉；超长时附 truncated 标记，CLI 可显示「(truncated)」。
+        const truncated = text.length > STEP_OUTPUT_CHUNK_LIMIT;
+        const chunk = truncated ? text.slice(0, STEP_OUTPUT_CHUNK_LIMIT) : text;
+        try { onOutput(stream, chunk, truncated); } catch (err) { logger.warn({ err }, 'step-output emit failed'); }
+      });
+    };
+    wireStream('stdout', child.stdout);
+    wireStream('stderr', child.stderr);
+    child.on('error', (err) => {
+      logger.warn({ err, command, args }, 'workflow step spawn 失败');
+      signal?.removeEventListener('abort', onAbort);
+      resolve(-1);
+    });
+    child.on('exit', (code) => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve(code ?? -1);
+    });
+  });
+}
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -25,10 +82,22 @@ import {
   SessionPromptRequestSchema,
   LaunchHandoffRequestSchema,
   UpdateWorkflowTaskStateRequestSchema,
+  InitializeWorkspaceRequestSchema,
+  ResolveWorkflowGateRequestSchema,
+  StartWorkflowRunRequestSchema,
   type WorkflowThread,
   type HandoffTarget,
   type LaunchHandoffResponse,
 } from '../shared/protocol.js';
+import { CodePanionWorkspaceManager, WORKSPACE_CONFIG_DIR } from '../workflows/workspaceManager.js';
+import {
+  WorkflowArtifactStore,
+  WorkflowDefinitionManager,
+  WorkflowRunHistory,
+  runWorkflow,
+  type WorkflowDefinition,
+} from '../workflows/workflowDefinitionManager.js';
+import { join as joinPath, resolve as resolvePath } from 'node:path';
 import { logger, maskString } from '../logger.js';
 import { VERSION } from '../shared/version.js';
 
@@ -458,6 +527,413 @@ export function createServer(
 
   app.get('/workflow/snapshot', (_req, res) => {
     res.json(workflows.snapshot(GUI_WORKFLOW_SNAPSHOT_LIMITS));
+  });
+
+  // board / gates 共用：从一段 runs 里挑出 paused + 有 checkpoint step 的，扁平成 gate entry。
+  // human-decision artifact 决定 gate 的「最近决策」状态：
+  //   - approve / reject：run 已被人工处理，gate 不再出现
+  //   - retry：人工要求重新决策，gate 仍保留并附 lastDecision 显示用户上一轮的约束
+  //   - 无决策：fresh gate
+  const collectPausedGates = (runs: ReturnType<WorkflowRunHistory['list']>, store: WorkflowArtifactStore) => {
+    // store.list() 按 createdAt 降序，第一次见到 runId 即最新一条 human-decision。
+    const latestDecisionByRun = new Map<
+      string,
+      { decision: 'approve' | 'reject' | 'retry' | 'unknown'; content: string; createdAt: number }
+    >();
+    for (const entry of store.list()) {
+      if (entry.type !== 'human-decision') continue;
+      if (latestDecisionByRun.has(entry.runId)) continue;
+      const firstLine = entry.content.split('\n')[0] ?? '';
+      const decision = firstLine.startsWith('decision=')
+        ? firstLine.slice('decision='.length)
+        : 'unknown';
+      latestDecisionByRun.set(entry.runId, {
+        decision: (['approve', 'reject', 'retry'].includes(decision) ? decision : 'unknown') as
+          | 'approve' | 'reject' | 'retry' | 'unknown',
+        content: entry.content,
+        createdAt: entry.createdAt,
+      });
+    }
+    return runs
+      .filter((run) => {
+        if (run.status !== 'paused') return false;
+        const latest = latestDecisionByRun.get(run.id);
+        if (!latest) return true;
+        // approve / reject 已闭环；retry / unknown 保留 gate 等下一轮人工决定。
+        return latest.decision === 'retry' || latest.decision === 'unknown';
+      })
+      .map((run) => {
+        const checkpoint = run.steps.find((step) => step.status === 'checkpoint');
+        if (!checkpoint) return null;
+        const latest = latestDecisionByRun.get(run.id);
+        return {
+          runId: run.id,
+          workflowName: run.workflowName,
+          stepId: checkpoint.id,
+          role: checkpoint.role,
+          tool: checkpoint.tool,
+          command: checkpoint.command,
+          args: checkpoint.args ?? [],
+          message: checkpoint.message,
+          artifacts: checkpoint.artifacts ?? [],
+          pausedAt: run.endedAt,
+          lastDecision: latest ? {
+            decision: latest.decision,
+            content: latest.content,
+            at: latest.createdAt,
+          } : undefined,
+        };
+      })
+      .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+  };
+
+  // W-32 起手：列出当前所有 paused workflow run 中的 checkpoint step，供 GUI 渲染「人工审核门」面板。
+  app.get('/workflow/gates', (req, res) => {
+    const stores = workspaceFor(typeof req.query.workspace === 'string' ? req.query.workspace : undefined);
+    res.json({ gates: collectPausedGates(stores.history.list(), stores.artifactStore) });
+  });
+
+  // W-10/W-11 接线：暴露 workspace 初始化与读取，供 GUI 在用户选择项目根目录后落 .codepanion/ 结构。
+  app.post('/workspace/initialize', (req, res) => {
+    const parsed = InitializeWorkspaceRequestSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.message });
+      return;
+    }
+    try {
+      const layout = new CodePanionWorkspaceManager(resolvePath(parsed.data.root)).initialize();
+      res.json({ layout });
+    } catch (err) {
+      logger.warn({ err, root: parsed.data.root }, 'workspace 初始化失败');
+      res.status(500).json({ error: (err as Error).message ?? 'workspace initialize failed' });
+    }
+  });
+
+  app.get('/workspace/config', (req, res) => {
+    const rootRaw = req.query.root;
+    if (typeof rootRaw !== 'string' || rootRaw.trim().length === 0) {
+      res.status(400).json({ error: 'query parameter `root` is required' });
+      return;
+    }
+    const manager = new CodePanionWorkspaceManager(resolvePath(rootRaw));
+    const config = manager.readConfig();
+    if (!config) {
+      res.status(404).json({ error: 'workspace config not found or corrupted' });
+      return;
+    }
+    res.json({ config, layout: manager.layout() });
+  });
+
+  // per-workspace stores 缓存：key 是绝对路径或空串（fallback = HOME_DIR）。
+  // 不指定 workspace 走原行为（HOME_DIR 全局），指定时 daemon 把 history / artifacts / definitions
+  // 都放到 `<workspace>/.codepanion/`，让不同项目互不污染。
+  type WorkspaceStores = {
+    definitions: WorkflowDefinitionManager;
+    history: WorkflowRunHistory;
+    artifactStore: WorkflowArtifactStore;
+  };
+  const workspaceStoresCache = new Map<string, WorkspaceStores>();
+  const workspaceKey = (raw?: string | null): string =>
+    typeof raw === 'string' && raw.trim().length > 0 ? resolvePath(raw) : '';
+  const workspaceFor = (raw?: string | null): WorkspaceStores => {
+    const key = workspaceKey(raw);
+    let stores = workspaceStoresCache.get(key);
+    if (stores) return stores;
+    if (key === '') {
+      // fallback：default constructor 走 env / HOME_DIR，保持向后兼容。
+      stores = {
+        definitions: new WorkflowDefinitionManager(),
+        history: new WorkflowRunHistory(),
+        artifactStore: new WorkflowArtifactStore(),
+      };
+    } else {
+      const configDir = joinPath(key, WORKSPACE_CONFIG_DIR);
+      stores = {
+        definitions: new WorkflowDefinitionManager(joinPath(configDir, 'workflows.json')),
+        history: new WorkflowRunHistory(joinPath(configDir, 'workflow-runs.ndjson')),
+        artifactStore: new WorkflowArtifactStore(joinPath(configDir, 'workflow-artifacts.ndjson')),
+      };
+    }
+    workspaceStoresCache.set(key, stores);
+    return stores;
+  };
+  // 兼容旧引用：原 `artifactStore` 单例变成 fallback workspace 的 artifactStore。
+  const fallbackStores = workspaceFor();
+  const artifactStore = fallbackStores.artifactStore;
+
+  // W-23：daemon 进程内活跃 run 注册表。runWorkflowOnDaemon 内的 hooks 在 run-start/step-start/step-finish
+  // 时更新，run-finish + history.append 完成后清除。GUI 通过 /workflow/board 合并看到 running 状态，
+  // 不必等 history 写盘。daemon 重启即清空，符合「未持久化的运行态」语义（重启后 daemon 内就没有正在跑的 run）。
+  type ActiveRunSnapshot = {
+    id: string;
+    workflowName: string;
+    startedAt: number;
+    currentStepId?: string;
+    currentStepStatus?: string;
+    currentStepRole?: string;
+    stepsFinished: number;
+  };
+  const activeRuns = new Map<string, ActiveRunSnapshot>();
+  // runId → AbortController：POST /workflow/runs/:runId/cancel 通过它 SIGTERM 当前 step 的子进程。
+  const runCancellers = new Map<string, AbortController>();
+
+  // daemon-side runWorkflow 调用模板。approve resume 与 /workflow/runs 启动都共用：
+  // - 注入 daemonWorkflowExecutor（child_process.spawn，避开 PTY handle 问题）
+  // - 把 4 个生命周期事件 emit 到 workflows 总线，让 WS observer 实时看到进度
+  // - 完成后 append 到 WorkflowRunHistory
+  // 失败仅 logger.error 留痕，不抛给调用方 —— caller 已经早返回了 HTTP 响应。
+  const runWorkflowOnDaemon = (opts: {
+    workflow: WorkflowDefinition;
+    values: Record<string, string>;
+    yes?: boolean;
+    dryRun?: boolean;
+    stores: WorkspaceStores;
+    logContext: Record<string, unknown>;
+  }) => {
+    const { history, artifactStore: store } = opts.stores;
+    let pendingRunId: string | undefined;
+    // currentContext 跟踪「executor 跑的是哪个 run 的哪个 step」，用于把 stdout/stderr chunk 标注后 emit。
+    // step-start hook 在调 executor 之前触发，所以 executor 内拿到 chunk 时 currentContext 已就绪。
+    let currentContext: { runId: string; workflowName: string; stepId: string } | undefined;
+    const controller = new AbortController();
+    const promise = runWorkflow({
+      workflow: opts.workflow,
+      values: opts.values,
+      yes: opts.yes,
+      dryRun: opts.dryRun,
+      artifactStore: store,
+      executor: (command, args) => daemonWorkflowExecutor(
+        command,
+        args,
+        controller.signal,
+        (stream, chunk, truncated) => {
+          if (!currentContext) return;
+          workflows.emitRunEvent({
+            action: 'step-output',
+            runId: currentContext.runId,
+            workflowName: currentContext.workflowName,
+            stepId: currentContext.stepId,
+            stream,
+            chunk,
+            truncated,
+          });
+        },
+      ),
+      signal: controller.signal,
+      hooks: {
+        onWorkflowStart: (run) => {
+          pendingRunId = run.id;
+          activeRuns.set(run.id, {
+            id: run.id,
+            workflowName: run.workflowName,
+            startedAt: run.startedAt,
+            stepsFinished: 0,
+          });
+          runCancellers.set(run.id, controller);
+          workflows.emitRunEvent({
+            action: 'run-start', runId: run.id, workflowName: run.workflowName, startedAt: run.startedAt,
+          });
+        },
+        onStepStart: (step, run) => {
+          currentContext = { runId: run.id, workflowName: run.workflowName, stepId: step.id };
+          const snapshot = activeRuns.get(run.id);
+          if (snapshot) {
+            snapshot.currentStepId = step.id;
+            snapshot.currentStepStatus = step.status;
+            snapshot.currentStepRole = step.role;
+          }
+          workflows.emitRunEvent({
+            action: 'step-start', runId: run.id, workflowName: run.workflowName,
+            stepId: step.id, tool: step.tool, role: step.role, status: step.status,
+          });
+        },
+        onStepFinish: (step, run) => {
+          const snapshot = activeRuns.get(run.id);
+          if (snapshot) {
+            snapshot.currentStepStatus = step.status;
+            if (step.status === 'success') snapshot.stepsFinished += 1;
+          }
+          workflows.emitRunEvent({
+            action: 'step-finish', runId: run.id, workflowName: run.workflowName,
+            stepId: step.id, status: step.status, exitCode: step.exitCode, message: step.message,
+          });
+        },
+        onWorkflowFinish: (run) => workflows.emitRunEvent({
+          action: 'run-finish', runId: run.id, workflowName: run.workflowName,
+          status: run.status, stepCount: run.steps.length, endedAt: run.endedAt,
+        }),
+      },
+    });
+    return promise
+      .then((completed) => {
+        history.append(completed);
+        activeRuns.delete(completed.id);
+        runCancellers.delete(completed.id);
+        return completed;
+      })
+      .catch((err) => {
+        // 抛错路径：onWorkflowStart 已经把 run 入活跃表，但 history 没写、completed 拿不到——
+        // 用上面记下的 pendingRunId 清掉孤儿条目，避免 board 里看到永远 running 的假任务。
+        if (pendingRunId) {
+          activeRuns.delete(pendingRunId);
+          runCancellers.delete(pendingRunId);
+        }
+        logger.error({ err, ...opts.logContext }, 'daemon 内 runWorkflow 失败');
+        throw err;
+      });
+  };
+
+  // W-33：列出某次 workflow run 的全部 artifact（plan / patch-summary / test-result / review-report /
+  // human-decision / delivery-note），供 GUI 渲染人工审核门面板和交付摘要。
+  app.get('/workflow/runs/:runId/artifacts', (req, res) => {
+    const stores = workspaceFor(typeof req.query.workspace === 'string' ? req.query.workspace : undefined);
+    res.json({ artifacts: stores.artifactStore.list(req.params.runId) });
+  });
+
+  // W-20 起手：一个 endpoint 聚合 GUI 主面板所需的 board 视图——可选执行的 workflow definitions、
+  // 最近若干次 run、当前等待人工审核的 gates。GUI 渲染左侧 workflow 列表 + 中央 board + 右侧人工门。
+  app.get('/workflow/board', (req, res) => {
+    const stores = workspaceFor(typeof req.query.workspace === 'string' ? req.query.workspace : undefined);
+    const definitions = stores.definitions.list();
+    const allRuns = stores.history.list();
+    const recentRuns = allRuns.slice(0, 30);
+    const gates = collectPausedGates(allRuns, stores.artifactStore);
+    // 把 daemon 内活跃的 run 合并到 runs 列表前面，status='running'，让 GUI 立刻看到运行态。
+    // 已 append 到历史的 run 已被 .then 从 activeRuns 删除，因此不会与历史条目重复。
+    const activeEntries = Array.from(activeRuns.values()).map((snapshot) => ({
+      id: snapshot.id,
+      workflowName: snapshot.workflowName,
+      status: 'running' as const,
+      startedAt: snapshot.startedAt,
+      endedAt: snapshot.startedAt,
+      stepCount: snapshot.stepsFinished,
+      currentStepId: snapshot.currentStepId,
+      currentStepStatus: snapshot.currentStepStatus,
+      currentStepRole: snapshot.currentStepRole,
+    }));
+    const historicalEntries = recentRuns.map((run) => ({
+      id: run.id,
+      workflowName: run.workflowName,
+      status: run.status,
+      startedAt: run.startedAt,
+      endedAt: run.endedAt,
+      stepCount: run.steps.length,
+    }));
+    res.json({
+      workflows: definitions.map((definition) => ({
+        name: definition.name,
+        description: definition.description,
+        stepCount: definition.steps.length,
+        updatedAt: definition.updatedAt,
+      })),
+      runs: [...activeEntries, ...historicalEntries],
+      gates,
+    });
+  });
+
+  // W-32 收尾：人工对当前停在 checkpoint 的 run/step 做决定，落一条 human-decision artifact。
+  // approve 分支会在 daemon 内 fire-and-forget 触发同 workflow 的续跑（带 yes:true），返回 newRunId；
+  // reject / retry 仅落 artifact 不续跑（retry 留给后续轮次让人重新发起）。
+  app.post('/workflow/gates/:runId/:stepId/resolve', (req, res) => {
+    const parsed = ResolveWorkflowGateRequestSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.message });
+      return;
+    }
+    const stores = workspaceFor(parsed.data.workspace);
+    const { runId, stepId } = req.params;
+    const previous = stores.history.get(runId);
+    if (!previous || previous.status !== 'paused') {
+      res.status(404).json({ error: 'paused workflow run not found' });
+      return;
+    }
+    const checkpoint = previous.steps.find((step) => step.id === stepId && step.status === 'checkpoint');
+    if (!checkpoint) {
+      res.status(404).json({ error: 'checkpoint step not found in run' });
+      return;
+    }
+    const lines: string[] = [`decision=${parsed.data.decision}`];
+    if (parsed.data.message) lines.push(`message=${parsed.data.message}`);
+    if (parsed.data.constraints && parsed.data.constraints.length > 0) {
+      lines.push(`constraints=${parsed.data.constraints.join(' | ')}`);
+    }
+    let artifact;
+    try {
+      artifact = stores.artifactStore.append({
+        runId,
+        workflowName: previous.workflowName,
+        stepId,
+        role: checkpoint.role,
+        type: 'human-decision',
+        title: `${previous.workflowName}/${stepId}: ${parsed.data.decision}`,
+        content: lines.join('\n'),
+        files: [],
+      });
+    } catch (err) {
+      logger.warn({ err, runId, stepId }, 'human-decision artifact 落条失败');
+      res.status(500).json({ error: (err as Error).message ?? 'append failed' });
+      return;
+    }
+
+    if (parsed.data.decision !== 'approve') {
+      res.json({ artifact });
+      return;
+    }
+
+    const workflow = stores.definitions.get(previous.workflowName);
+    if (!workflow) {
+      // approve 了但找不到 definition：仍返回 artifact，前端可显示「需要重新导入 workflow」。
+      logger.warn({ runId, workflowName: previous.workflowName }, 'approve 时 workflow definition 缺失，跳过续跑');
+      res.json({ artifact, resumeError: 'workflow definition missing' });
+      return;
+    }
+    // 同 workflow + 同 values + yes:true 续跑一次，落入历史。fire-and-forget：不阻塞 HTTP。
+    runWorkflowOnDaemon({
+      workflow,
+      values: previous.values,
+      yes: true,
+      stores,
+      logContext: { runId, workflowName: previous.workflowName, source: 'gate-approve' },
+    }).catch(() => undefined);
+    res.json({ artifact, resumed: true });
+  });
+
+  // W-32 / cancel：让用户停掉 daemon 内正在跑的 workflow。触发 AbortController →
+  // daemonWorkflowExecutor 立即 SIGTERM 当前 step 的子进程；runWorkflow 在 step 之间也会
+  // 检测 aborted 提前 break。HTTP 立即响应，run-finish 事件由 runWorkflow 自然到达。
+  app.post('/workflow/runs/:runId/cancel', (req, res) => {
+    const { runId } = req.params;
+    const controller = runCancellers.get(runId);
+    if (!controller) {
+      res.status(404).json({ error: 'run not active or already finished' });
+      return;
+    }
+    controller.abort();
+    res.json({ cancelled: true, runId });
+  });
+
+  // W-22 起手：GUI / 外部触发的 workflow 从头启动，fire-and-forget，进度走 workflow-run-event WS 流。
+  app.post('/workflow/runs', (req, res) => {
+    const parsed = StartWorkflowRunRequestSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.message });
+      return;
+    }
+    const stores = workspaceFor(parsed.data.workspace);
+    const workflow = stores.definitions.get(parsed.data.workflow);
+    if (!workflow) {
+      res.status(404).json({ error: 'workflow not found' });
+      return;
+    }
+    runWorkflowOnDaemon({
+      workflow,
+      values: { ...workflow.params, ...(parsed.data.values ?? {}) },
+      yes: parsed.data.yes,
+      dryRun: parsed.data.dryRun,
+      stores,
+      logContext: { workflowName: workflow.name, source: 'run-start' },
+    }).catch(() => undefined);
+    res.json({ accepted: true, workflowName: workflow.name });
   });
 
   app.post('/workflow/threads/:id/task-state', (req, res) => {

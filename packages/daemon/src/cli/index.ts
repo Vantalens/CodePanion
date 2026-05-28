@@ -15,15 +15,23 @@ import {
 } from './templates.js';
 import {
   workflowAddCommand,
+  workflowArtifactsCommand,
+  workflowBoardCommand,
+  workflowCancelCommand,
+  workflowGatesCommand,
   workflowHistoryCommand,
   workflowImportCommand,
   workflowListCommand,
   workflowRemoveCommand,
   workflowReplayCommand,
+  workflowResolveCommand,
   workflowRunCommand,
   workflowShowCommand,
+  workflowStartCommand,
+  workflowWatchCommand,
 } from './workflows.js';
 import { auditExportCommand } from './audit.js';
+import { workspaceInitCommand, workspaceStatusCommand } from './workspace.js';
 
 export async function runCli(argv: string[]): Promise<void> {
   await yargs(hideBin(argv))
@@ -154,7 +162,7 @@ export async function runCli(argv: string[]): Promise<void> {
         y
           .positional('action', {
             type: 'string',
-            choices: ['add', 'import', 'list', 'show', 'run', 'remove', 'history', 'replay'],
+            choices: ['add', 'import', 'list', 'show', 'run', 'remove', 'history', 'replay', 'start', 'board', 'gates', 'cancel', 'resolve', 'watch', 'artifacts'],
             demandOption: true,
           })
           .positional('name', { type: 'string' })
@@ -169,19 +177,38 @@ export async function runCli(argv: string[]): Promise<void> {
           .option('set', { type: 'array', string: true, describe: '运行时参数 name=value，可重复' })
           .option('query', { type: 'string', describe: 'history 搜索关键字' })
           .option('dry-run', { type: 'boolean', default: false, describe: '只解析步骤，不实际执行' })
-          .option('yes', { type: 'boolean', default: false, describe: '跳过人工检查点' }),
+          .option('yes', { type: 'boolean', default: false, describe: '跳过人工检查点' })
+          .option('workspace', {
+            type: 'string',
+            describe: 'workspace 根目录；未指定时从 cwd 向上找 .codepanion/，找不到则走 HOME_DIR 全局共享',
+          })
+          .option('decision', {
+            type: 'string',
+            choices: ['approve', 'reject', 'retry'],
+            describe: 'resolve 操作的人工决定（approve / reject / retry）',
+          })
+          .option('step-id', { type: 'string', describe: 'resolve 时的 checkpoint step id' })
+          .option('message', { type: 'string', describe: 'resolve 操作的可选说明' })
+          .option('constraint', { type: 'array', string: true, describe: '可重复的人工约束条目' })
+          .option('run', { type: 'string', describe: 'watch 时只 follow 指定 runId 的事件' })
+          .option('once', { type: 'boolean', default: false, describe: 'watch 收到匹配的 run-finish 后立即退出' })
+          .option('verbose', { type: 'boolean', default: false, describe: 'artifacts 命令展开 content + files 列表' }),
       async (a) => {
         const action = a.action as string;
         const name = a.name as string | undefined;
-        if (action === 'list') return workflowListCommand();
-        if (action === 'history') return workflowHistoryCommand({ query: a.query as string | undefined });
+        const workspace = a.workspace as string | undefined;
+        if (action === 'list') return workflowListCommand({ workspace });
+        if (action === 'history') return workflowHistoryCommand({ query: a.query as string | undefined, workspace });
+        if (action === 'board') return workflowBoardCommand({ workspace });
+        if (action === 'gates') return workflowGatesCommand({ workspace });
+        if (action === 'watch') return workflowWatchCommand({ run: a.run as string | undefined, once: a.once as boolean });
         if (action === 'import') {
           const file = (a.file as string | undefined) ?? name;
           if (!file) {
             console.error('usage: codepanion workflow import --file <path-to-json>');
             process.exit(2);
           }
-          return workflowImportCommand({ file });
+          return workflowImportCommand({ file, workspace });
         }
         if (action === 'replay') {
           if (!name) {
@@ -193,20 +220,65 @@ export async function runCli(argv: string[]): Promise<void> {
             set: a.set as string[] | undefined,
             dryRun: a.dryRun as boolean,
             yes: a.yes as boolean,
+            workspace,
+          });
+        }
+        if (action === 'cancel') {
+          if (!name) {
+            console.error('usage: codepanion workflow cancel <runId>');
+            process.exit(2);
+          }
+          return workflowCancelCommand({ id: name });
+        }
+        if (action === 'artifacts') {
+          if (!name) {
+            console.error('usage: codepanion workflow artifacts <runId> [--verbose]');
+            process.exit(2);
+          }
+          return workflowArtifactsCommand({
+            runId: name,
+            workspace,
+            verbose: a.verbose as boolean,
+          });
+        }
+        if (action === 'resolve') {
+          const stepId = a['step-id'] as string | undefined;
+          const decision = a.decision as 'approve' | 'reject' | 'retry' | undefined;
+          if (!name || !stepId || !decision) {
+            console.error('usage: codepanion workflow resolve <runId> --step-id <stepId> --decision <approve|reject|retry>');
+            process.exit(2);
+          }
+          return workflowResolveCommand({
+            runId: name,
+            stepId,
+            decision,
+            message: a.message as string | undefined,
+            constraint: a.constraint as string[] | undefined,
+            workspace,
           });
         }
         if (!name) {
-          console.error('usage: codepanion workflow <add|show|run|remove> <name>');
+          console.error('usage: codepanion workflow <add|show|run|remove|start> <name>');
           process.exit(2);
         }
-        if (action === 'show') return workflowShowCommand({ name });
-        if (action === 'remove') return workflowRemoveCommand({ name });
+        if (action === 'show') return workflowShowCommand({ name, workspace });
+        if (action === 'remove') return workflowRemoveCommand({ name, workspace });
         if (action === 'run') {
           return workflowRunCommand({
             name,
             set: a.set as string[] | undefined,
             dryRun: a.dryRun as boolean,
             yes: a.yes as boolean,
+            workspace,
+          });
+        }
+        if (action === 'start') {
+          return workflowStartCommand({
+            name,
+            set: a.set as string[] | undefined,
+            yes: a.yes as boolean,
+            dryRun: a.dryRun as boolean,
+            workspace,
           });
         }
         return workflowAddCommand({
@@ -214,7 +286,22 @@ export async function runCli(argv: string[]): Promise<void> {
           description: a.description as string | undefined,
           param: a.param as string[] | undefined,
           step: a.step as string[] | undefined,
+          workspace,
         });
+      },
+    )
+    .command(
+      'workspace <action>',
+      '初始化 / 查看当前 workspace（.codepanion/）',
+      (y) =>
+        y
+          .positional('action', { type: 'string', choices: ['init', 'status'], demandOption: true })
+          .option('root', { type: 'string', describe: 'workspace 根目录，默认 cwd' }),
+      async (a) => {
+        const action = a.action as string;
+        const root = a.root as string | undefined;
+        if (action === 'init') return workspaceInitCommand({ root });
+        return workspaceStatusCommand({ root });
       },
     )
     .command(
