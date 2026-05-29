@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
 using System.Net.WebSockets;
@@ -405,6 +406,58 @@ namespace CodePanion.Gui.Services
             {
                 Log($"刷新 workflow board 失败：{ex.Message}");
                 return null;
+            }
+        }
+
+        // W-20 第二切片：从 board 直接发起 workflow run。caller 提供 workflow 名 + 可选 workspace。
+        // 成功 → daemon 200 接受，run 在后台 fire-and-forget 推进，webview 通过下一次 board 刷新看到。
+        public async Task<(bool ok, string? body)> StartWorkflowRunAsync(string workflowName, string? workspace = null)
+        {
+            try
+            {
+                var url = $"{_daemonUrl}/workflow/runs";
+                var payload = string.IsNullOrWhiteSpace(workspace)
+                    ? (object)new { workflow = workflowName }
+                    : new { workflow = workflowName, workspace };
+                var response = await PostJsonAsync(url, payload);
+                var body = await response.Content.ReadAsStringAsync();
+                return (response.IsSuccessStatusCode, body);
+            }
+            catch (Exception ex)
+            {
+                Log($"启动 workflow 失败：{ex.Message}");
+                return (false, null);
+            }
+        }
+
+        // W-20 第二切片：从 board 直接对 paused gate 做决策。decision = approve | reject | retry。
+        // constraints / message 可选；daemon 端会落 human-decision artifact，approve / retry 会续跑。
+        public async Task<(bool ok, string? body)> ResolveWorkflowGateAsync(
+            string runId,
+            string stepId,
+            string decision,
+            string? workspace = null,
+            string? message = null,
+            string[]? constraints = null)
+        {
+            try
+            {
+                var url = $"{_daemonUrl}/workflow/gates/{Uri.EscapeDataString(runId)}/{Uri.EscapeDataString(stepId)}/resolve";
+                var payload = new Dictionary<string, object?>
+                {
+                    ["decision"] = decision,
+                };
+                if (!string.IsNullOrWhiteSpace(workspace)) payload["workspace"] = workspace;
+                if (!string.IsNullOrWhiteSpace(message)) payload["message"] = message;
+                if (constraints != null && constraints.Length > 0) payload["constraints"] = constraints;
+                var response = await PostJsonAsync(url, payload);
+                var body = await response.Content.ReadAsStringAsync();
+                return (response.IsSuccessStatusCode, body);
+            }
+            catch (Exception ex)
+            {
+                Log($"resolve gate 失败：{ex.Message}");
+                return (false, null);
             }
         }
 

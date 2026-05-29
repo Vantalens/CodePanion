@@ -33,6 +33,8 @@ namespace CodePanion.Gui
             "handoff-launch",
             "open-external",
             "request-workflow-board",
+            "request-workflow-launch",
+            "request-gate-resolve",
         };
 
         private readonly DaemonClient _daemonClient;
@@ -282,6 +284,39 @@ namespace CodePanion.Gui
                     {
                         var workspace = message["workspace"]?.Value<string>();
                         _ = HandleWorkflowBoardRequestAsync(workspace);
+                        break;
+                    }
+
+                    // W-20 第二切片：board 上点 workflow 卡片 → POST /workflow/runs 启动 run，
+                    // 启动后自动重新拉 board 让前端看到 active run 进入列表。
+                    case "request-workflow-launch":
+                    {
+                        var workflow = message["workflow"]?.Value<string>();
+                        var workspace = message["workspace"]?.Value<string>();
+                        if (string.IsNullOrWhiteSpace(workflow))
+                        {
+                            AddLog("丢弃 request-workflow-launch：workflow 字段缺失");
+                            break;
+                        }
+                        _ = HandleWorkflowLaunchAsync(workflow!, workspace);
+                        break;
+                    }
+
+                    // W-20 第二切片：board 上 gate 卡片的 approve / reject / retry 按钮 → POST
+                    // /workflow/gates/:runId/:stepId/resolve，落 human-decision artifact 并续跑（除 reject）。
+                    case "request-gate-resolve":
+                    {
+                        var runId = message["runId"]?.Value<string>();
+                        var stepId = message["stepId"]?.Value<string>();
+                        var decision = message["decision"]?.Value<string>();
+                        var workspace = message["workspace"]?.Value<string>();
+                        if (string.IsNullOrWhiteSpace(runId) || string.IsNullOrWhiteSpace(stepId)
+                            || string.IsNullOrWhiteSpace(decision))
+                        {
+                            AddLog("丢弃 request-gate-resolve：runId / stepId / decision 字段缺失");
+                            break;
+                        }
+                        _ = HandleGateResolveAsync(runId!, stepId!, decision!, workspace);
                         break;
                     }
                 }
@@ -843,6 +878,50 @@ namespace CodePanion.Gui
                 AddLog($"处理 request-workflow-board 失败：{ex.Message}");
                 await Dispatcher.InvokeAsync(() =>
                     SendMessageToWeb(new { type = "workflow-board", workspace, board = (object?)null, error = ex.Message }));
+            }
+        }
+
+        // W-20 第二切片：启动 workflow run。成功后立刻重新拉一次 board，让前端看到 run 进入 active 列表。
+        // 失败时单独 push workflow-action-result 让前端展示错误提示。
+        private async Task HandleWorkflowLaunchAsync(string workflowName, string? workspace)
+        {
+            var (ok, body) = await _daemonClient.StartWorkflowRunAsync(workflowName, workspace);
+            await Dispatcher.InvokeAsync(() =>
+                SendMessageToWeb(new
+                {
+                    type = "workflow-action-result",
+                    action = "launch",
+                    workflow = workflowName,
+                    workspace,
+                    ok,
+                    body,
+                }));
+            if (ok)
+            {
+                await HandleWorkflowBoardRequestAsync(workspace);
+            }
+        }
+
+        // W-20 第二切片：approve / reject / retry 一个 paused gate。成功后重新拉 board，
+        // 让 gates 列表里那条消失，runs 列表反映续跑进度。失败时 push action-result 让前端提示。
+        private async Task HandleGateResolveAsync(string runId, string stepId, string decision, string? workspace)
+        {
+            var (ok, body) = await _daemonClient.ResolveWorkflowGateAsync(runId, stepId, decision, workspace);
+            await Dispatcher.InvokeAsync(() =>
+                SendMessageToWeb(new
+                {
+                    type = "workflow-action-result",
+                    action = "gate-resolve",
+                    runId,
+                    stepId,
+                    decision,
+                    workspace,
+                    ok,
+                    body,
+                }));
+            if (ok)
+            {
+                await HandleWorkflowBoardRequestAsync(workspace);
             }
         }
 

@@ -2302,6 +2302,11 @@ function handleMessage(message) {
         case 'workflow-board':
             applyWorkflowBoard(message.board, message.error);
             break;
+        // W-20 第二切片：launch run / resolve gate 等动作的执行结果。host 在 ok=true 时已自动重拉 board，
+        // 这里只把成功/失败提示落到 #workflow-board-status，省个 toast。
+        case 'workflow-action-result':
+            applyWorkflowActionResult(message);
+            break;
         case 'source-registered':
             if (message.source) {
                 const sourceId = message.source.id || message.source.Id || generateId();
@@ -3278,6 +3283,22 @@ function renderWorkflowDefinitionCard(workflow) {
     const stepCount = typeof workflow.stepCount === 'number' ? workflow.stepCount : 0;
     meta.textContent = `${stepCount} 步`;
     card.appendChild(meta);
+    // W-20 第二切片：板上一键启动 run。launch 后 host 自动重拉 board，新 run 进 active 列表。
+    if (workflow.name) {
+        const actions = document.createElement('div');
+        actions.className = 'board-card-actions';
+        const launchBtn = document.createElement('button');
+        launchBtn.type = 'button';
+        launchBtn.className = 'action-button primary board-action';
+        launchBtn.textContent = '启动';
+        launchBtn.addEventListener('click', () => {
+            const status = document.getElementById('workflow-board-status');
+            if (status) status.textContent = `启动 ${workflow.name} 中…`;
+            sendToHost({ type: 'request-workflow-launch', workflow: workflow.name });
+        });
+        actions.appendChild(launchBtn);
+        card.appendChild(actions);
+    }
     return card;
 }
 
@@ -3319,7 +3340,54 @@ function renderWorkflowGateCard(gate) {
         detail.textContent = gate.title;
         card.appendChild(detail);
     }
+    // W-20 第二切片：approve / reject / retry 三按钮直接挂在 gate 卡片上，对应 W-32 三种决策。
+    // 这里走 simple flow（不带 constraints/message）；后续可以加一个抽屉收集 constraints 与 message。
+    if (gate.runId && gate.stepId) {
+        const actions = document.createElement('div');
+        actions.className = 'board-card-actions';
+        const make = (label, decision, klass) => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = `action-button board-action ${klass}`;
+            btn.textContent = label;
+            btn.addEventListener('click', () => {
+                const status = document.getElementById('workflow-board-status');
+                if (status) status.textContent = `${decision} ${gate.workflowName || ''}/${gate.stepId} 中…`;
+                sendToHost({
+                    type: 'request-gate-resolve',
+                    runId: gate.runId,
+                    stepId: gate.stepId,
+                    decision,
+                });
+            });
+            return btn;
+        };
+        actions.appendChild(make('Approve', 'approve', 'primary'));
+        actions.appendChild(make('Retry', 'retry', ''));
+        actions.appendChild(make('Reject', 'reject', 'danger'));
+        card.appendChild(actions);
+    }
     return card;
+}
+
+// W-20 第二切片：把 host 推回来的 action 执行结果落到 board status，让用户知道点的动作生效了。
+function applyWorkflowActionResult(message) {
+    const status = document.getElementById('workflow-board-status');
+    if (!status) return;
+    const action = message.action || 'action';
+    const ok = message.ok === true;
+    if (!ok) {
+        const err = message.body ? `：${typeof message.body === 'string' ? message.body : JSON.stringify(message.body)}` : '';
+        status.textContent = `${action} 失败${err}`;
+        return;
+    }
+    if (action === 'launch') {
+        status.textContent = `已启动 ${message.workflow || 'workflow'}（board 已刷新）`;
+    } else if (action === 'gate-resolve') {
+        status.textContent = `已 ${message.decision || 'resolve'} ${message.stepId || 'step'}（board 已刷新）`;
+    } else {
+        status.textContent = `${action} 完成`;
+    }
 }
 
 // J-01：conversation 列表点击走事件委托，rerender 时无需 add/remove listener，

@@ -24,7 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **W-20 workflow board 视图（第一切片）**：GUI rail 增加 ◫ workflow 按钮，激活后 main 区从会话流切换到 workflow board，三列展示 daemon `/workflow/board` 的可执行 workflow / 近期 runs / 等待人工门。
   - 新增 webview ↔ host 协议 `request-workflow-board` / `workflow-board`，host 端走 [`DaemonClient.FetchWorkflowBoardJsonAsync`](packages/gui/Services/DaemonClient.cs) 拉 daemon。
   - 卡片按 run 状态（paused / failed / success / running）染色 left border，让"我现在在跑什么、在等什么"一眼能看到。
-  - 待办：从 board 直接 POST `/workflow/runs`、点 gate 跳决策抽屉、workspace 切换。
+- **W-20 workflow board 视图（第二切片）**：board 上可以直接动作，不用切回 CLI。
+  - workflow 卡片「启动」按钮 → `request-workflow-launch` → host POST `/workflow/runs`，启动后自动重拉 board。
+  - gate 卡片 Approve / Retry / Reject 三按钮 → `request-gate-resolve` → host POST `/workflow/gates/:runId/:stepId/resolve`（对应 W-32 三种决策），成功后自动重拉 board。
+  - 动作结果走 `workflow-action-result` 消息回前端，落到 board status 行。
+  - 待办：gate 决策抽屉收集 constraints / message、workspace 切换、run 卡片展开 W-31 step output 摘要。
 
 ### Positioning
 
