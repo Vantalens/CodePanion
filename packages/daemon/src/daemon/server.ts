@@ -17,13 +17,16 @@ import { isAbsolute } from 'node:path';
  *   留好）+ 配套 stdin 转发，但不在本段范围。
  */
 const STEP_OUTPUT_CHUNK_LIMIT = 4096;
+// W-31：每个 step 的整段累积输出 cap，stdout / stderr 各占一半，超过就截断并把 truncated=true 落到 stepRun.output。
+// 32KB/流足够装下大多数 provider 的一次完整响应，又不会让 WorkflowRunHistory 的 NDJSON 单行膨胀失控。
+const STEP_OUTPUT_BUFFER_LIMIT = 32 * 1024;
 
 function daemonWorkflowExecutor(
   command: string,
   args: string[],
   signal?: AbortSignal,
   onOutput?: (stream: 'stdout' | 'stderr', chunk: string, truncated: boolean) => void,
-): Promise<number> {
+): Promise<{ exitCode: number; stdout: string; stderr: string; truncated: boolean }> {
   return new Promise((resolve) => {
     const child = spawn(command, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -36,13 +39,24 @@ function daemonWorkflowExecutor(
       if (signal.aborted) onAbort();
       else signal.addEventListener('abort', onAbort, { once: true });
     }
+    // 累积 buffer 用于 W-31 落到 stepRun.output；每条流独立计 cap，命中 cap 就停止累加，
+    // 但 onOutput WS 推送 (4KB chunk) 仍继续，让 GUI 看到实时输出，仅历史持久化截断。
+    const buffers: Record<'stdout' | 'stderr', string> = { stdout: '', stderr: '' };
+    let bufferTruncated = false;
     const wireStream = (stream: 'stdout' | 'stderr', src: NodeJS.ReadableStream | null) => {
       if (!src) return;
       src.on('data', (raw: Buffer) => {
         const text = raw.toString('utf8');
         logger.debug({ command, stream, bytes: text.length }, 'workflow step output');
+        const remaining = STEP_OUTPUT_BUFFER_LIMIT - buffers[stream].length;
+        if (remaining > 0) {
+          buffers[stream] += text.length <= remaining ? text : text.slice(0, remaining);
+          if (text.length > remaining) bufferTruncated = true;
+        } else {
+          bufferTruncated = true;
+        }
         if (!onOutput) return;
-        // 截断到 4KB 防止单条 WS 帧爆掉；超长时附 truncated 标记，CLI 可显示「(truncated)」。
+        // WS chunk 仍按 4KB 截：单条帧不爆但流不停。
         const truncated = text.length > STEP_OUTPUT_CHUNK_LIMIT;
         const chunk = truncated ? text.slice(0, STEP_OUTPUT_CHUNK_LIMIT) : text;
         try { onOutput(stream, chunk, truncated); } catch (err) { logger.warn({ err }, 'step-output emit failed'); }
@@ -53,11 +67,11 @@ function daemonWorkflowExecutor(
     child.on('error', (err) => {
       logger.warn({ err, command, args }, 'workflow step spawn 失败');
       signal?.removeEventListener('abort', onAbort);
-      resolve(-1);
+      resolve({ exitCode: -1, stdout: buffers.stdout, stderr: buffers.stderr, truncated: bufferTruncated });
     });
     child.on('exit', (code) => {
       signal?.removeEventListener('abort', onAbort);
-      resolve(code ?? -1);
+      resolve({ exitCode: code ?? -1, stdout: buffers.stdout, stderr: buffers.stderr, truncated: bufferTruncated });
     });
   });
 }

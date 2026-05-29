@@ -96,6 +96,14 @@ const DefinitionStoreSchema = z.object({
   workflows: z.array(WorkflowDefinitionSchema).default([]),
 });
 
+// W-31：persist 每个 step 的 stdout/stderr 到 run 历史，方便 delivery-note 与 GUI 复盘真实 provider 返回。
+// 字段 cap 在 executor 端做（默认 32KB/流），truncated=true 时说明输出被截断；下游不需要再重复截断。
+const WorkflowStepOutputSchema = z.object({
+  stdout: z.string().default(''),
+  stderr: z.string().default(''),
+  truncated: z.boolean().default(false),
+});
+
 const WorkflowStepRunSchema = z.object({
   id: z.string(),
   tool: z.string(),
@@ -110,6 +118,7 @@ const WorkflowStepRunSchema = z.object({
   startedAt: z.number().int().optional(),
   endedAt: z.number().int().optional(),
   message: z.string().optional(),
+  output: WorkflowStepOutputSchema.optional(),
 });
 
 const WorkflowRunSchema = z.object({
@@ -144,7 +153,20 @@ export type WorkflowStep = z.infer<typeof WorkflowStepSchema>;
 export type WorkflowDefinition = z.infer<typeof WorkflowDefinitionSchema>;
 export type WorkflowStepRun = z.infer<typeof WorkflowStepRunSchema>;
 export type WorkflowRun = z.infer<typeof WorkflowRunSchema>;
+export type WorkflowStepOutput = z.infer<typeof WorkflowStepOutputSchema>;
 export type WorkflowArtifact = z.infer<typeof WorkflowArtifactSchema>;
+
+/**
+ * W-31：executor 既可以只返回 exit code（保留旧的 `Promise<number>` 写法兼容现有 PTY 等 executor），
+ * 也可以返回结构化结果带上 stdout/stderr，让 runWorkflow 把真实的 provider 输出落到 stepRun.output。
+ * 任一字段缺省时按 exit-code-only 处理。
+ */
+export type ExecutorResult = number | {
+  exitCode: number;
+  stdout?: string;
+  stderr?: string;
+  truncated?: boolean;
+};
 export type WorkflowArtifactInput = Omit<WorkflowArtifact, 'id' | 'createdAt'> & {
   id?: string;
   createdAt?: number;
@@ -485,7 +507,7 @@ export async function runWorkflow(input: {
   values?: Record<string, string>;
   dryRun?: boolean;
   yes?: boolean;
-  executor?: (command: string, args: string[]) => Promise<number>;
+  executor?: (command: string, args: string[]) => Promise<ExecutorResult>;
   templateManager?: WorkflowTemplateManager;
   hooks?: WorkflowRunHooks;
   /** 可选 artifact store：每个 step 成功或停在 checkpoint 时，按 step.artifacts 列表落一条占位 artifact。 */
@@ -604,8 +626,22 @@ export async function runWorkflow(input: {
     // onStepFinish 不会触发，GUI 看到 step 一直 running。把同步 / 异步抛错都归一化成
     // failed step，让事件总线和上层调用方拿到完整的失败语义。
     let exitCode: number;
+    let capturedOutput: WorkflowStepOutput | undefined;
     try {
-      exitCode = await executor(resolved.command, resolved.args);
+      const result = await executor(resolved.command, resolved.args);
+      // 兼容旧 `Promise<number>` executor（runWithPty）与新结构化结果（daemonWorkflowExecutor）。
+      if (typeof result === 'number') {
+        exitCode = result;
+      } else {
+        exitCode = result.exitCode;
+        if (result.stdout != null || result.stderr != null) {
+          capturedOutput = {
+            stdout: result.stdout ?? '',
+            stderr: result.stderr ?? '',
+            truncated: result.truncated ?? false,
+          };
+        }
+      }
     } catch (err) {
       stepRun.exitCode = -1;
       stepRun.endedAt = Date.now();
@@ -618,6 +654,9 @@ export async function runWorkflow(input: {
     stepRun.exitCode = exitCode;
     stepRun.endedAt = Date.now();
     stepRun.status = exitCode === 0 ? 'success' : 'failed';
+    if (capturedOutput) {
+      stepRun.output = capturedOutput;
+    }
     // 如果是因为 cancel 被打断（executor 内 child 被 SIGTERM），message 给出明确原因，
     // 方便 delivery-note / GUI 区分「执行失败」与「用户主动取消」。
     if (exitCode !== 0 && input.signal?.aborted) {
@@ -661,6 +700,17 @@ function recordDeliveryNote(store: WorkflowArtifactStore | undefined, run: Workf
     const detail = step.message ? ` :: ${step.message}` : '';
     lines.push(`- ${step.id} [${facets.join(' ')}] ${step.status}${detail}`);
   }
+  // W-31：把每个 step 真实的 stdout/stderr 头尾摘要带进 delivery-note，让续作的外部 AI 能看到上一轮 provider 返回了什么。
+  // 单 step 最多带 40 行预览（前 30 + 末 10），完整内容仍保留在 stepRun.output 里供 GUI 展开。
+  const stepsWithOutput = run.steps.filter((step) => step.output && (step.output.stdout || step.output.stderr));
+  if (stepsWithOutput.length > 0) {
+    lines.push('', '## Step output preview');
+    for (const step of stepsWithOutput) {
+      lines.push('', `### ${step.id}${step.provider && step.provider !== 'local' ? ` (${step.provider}${step.model ? `:${step.model}` : ''})` : ''}`);
+      const preview = previewStepOutput(step.output!);
+      lines.push(...preview);
+    }
+  }
   if (priorArtifacts.length > 0) {
     lines.push('', '## Artifacts');
     for (const artifact of priorArtifacts.slice().sort((a, b) => a.createdAt - b.createdAt)) {
@@ -682,6 +732,36 @@ function recordDeliveryNote(store: WorkflowArtifactStore | undefined, run: Workf
   } catch (err) {
     logger.warn({ err, runId: run.id }, 'delivery-note artifact 落条失败');
   }
+}
+
+// W-31 helper：把单 step 的 stdout/stderr 浓缩成 delivery-note 可贴的预览（fenced code block + 头尾摘要）。
+// 不返回字符串，返回行数组让上层直接 push 进 lines，避免多余拼接。
+function previewStepOutput(output: WorkflowStepOutput): string[] {
+  const PREVIEW_HEAD = 30;
+  const PREVIEW_TAIL = 10;
+  const lines: string[] = [];
+  const renderStream = (label: string, raw: string) => {
+    if (!raw) return;
+    const all = raw.split(/\r?\n/);
+    if (all[all.length - 1] === '') all.pop();
+    let preview: string[];
+    if (all.length <= PREVIEW_HEAD + PREVIEW_TAIL) {
+      preview = all;
+    } else {
+      preview = [
+        ...all.slice(0, PREVIEW_HEAD),
+        `... (${all.length - PREVIEW_HEAD - PREVIEW_TAIL} more lines elided)`,
+        ...all.slice(-PREVIEW_TAIL),
+      ];
+    }
+    lines.push('', `**${label}**`, '```', ...preview, '```');
+  };
+  renderStream('stdout', output.stdout);
+  renderStream('stderr', output.stderr);
+  if (output.truncated) {
+    lines.push('', '_(output was truncated by executor cap; full content discarded)_');
+  }
+  return lines;
 }
 
 async function invokeHook<T extends unknown[]>(

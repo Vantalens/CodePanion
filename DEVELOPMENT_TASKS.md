@@ -72,6 +72,10 @@ CodePanion 后续专注：
 
 - [x] **W-30** 支持同一模型绑定不同角色 prompt、权限和上下文策略。
 - [-] **W-31** 支持不同 provider / model 在同一 workflow 中协作。
+  - `providerInvocation` 把 step.command 包成 `codex exec` / `claude -p` / `opencode run` 调用模板
+  - `daemonWorkflowExecutor` 返回结构化结果（exitCode + stdout + stderr + truncated），由 `runWorkflow` 落到 `stepRun.output`，每流 cap 32KB
+  - delivery-note 自动带 `## Step output preview`（每流前 30 + 末 10 行），让续作的外部 AI 能看到上一轮 provider 真实返回
+  - 待办：结构化 model-event 轴（区分 thinking / tool_use / tool_result 而不仅是 raw stdout）
 - [x] **W-32** 支持人工在计划、审查、交付门中批准、拒绝、要求重试或追加约束。
   - approve：复用原 runId 从 checkpoint 之后续跑（PR #8）
   - reject：仅落 human-decision artifact，run 维持 paused
