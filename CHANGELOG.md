@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **W-20 run 详情端点**：`GET /workflow/runs/:runId?workspace=...` 返回完整 run 记录（含每个 step 的 W-31 `output` stdout/stderr）。board 只给摘要，GUI run 卡片要展开 step 输出时走这个详情端点；找不到 → 404。
+
 - **W-32 人工门完整闭环**：`/workflow/gates/:runId/:stepId/resolve` 现在三种决策都会续跑：
   - `approve` → 从 checkpoint 之后续跑（PR #8 已实现）
   - `retry` → 复用原 runId，回到 checkpoint 前最近一个 success step 重新执行；checkpoint 因 `yes:true` 自动跳过

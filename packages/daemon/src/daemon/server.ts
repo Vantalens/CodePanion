@@ -835,6 +835,22 @@ export function createServer(
       });
   };
 
+  // W-20：返回某次 run 的完整记录（含每个 step 的 W-31 output stdout/stderr）。board 只给摘要，
+  // GUI 要在 run 卡片展开 step 输出时走这个详情端点。找不到 → 404。
+  app.get('/workflow/runs/:runId', (req, res) => {
+    try {
+      const { stores } = workspaceFor(typeof req.query.workspace === 'string' ? req.query.workspace : undefined);
+      const run = stores.history.get(req.params.runId);
+      if (!run) {
+        res.status(404).json({ error: 'workflow run not found' });
+        return;
+      }
+      res.json({ run });
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message ?? 'invalid workspace' });
+    }
+  });
+
   // W-33：列出某次 workflow run 的全部 artifact（plan / patch-summary / test-result / review-report /
   // human-decision / delivery-note），供 GUI 渲染人工审核门面板和交付摘要。
   app.get('/workflow/runs/:runId/artifacts', (req, res) => {
