@@ -80,11 +80,12 @@ CodePanion 后续专注：
 ## P3：多模型与多角色执行闭环
 
 - [x] **W-30** 支持同一模型绑定不同角色 prompt、权限和上下文策略。
-- [-] **W-31** 支持不同 provider / model 在同一 workflow 中协作。
-  - `providerInvocation` 把 step.command 包成 `codex exec` / `claude -p` / `opencode run` 调用模板
-  - `daemonWorkflowExecutor` 返回结构化结果（exitCode + stdout + stderr + truncated），由 `runWorkflow` 落到 `stepRun.output`，每流 cap 32KB
-  - delivery-note 自动带 `## Step output preview`（每流前 30 + 末 10 行），让续作的外部 AI 能看到上一轮 provider 真实返回
-  - 待办：结构化 model-event 轴（区分 thinking / tool_use / tool_result 而不仅是 raw stdout）
+- [-] **W-31** 支持不同 architecture / model 在同一 workflow 中协作。
+  - **执行模型两轴化（2026-05-29 定位细化）**：step 执行 = architecture（`shell` 进程内 spawn / `agent` 进程内调模型 API）× model（config.models 的 OpenAI 兼容后端）。旧 `provider` 兼容派生（local→shell，其余→agent），`providerInvocation` 的外部 CLI 拼装已退役。
+  - slice 1 = single-call agent：组 prompt → 调一次 `/chat/completions` → 文本落 stepRun.output + WS step-output 实时推送 + delivery-note `## Step output preview`。
+  - `daemonWorkflowExecutor` 返回结构化结果（exitCode + stdout + stderr + truncated），shell/agent 两路都落 `stepRun.output`，每流 cap 32KB。
+  - config.json `models` / `defaultModel` + [modelClient.ts](packages/daemon/src/models/modelClient.ts)（内置 fetch）；daemon `agentExecutor` 解析 role/model→后端→调模型。
+  - 待办：tool-use 循环（agent 读写文件 / 跑命令 / 沙箱权限 / contextPolicy 强制）；GUI 选择 architecture/model + 编辑模型后端。
 - [x] **W-32** 支持人工在计划、审查、交付门中批准、拒绝、要求重试或追加约束。
   - approve：复用原 runId 从 checkpoint 之后续跑（PR #8）
   - reject：仅落 human-decision artifact，run 维持 paused

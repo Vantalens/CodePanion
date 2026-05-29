@@ -2,7 +2,7 @@
 
 ## 目标
 
-CodePanion 的主线是「个人 Agent AI IDE + 本地 AI 工作流控制台」：CodePanion 自身是 Agent IDE，通过逆向接口和 API 调用 Codex / Claude Code / OpenCode 等外部 AI 编程工具的能力，并在本地把这些调用编排成可审核、可归档的多步骤 workflow。用户从一个产品目标出发，在本机完成任务拆分、AI 角色分工、多模型协作、人工审核和产品产出归档。外部工具不再是被动监听对象，也不是被「派活」的接收方，而是 CodePanion 主动调用的能力源。
+CodePanion 的主线是「个人 Agent AI IDE + 本地 AI 工作流控制台」：**一切在 CodePanion 内进行**。CodePanion 自身是 Agent IDE，把 step 执行拆成两条正交轴——**architecture（进程内 agent 架构 / harness，逆向自 Claude Code 等）× model（外部 API 后端，如 DeepSeek）**——在自己进程内组合运行，而不是 shell 出去调外部 CLI 当黑盒。用户从一个产品目标出发，在本机完成任务拆分、AI 角色分工、多模型协作、人工审核和产品产出归档。外部模型只通过 API 提供智能、外部工具的架构通过逆向复刻进来——都在 CodePanion 内运行。
 
 ## 参考原则
 
@@ -91,14 +91,18 @@ CodePanion 支持两种使用方式：
 
 模型选择不应成为产品入口。用户面对的是角色和 workflow；模型只是角色配置的一部分。
 
-## 能力源边界
+## 执行模型：architecture × model 两轴
 
-Codex、Claude Code、OpenCode 和本地 CLI/PTY 都是 CodePanion 主动调用的**能力源**，统一抽象为一个 capability source：
+每个 workflow step 的执行由两条正交轴决定：
 
-- `capability source`：CodePanion 通过逆向接口 / API / CLI / SDK 调用的外部能力，能完成某个 workflow 节点，例如运行编码任务、测试命令或文档生成。
-- CodePanion 是调用方，能力源是被调用方；workflow 角色与能力源的绑定描述「这个角色会调用谁」，而不是「这个角色把任务派给谁」。
+- **architecture（harness，进程内）**：
+  - `shell`：在本机 spawn `step.command/args`，用于跑测试、本地命令等非 AI 步骤。
+  - `agent`：CodePanion 进程内的 agent 运行时把 step 组成 prompt 交给模型 API 完成。**slice 1 = single-call**（组 prompt → 调一次 `/chat/completions` → 捕获返回文本为 output/artifact）；后续会长出 tool-use 循环（读写文件 / 跑命令 / 沙箱权限）。架构思路逆向自 Claude Code 等，但**在 CodePanion 进程内复刻**，不 shell 外部 CLI。
+- **model（API 后端）**：`config.json` 的 `models[<id>]`（OpenAI 兼容，如 DeepSeek）。step 用哪个由 `step.model → role 绑定.model → defaultModel` 中第一个能命中的决定。key 存 config.json（0600 保护）。
 
-上下文输入不独立成为监听来源。用户可以手动选择文件、目录、历史记录或诊断文本交给 workflow，但 CodePanion 不主动监听外部窗口，也不读取闭源工具的私有存储或登录态。任何写回、命令执行或跨工具调用都必须是用户显式授权的能力源调用。
+兼容：历史 `provider` 字段保留——`local→shell`，`codex/claude-code/opencode→agent`（旧语义是 shell 出去调该 CLI，现统一为进程内 agent，harness 风格差异靠 role/system-prompt 区分）。
+
+上下文输入不独立成为监听来源。用户可以手动选择文件、目录、历史记录或诊断文本交给 workflow，但 CodePanion 不主动监听外部窗口，也不读取闭源工具的私有存储或登录态。模型只通过 API 调用、用用户自己的 key。
 
 ## GUI 形态
 

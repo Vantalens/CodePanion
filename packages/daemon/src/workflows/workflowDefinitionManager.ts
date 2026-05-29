@@ -37,12 +37,20 @@ const PARAM_NAME_RE = /^[A-Za-z_][A-Za-z0-9_-]*$/;
 
 const WorkflowPermissionSchema = z.enum(['read', 'write', 'command', 'network', 'delegate', 'approve']);
 
-// W-31：内置 provider，决定 step.command 怎么被实际拼成 CLI invocation。
-// - local: 完全保持 step.command/args 不变（向后兼容当前所有 workflow）
-// - codex / claude-code / opencode: step.command 当 prompt 文本，daemon 用对应 CLI 模板包装
+// 历史字段 provider：保留用于解析旧 workflows.json，但执行模型已两轴化（见下 architecture）。
+// - local: 进程内不调模型，spawn 本地命令（shell 架构）
+// - codex / claude-code / opencode: 旧语义是 shell 出去调对应 CLI；现统一映射到进程内 agent 架构。
 export const WORKFLOW_PROVIDERS = ['local', 'codex', 'claude-code', 'opencode'] as const;
 const WorkflowProviderSchema = z.enum(WORKFLOW_PROVIDERS);
 export type WorkflowProvider = z.infer<typeof WorkflowProviderSchema>;
+
+// 执行模型两轴重构（2026-05-29）：step 的执行架构（harness），与 model（API 后端）正交。
+// - shell: 在本机 spawn step.command/args（跑测试、本地命令等非 AI 步骤）。
+// - agent: 进程内把 prompt 交给模型 API 完成（CodePanion 自己的 agent 运行时，slice 1 = single-call）。
+// architecture 缺省时由 provider 派生：local→shell，其余→agent（见 resolveStepArchitecture）。
+export const WORKFLOW_ARCHITECTURES = ['shell', 'agent'] as const;
+const WorkflowArchitectureSchema = z.enum(WORKFLOW_ARCHITECTURES);
+export type WorkflowArchitecture = z.infer<typeof WorkflowArchitectureSchema>;
 
 // step.artifacts 是该 step 完成后会产出的 artifact 类型列表，类型与 WorkflowArtifactSchema.type 共享 enum，
 // runWorkflow 完成 step 后会按这个清单往 artifactStore 落占位条目。
@@ -70,6 +78,8 @@ const WorkflowStepSchema = z.object({
   role: z.string().min(1).max(80).regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*$/).optional(),
   model: z.string().min(1).max(120).optional(),
   provider: WorkflowProviderSchema.default('local'),
+  // 执行架构（harness）。缺省 → 由 provider 派生（见 resolveStepArchitecture）。
+  architecture: WorkflowArchitectureSchema.optional(),
   permissions: z.array(WorkflowPermissionSchema).default([]),
   contextPolicy: WorkflowContextPolicySchema,
   humanGate: z.string().min(1).max(80).regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*$/).optional(),
@@ -110,6 +120,7 @@ const WorkflowStepRunSchema = z.object({
   role: z.string().optional(),
   model: z.string().optional(),
   provider: WorkflowProviderSchema.optional(),
+  architecture: WorkflowArchitectureSchema.optional(),
   artifacts: z.array(z.string()).default([]),
   status: z.enum(['pending', 'running', 'success', 'failed', 'skipped', 'checkpoint']),
   command: z.string().optional(),
@@ -167,6 +178,25 @@ export type ExecutorResult = number | {
   stderr?: string;
   truncated?: boolean;
 };
+
+// 执行模型两轴重构：architecture=agent 的 step 走 agentExecutor 而非 shell executor。
+// runWorkflow 把 step 渲染成这个请求交给注入的 agentExecutor（daemon 端解析 role/model→后端→调 modelClient）。
+// runWorkflow 自身保持纯净（不读 config / 不连网 / 不读 workspace）。
+export type AgentStepRequest = {
+  runId: string;
+  stepId: string;
+  role?: string;
+  model?: string;
+  prompt: string;
+  values: Record<string, string>;
+};
+export type AgentExecutor = (req: AgentStepRequest) => Promise<ExecutorResult>;
+
+// 由 step 解析执行架构：显式 architecture 优先，否则从历史 provider 派生（local→shell，其余→agent）。
+export function resolveStepArchitecture(step: Pick<WorkflowStep, 'architecture' | 'provider'>): WorkflowArchitecture {
+  if (step.architecture) return step.architecture;
+  return (step.provider ?? 'local') === 'local' ? 'shell' : 'agent';
+}
 export type WorkflowArtifactInput = Omit<WorkflowArtifact, 'id' | 'createdAt'> & {
   id?: string;
   createdAt?: number;
@@ -466,6 +496,7 @@ export function parseWorkflowStep(entry: string): WorkflowStep {
     role: fields.role || undefined,
     model: fields.model || undefined,
     provider: fields.provider || 'local',
+    architecture: fields.architecture || undefined,
     permissions: fields.permissions ? splitList(fields.permissions) : [],
     contextPolicy: parseContextPolicy(fields),
     humanGate: fields.humanGate || undefined,
@@ -508,6 +539,8 @@ export async function runWorkflow(input: {
   dryRun?: boolean;
   yes?: boolean;
   executor?: (command: string, args: string[]) => Promise<ExecutorResult>;
+  /** architecture=agent 的 step 走这里（进程内调模型 API）。缺省时 agent step 归一成 failed。 */
+  agentExecutor?: AgentExecutor;
   templateManager?: WorkflowTemplateManager;
   hooks?: WorkflowRunHooks;
   /** 可选 artifact store：每个 step 成功或停在 checkpoint 时，按 step.artifacts 列表落一条占位 artifact。 */
@@ -588,14 +621,29 @@ export async function runWorkflow(input: {
       break;
     }
 
-    const resolved = resolveWorkflowStep(step, run.values, templateManager);
+    // 执行模型两轴：先定架构，再据此渲染——shell 渲染 command/args；agent 渲染 prompt。
+    const architecture = resolveStepArchitecture(step);
+    let resolvedCommand: string;
+    let resolvedArgs: string[];
+    let agentPrompt: string | undefined;
+    if (architecture === 'agent') {
+      agentPrompt = buildAgentPrompt(step, run.values, templateManager);
+      // 对 agent step，command 字段记录"发给模型的 prompt"，args 为空——和 shell 的 command/args 语义对齐供时间线展示。
+      resolvedCommand = agentPrompt;
+      resolvedArgs = [];
+    } else {
+      const resolved = resolveWorkflowStep(step, run.values, templateManager);
+      resolvedCommand = resolved.command;
+      resolvedArgs = resolved.args;
+    }
+
     if (step.checkpoint && !input.yes) {
       run.status = 'paused';
       const checkpointStep: WorkflowStepRun = {
         ...stepMetaFrom(step),
         status: 'checkpoint',
-        command: resolved.command,
-        args: resolved.args,
+        command: resolvedCommand,
+        args: resolvedArgs,
         message: 'manual checkpoint required; rerun with --yes to continue',
       };
       run.steps.push(checkpointStep);
@@ -608,8 +656,8 @@ export async function runWorkflow(input: {
     const stepRun: WorkflowStepRun = {
       ...stepMetaFrom(step),
       status: input.dryRun ? 'success' : 'running',
-      command: resolved.command,
-      args: resolved.args,
+      command: resolvedCommand,
+      args: resolvedArgs,
       startedAt: Date.now(),
     };
     run.steps.push(stepRun);
@@ -628,8 +676,25 @@ export async function runWorkflow(input: {
     let exitCode: number;
     let capturedOutput: WorkflowStepOutput | undefined;
     try {
-      const result = await executor(resolved.command, resolved.args);
-      // 兼容旧 `Promise<number>` executor（runWithPty）与新结构化结果（daemonWorkflowExecutor）。
+      let result: ExecutorResult;
+      if (architecture === 'agent') {
+        if (!input.agentExecutor) {
+          // 没注入 agentExecutor（例如未配置模型后端）→ 归一成 failed，不抛崩。
+          result = { exitCode: 1, stdout: '', stderr: 'architecture=agent 需要模型后端：daemon 未注入 agentExecutor（请在 config.json 配置 models / defaultModel）' };
+        } else {
+          result = await input.agentExecutor({
+            runId: run.id,
+            stepId: step.id,
+            role: step.role,
+            model: step.model,
+            prompt: agentPrompt ?? '',
+            values: run.values,
+          });
+        }
+      } else {
+        result = await executor(resolvedCommand, resolvedArgs);
+      }
+      // 兼容旧 `Promise<number>` executor（runWithPty）与新结构化结果（daemonWorkflowExecutor / agentExecutor）。
       if (typeof result === 'number') {
         exitCode = result;
       } else {
@@ -777,60 +842,38 @@ async function invokeHook<T extends unknown[]>(
   }
 }
 
+// shell 架构：渲染出真正要 spawn 的 command/args（template 或 command 路径，模板变量替换）。
+// 执行模型两轴重构后不再做 provider→CLI 包装（旧的 codex exec / claude -p / opencode run 已退役）。
 export function resolveWorkflowStep(
   step: WorkflowStep,
   values: Record<string, string>,
   templateManager = new WorkflowTemplateManager(),
 ): { command: string; args: string[] } {
-  let base: { command: string; args: string[] };
   if (step.template) {
     const templateValues = renderValues(step.values, values);
     const resolved = templateManager.resolve(step.template, { ...values, ...templateValues });
-    base = {
+    return {
       command: render(resolved.command, values),
       args: resolved.args.map((arg) => render(arg, values)),
     };
-  } else {
-    if (!step.command) throw new Error(`workflow step ${step.id} requires command or template`);
-    base = {
-      command: render(step.command, values),
-      args: step.args.map((arg) => render(arg, values)),
-    };
   }
-  return providerInvocation(step.provider ?? 'local', step.model, base);
+  if (!step.command) throw new Error(`workflow step ${step.id} requires command or template`);
+  return {
+    command: render(step.command, values),
+    args: step.args.map((arg) => render(arg, values)),
+  };
 }
 
-/**
- * W-31：按 provider 把 step 的 base invocation 包装成对应 CLI 调用。
- *
- * - local: base 原样返回（向后兼容所有不带 provider 字段的 workflow）
- * - codex: `codex exec [--model M] [<base-args>...] <base-command-as-prompt>`
- *   step.command 视为给 codex 的 prompt 文本；step.args 透传给 codex（用户可以塞 `--cwd` 等）
- * - claude-code: `claude -p <prompt> [<base-args>...] [--model M]`
- * - opencode: `opencode run [<base-args>...] [--model M] <prompt>`
- *
- * 这套模板是各 CLI 当前文档中的常见调用形态；用户后续若要换模板，可以走 step.template 走通用路径。
- */
-function providerInvocation(
-  provider: WorkflowProvider,
-  model: string | undefined,
-  base: { command: string; args: string[] },
-): { command: string; args: string[] } {
-  if (provider === 'local') return base;
-  const prompt = base.command;
-  if (!prompt) {
-    // template 分支也可能落到这里，但 template.command 始终非空，仅 paranoia
-    throw new Error(`provider ${provider} requires a non-empty step command/prompt`);
-  }
-  const modelFlag = model ? ['--model', model] : [];
-  switch (provider) {
-    case 'codex':
-      return { command: 'codex', args: ['exec', ...modelFlag, ...base.args, prompt] };
-    case 'claude-code':
-      return { command: 'claude', args: ['-p', prompt, ...base.args, ...modelFlag] };
-    case 'opencode':
-      return { command: 'opencode', args: ['run', ...modelFlag, ...base.args, prompt] };
-  }
+// agent 架构：把 step 渲染成发给模型的 user prompt 文本。
+// 复用 resolveWorkflowStep 的 template/command 渲染：command（或 template 渲染出的 command）即 prompt 主体，
+// 若带 args 则附在后面（便于把片段拼进 prompt）。slice 1 只取文本，不拼 CLI。
+export function buildAgentPrompt(
+  step: WorkflowStep,
+  values: Record<string, string>,
+  templateManager = new WorkflowTemplateManager(),
+): string {
+  const base = resolveWorkflowStep(step, values, templateManager);
+  return base.args.length > 0 ? `${base.command} ${base.args.join(' ')}` : base.command;
 }
 
 function validateWorkflow(workflow: WorkflowDefinition): void {
@@ -859,13 +902,14 @@ function splitList(value: string): string[] {
   return value.split(',').map((item) => item.trim()).filter(Boolean);
 }
 
-function stepMetaFrom(step: WorkflowStep): Pick<WorkflowStepRun, 'id' | 'tool' | 'role' | 'model' | 'provider' | 'artifacts'> {
+function stepMetaFrom(step: WorkflowStep): Pick<WorkflowStepRun, 'id' | 'tool' | 'role' | 'model' | 'provider' | 'architecture' | 'artifacts'> {
   return {
     id: step.id,
     tool: step.tool,
     role: step.role,
     model: step.model,
     provider: step.provider,
+    architecture: resolveStepArchitecture(step),
     artifacts: step.artifacts,
   };
 }

@@ -11,6 +11,8 @@ import {
   parseWorkflowStep,
   parseWorkflowSteps,
   resolveWorkflowStep,
+  resolveStepArchitecture,
+  buildAgentPrompt,
   runWorkflow,
 } from '../dist/workflows/workflowDefinitionManager.js';
 import { WorkflowTemplateManager } from '../dist/workflows/templateManager.js';
@@ -63,40 +65,27 @@ test('W-31: parseWorkflowStep 识别 provider 字段，未指定时默认 local'
   assert.throws(() => parseWorkflowStep('id=plan;provider=mystery;command=noop'));
 });
 
-test('W-31: resolveWorkflowStep 按 provider 把 step.command 包装为 CLI invocation', () => {
+test('执行模型两轴：shell 渲染 command/args；agent 渲染 prompt（不再拼外部 CLI）', () => {
+  // shell：command/args 原样渲染（模板变量替换），不做任何 CLI 包装。
   const local = resolveWorkflowStep(
     parseWorkflowStep('id=plan;command=echo;args=hi,there'),
     {},
   );
   assert.deepEqual(local, { command: 'echo', args: ['hi', 'there'] });
 
-  const codex = resolveWorkflowStep(
-    parseWorkflowStep('id=plan;provider=codex;model=gpt-5-codex;command=Plan refactor;args=--cwd,.'),
-    {},
-  );
-  assert.equal(codex.command, 'codex');
-  assert.deepEqual(codex.args, ['exec', '--model', 'gpt-5-codex', '--cwd', '.', 'Plan refactor']);
+  // 旧的 provider=codex/claude/opencode 现在派生为 agent 架构：不再 spawn 外部 CLI，
+  // buildAgentPrompt 把 command（+args）渲染成发给模型的 prompt 文本。
+  const codexStep = parseWorkflowStep('id=plan;provider=codex;command=Plan refactor;args=--cwd,.');
+  assert.equal(resolveStepArchitecture(codexStep), 'agent');
+  assert.equal(buildAgentPrompt(codexStep, {}), 'Plan refactor --cwd .');
 
-  const claude = resolveWorkflowStep(
-    parseWorkflowStep('id=build;provider=claude-code;model=claude-sonnet-4-6;command=Implement the plan'),
-    {},
-  );
-  assert.equal(claude.command, 'claude');
-  assert.deepEqual(claude.args, ['-p', 'Implement the plan', '--model', 'claude-sonnet-4-6']);
+  const claudeStep = parseWorkflowStep('id=build;provider=claude-code;command=Implement the plan');
+  assert.equal(resolveStepArchitecture(claudeStep), 'agent');
+  assert.equal(buildAgentPrompt(claudeStep, {}), 'Implement the plan');
 
-  const opencode = resolveWorkflowStep(
-    parseWorkflowStep('id=review;provider=opencode;command=Review diff'),
-    {},
-  );
-  assert.equal(opencode.command, 'opencode');
-  assert.deepEqual(opencode.args, ['run', 'Review diff']);
-
-  // 渲染 {var} 占位再喂给 provider：confirm prompt 包含已替换的变量。
-  const rendered = resolveWorkflowStep(
-    parseWorkflowStep('id=plan;provider=codex;command=Plan {target}'),
-    { target: 'packages/daemon' },
-  );
-  assert.equal(rendered.args.at(-1), 'Plan packages/daemon');
+  // {var} 占位在 prompt 里被替换。
+  const rendered = parseWorkflowStep('id=plan;architecture=agent;command=Plan {target}');
+  assert.equal(buildAgentPrompt(rendered, { target: 'packages/daemon' }), 'Plan packages/daemon');
 });
 
 test('parseWorkflowStep rejects contextInclude/exclude with traversal or absolute paths', () => {
@@ -220,9 +209,11 @@ test('W-31+W-33: delivery-note 标注每步 provider / role / model，并把 fil
       });
       assert.ok(planArtifact);
 
+      // provider=claude-code/codex 现派生为 agent 架构 → 注入 fake agentExecutor 让其成功（不打网络）。
       const run = await runWorkflow({
         workflow,
         executor: async () => 0,
+        agentExecutor: async () => ({ exitCode: 0, stdout: 'ok', stderr: '', truncated: false }),
         artifactStore: store,
       });
       assert.equal(run.status, 'success');
