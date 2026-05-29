@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **W-32 人工门完整闭环**：`/workflow/gates/:runId/:stepId/resolve` 现在三种决策都会续跑：
+  - `approve` → 从 checkpoint 之后续跑（PR #8 已实现）
+  - `retry` → 复用原 runId，回到 checkpoint 前最近一个 success step 重新执行；checkpoint 因 `yes:true` 自动跳过
+  - `reject` → 不续跑，仅落 human-decision artifact
+  - 任何决策都可携带 `constraints` 列表，会作为 `constraints` 字段并入 resumed run 的 values，后续 step 可通过 `{constraints}` 模板引用
+
 ### Positioning
 
 - 产品定位明确为「个人 Agent AI IDE + AI 工作流控制台」双重身份：CodePanion 自身是 Agent IDE，通过逆向接口和 API 主动调用 Codex / Claude Code / OpenCode 等外部 AI 编程工具的能力作为可编排能力源（不是把任务派给它们，也不是被动监听它们）。同步更新 README、POSITIONING、PRODUCT_ROADMAP、LOCAL_AI_WORKFLOW、DEVELOPMENT_TASKS。
