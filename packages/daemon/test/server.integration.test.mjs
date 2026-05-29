@@ -2090,21 +2090,21 @@ test('W-32 approve 触发 daemon 续跑，观察者通过 WS 收到 workflow-run
         assert.equal(resolved.status, 200);
         assert.equal(resolved.body.resumed, true);
 
+        // Codex P1 修复后续跑复用原 runId，不再创建新 run。run-start 事件带的就是原 runId。
         const runStart = await wait(
           (m) => m.type === 'workflow-run-event' && m.event?.action === 'run-start' && m.event?.workflowName === 'resume-ws',
           5000,
         );
-        const newRunId = runStart.event.runId;
-        assert.notEqual(newRunId, runId);
+        assert.equal(runStart.event.runId, runId);
 
         const stepFinish = await wait(
-          (m) => m.type === 'workflow-run-event' && m.event?.action === 'step-finish' && m.event?.runId === newRunId && m.event?.stepId === 'publish',
+          (m) => m.type === 'workflow-run-event' && m.event?.action === 'step-finish' && m.event?.runId === runId && m.event?.stepId === 'publish',
           5000,
         );
         assert.equal(stepFinish.event.status, 'success');
 
         const runFinish = await wait(
-          (m) => m.type === 'workflow-run-event' && m.event?.action === 'run-finish' && m.event?.runId === newRunId,
+          (m) => m.type === 'workflow-run-event' && m.event?.action === 'run-finish' && m.event?.runId === runId,
           5000,
         );
         assert.equal(runFinish.event.status, 'success');
@@ -2124,7 +2124,7 @@ test('W-32 approve 触发 daemon 续跑，观察者通过 WS 收到 workflow-run
   }
 });
 
-test('W-32 approve 在 daemon 内续跑同 workflow，落 newRun + delivery-note', async () => {
+test('W-32 approve 在原 runId 上从 checkpoint 续跑同 workflow，落 delivery-note', async () => {
   const {
     WorkflowDefinitionManager,
     WorkflowRunHistory,
@@ -2182,21 +2182,22 @@ test('W-32 approve 在 daemon 内续跑同 workflow，落 newRun + delivery-note
       assert.equal(resolved.body.resumed, true);
       assert.equal(resolved.body.artifact.type, 'human-decision');
 
-      // 等续跑完成（daemon 内 fire-and-forget），通过轮询 history 兜底。
+      // 续跑复用原 runId（Codex P1 修复）：从 checkpoint 之后开始跑，前面的 success step 不重跑。
+      // history 写入时 WorkflowRunHistory.append 会用同 id 覆盖原 paused 条目。
       const deadline = Date.now() + 5000;
       let resumed;
       while (Date.now() < deadline) {
         const runs = new WorkflowRunHistory().list();
-        resumed = runs.find((entry) => entry.id !== runId && entry.workflowName === 'resume-target');
-        if (resumed) break;
+        resumed = runs.find((entry) => entry.id === runId);
+        if (resumed && resumed.status !== 'paused') break;
         await new Promise((r) => setTimeout(r, 80));
       }
-      assert.ok(resumed, '续跑 run 应当被 daemon 写入历史');
-      assert.equal(resumed.status, 'success', `续跑 run 应当成功，实际 status=${resumed?.status}`);
-      // delivery-note 由 runWorkflow 自动落，artifact list 至少含 1 条 delivery-note。
+      assert.ok(resumed, '续跑应当覆盖原 paused 历史条目');
+      assert.equal(resumed.status, 'success', `续跑应当成功，实际 status=${resumed?.status}`);
+      // delivery-note 由 runWorkflow 自动落到同一 runId 上。
       const store = new WorkflowArtifactStore();
-      const newArtifacts = store.list(resumed.id);
-      assert.ok(newArtifacts.some((entry) => entry.type === 'delivery-note'));
+      const allArtifacts = store.list(runId);
+      assert.ok(allArtifacts.some((entry) => entry.type === 'delivery-note'));
     });
   } finally {
     if (prev.workflowEnv === undefined) delete process.env.CODEPANION_WORKFLOW_PATH;

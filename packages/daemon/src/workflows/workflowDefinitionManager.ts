@@ -492,10 +492,19 @@ export async function runWorkflow(input: {
   artifactStore?: WorkflowArtifactStore;
   /** 可选 AbortSignal：触发后当前 step 由 executor 自行中断，外层在 step 之间发现 abort 也会立刻收尾。 */
   signal?: AbortSignal;
+  /** 续跑入口：从 paused checkpoint 恢复时，把前序 step 状态带进来，复用原 runId/startedAt，
+   *  从 stepId 开始重新执行该 checkpoint step，前面的 success step 不重跑。 */
+  resumeFrom?: {
+    runId: string;
+    stepId: string;
+    previousSteps: WorkflowStepRun[];
+    startedAt: number;
+  };
 }): Promise<WorkflowRun> {
-  const startedAt = Date.now();
+  const resumeFrom = input.resumeFrom;
+  const startedAt = resumeFrom?.startedAt ?? Date.now();
   const run: WorkflowRun = {
-    id: `run-${startedAt}-${Math.random().toString(16).slice(2, 10)}`,
+    id: resumeFrom?.runId ?? `run-${startedAt}-${Math.random().toString(16).slice(2, 10)}`,
     workflowName: input.workflow.name,
     status: input.dryRun ? 'dry-run' : 'success',
     values: { ...input.workflow.params, ...(input.values ?? {}) },
@@ -509,8 +518,27 @@ export async function runWorkflow(input: {
   const hooks = input.hooks ?? {};
   const successful = new Set<string>();
 
+  // 续跑时先把已成功 step 灌进 run.steps 和 successful set，让 dependsOn 不会误报缺失；
+  // 检查点步骤本身不带进来，由下面的循环重新执行。
+  if (resumeFrom) {
+    for (const prev of resumeFrom.previousSteps) {
+      if (prev.id === resumeFrom.stepId) break;
+      run.steps.push(prev);
+      if (prev.status === 'success') successful.add(prev.id);
+    }
+  }
+
   await invokeHook(hooks.onWorkflowStart, run);
+  let resumeReached = !resumeFrom;
   for (const step of input.workflow.steps) {
+    // 续跑模式下，到达 resumeFrom.stepId 之前的 step 全部跳过（已在 previousSteps 里灌好状态）。
+    if (!resumeReached) {
+      if (step.id === resumeFrom!.stepId) {
+        resumeReached = true;
+      } else {
+        continue;
+      }
+    }
     // signal 在 step 之间检查：如果用户/上层取消，立刻收尾，留一条标记 cancelled 的 stepRun。
     if (input.signal?.aborted) {
       run.status = 'failed';

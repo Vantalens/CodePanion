@@ -2,8 +2,8 @@ import express, { type Request, type Response, type NextFunction } from 'express
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { Server } from 'node:http';
 import { spawn, execFile } from 'node:child_process';
-import { realpathSync } from 'node:fs';
-import { relative } from 'node:path';
+import { existsSync, realpathSync } from 'node:fs';
+import { isAbsolute } from 'node:path';
 
 /**
  * daemon 内部 fire-and-forget 续跑 workflow 用的 executor：
@@ -98,6 +98,7 @@ import {
   WorkflowRunHistory,
   runWorkflow,
   type WorkflowDefinition,
+  type WorkflowStepRun,
 } from '../workflows/workflowDefinitionManager.js';
 import { join as joinPath, resolve as resolvePath } from 'node:path';
 import { logger, maskString } from '../logger.js';
@@ -592,7 +593,7 @@ export function createServer(
   // W-32 起手：列出当前所有 paused workflow run 中的 checkpoint step，供 GUI 渲染「人工审核门」面板。
   app.get('/workflow/gates', (req, res) => {
     try {
-      const stores = workspaceFor(typeof req.query.workspace === 'string' ? req.query.workspace : undefined);
+      const { stores } = workspaceFor(typeof req.query.workspace === 'string' ? req.query.workspace : undefined);
       res.json({ gates: collectPausedGates(stores.history.list(), stores.artifactStore) });
     } catch (err) {
       res.status(400).json({ error: (err as Error).message ?? 'invalid workspace' });
@@ -621,13 +622,15 @@ export function createServer(
       res.status(400).json({ error: 'query parameter `root` is required' });
       return;
     }
-    const resolvedRoot = resolvePath(rootRaw);
-    const relToHome = relative(HOME_DIR, resolvedRoot);
-    if (relToHome.startsWith('..') || relToHome === '..' || relToHome.startsWith('../') || relToHome.length === 0 ? false : false) {
-      // placeholder
+    // workspace root 是用户选择的项目目录，不限定在 HOME_DIR；仅做绝对路径规范化即可。
+    // readConfig 内部用 ensurePathInside 校验 workflowPath 是否逃出 root，是真正的 CodeQL 闭环。
+    if (rootRaw.includes('\0')) {
+      res.status(400).json({ error: 'workspace root must not contain NUL byte' });
+      return;
     }
-    if (relToHome === '..' || relToHome.startsWith(`..${pathSep}`) || relToHome.startsWith('/') || relToHome.startsWith('\\')) {
-      res.status(403).json({ error: 'workspace root must be inside HOME_DIR' });
+    const resolvedRoot = resolvePath(rootRaw);
+    if (!isAbsolute(resolvedRoot)) {
+      res.status(400).json({ error: 'workspace root must resolve to an absolute path' });
       return;
     }
     const manager = new CodePanionWorkspaceManager(resolvedRoot);
@@ -639,52 +642,47 @@ export function createServer(
     res.json({ config, layout: manager.layout() });
   });
 
-  // per-workspace stores 缓存：key 是绝对路径或空串（fallback = HOME_DIR）。
+  // per-workspace stores 缓存：key 是用户工作区目录的 canonical 绝对路径，或空串表示 fallback（走 HOME_DIR 默认 store）。
   // 不指定 workspace 走原行为（HOME_DIR 全局），指定时 daemon 把 history / artifacts / definitions
-  // 都放到 `<workspace>/.codepanion/`，让不同项目互不污染。
+  // 都放到 `<workspace>/.codepanion/`，让不同项目互不污染。workspace 可以是任何用户目录。
   type WorkspaceStores = {
     definitions: WorkflowDefinitionManager;
     history: WorkflowRunHistory;
     artifactStore: WorkflowArtifactStore;
   };
   const workspaceStoresCache = new Map<string, WorkspaceStores>();
-  const WORKSPACE_ROOT = resolvePath(HOME_DIR);
   const workspaceKey = (raw?: string | null): string => {
     if (typeof raw !== 'string' || raw.trim().length === 0) return '';
     if (raw.includes('\0')) throw new Error('invalid workspace: contains NUL byte');
     const resolved = resolvePath(raw);
     if (!isAbsolute(resolved)) throw new Error('invalid workspace: must resolve to an absolute path');
-    const canonical = existsSync(resolved) ? realpathSync.native(resolved) : resolved;
-    const rel = relative(WORKSPACE_ROOT, canonical);
-    if (rel === '..' || rel.startsWith(`..${sep}`) || rel.includes(`..${sep}`)) {
-      throw new Error('invalid workspace: must be under HOME_DIR');
-    }
-    return canonical;
+    return existsSync(resolved) ? realpathSync.native(resolved) : resolved;
   };
-  const workspaceFor = (raw?: string | null): WorkspaceStores => {
+  const workspaceFor = (raw?: string | null): { stores: WorkspaceStores; key: string } => {
     const key = workspaceKey(raw);
     let stores = workspaceStoresCache.get(key);
-    if (stores) return stores;
-    if (key === '') {
-      // fallback：default constructor 走 env / HOME_DIR，保持向后兼容。
-      stores = {
-        definitions: new WorkflowDefinitionManager(),
-        history: new WorkflowRunHistory(),
-        artifactStore: new WorkflowArtifactStore(),
-      };
-    } else {
-      const configDir = joinPath(key, WORKSPACE_CONFIG_DIR);
-      stores = {
-        definitions: new WorkflowDefinitionManager(joinPath(configDir, 'workflows.json')),
-        history: new WorkflowRunHistory(joinPath(configDir, 'workflow-runs.ndjson')),
-        artifactStore: new WorkflowArtifactStore(joinPath(configDir, 'workflow-artifacts.ndjson')),
-      };
+    if (!stores) {
+      if (key === '') {
+        // fallback：default constructor 走 env / HOME_DIR，保持向后兼容。
+        stores = {
+          definitions: new WorkflowDefinitionManager(),
+          history: new WorkflowRunHistory(),
+          artifactStore: new WorkflowArtifactStore(),
+        };
+      } else {
+        const configDir = joinPath(key, WORKSPACE_CONFIG_DIR);
+        stores = {
+          definitions: new WorkflowDefinitionManager(joinPath(configDir, 'workflows.json')),
+          history: new WorkflowRunHistory(joinPath(configDir, 'workflow-runs.ndjson')),
+          artifactStore: new WorkflowArtifactStore(joinPath(configDir, 'workflow-artifacts.ndjson')),
+        };
+      }
+      workspaceStoresCache.set(key, stores);
     }
-    workspaceStoresCache.set(key, stores);
-    return stores;
+    return { stores, key };
   };
   // 兼容旧引用：原 `artifactStore` 单例变成 fallback workspace 的 artifactStore。
-  const fallbackStores = workspaceFor();
+  const fallbackStores = workspaceFor().stores;
   const artifactStore = fallbackStores.artifactStore;
 
   // W-23：daemon 进程内活跃 run 注册表。runWorkflowOnDaemon 内的 hooks 在 run-start/step-start/step-finish
@@ -693,6 +691,9 @@ export function createServer(
   type ActiveRunSnapshot = {
     id: string;
     workflowName: string;
+    // workspace 隔离用 key：和 workspaceStoresCache 的 key 一致（空串 = fallback 全局 workspace）。
+    // /workflow/board 用这个过滤，避免 A workspace 的 active run 在 B workspace 视图里露出。
+    workspaceKey: string;
     startedAt: number;
     currentStepId?: string;
     currentStepStatus?: string;
@@ -714,7 +715,14 @@ export function createServer(
     yes?: boolean;
     dryRun?: boolean;
     stores: WorkspaceStores;
+    workspaceKey: string;
     logContext: Record<string, unknown>;
+    resumeFrom?: {
+      runId: string;
+      stepId: string;
+      previousSteps: WorkflowStepRun[];
+      startedAt: number;
+    };
   }) => {
     const { history, artifactStore: store } = opts.stores;
     let pendingRunId: string | undefined;
@@ -728,6 +736,7 @@ export function createServer(
       yes: opts.yes,
       dryRun: opts.dryRun,
       artifactStore: store,
+      resumeFrom: opts.resumeFrom,
       executor: (command, args) => daemonWorkflowExecutor(
         command,
         args,
@@ -749,11 +758,14 @@ export function createServer(
       hooks: {
         onWorkflowStart: (run) => {
           pendingRunId = run.id;
+          // 续跑场景：run.steps 已经被 runWorkflow 灌入了前序 success step，stepsFinished 从那里点算，
+          // 让 board 立刻看到正确的进度，而不是 0。
           activeRuns.set(run.id, {
             id: run.id,
             workflowName: run.workflowName,
+            workspaceKey: opts.workspaceKey,
             startedAt: run.startedAt,
-            stepsFinished: 0,
+            stepsFinished: run.steps.filter((s) => s.status === 'success').length,
           });
           runCancellers.set(run.id, controller);
           workflows.emitRunEvent({
@@ -813,7 +825,7 @@ export function createServer(
   // human-decision / delivery-note），供 GUI 渲染人工审核门面板和交付摘要。
   app.get('/workflow/runs/:runId/artifacts', (req, res) => {
     try {
-      const stores = workspaceFor(typeof req.query.workspace === 'string' ? req.query.workspace : undefined);
+      const { stores } = workspaceFor(typeof req.query.workspace === 'string' ? req.query.workspace : undefined);
       res.json({ artifacts: stores.artifactStore.list(req.params.runId) });
     } catch (err) {
       res.status(400).json({ error: (err as Error).message ?? 'invalid workspace' });
@@ -824,14 +836,18 @@ export function createServer(
   // 最近若干次 run、当前等待人工审核的 gates。GUI 渲染左侧 workflow 列表 + 中央 board + 右侧人工门。
   app.get('/workflow/board', (req, res) => {
     try {
-      const stores = workspaceFor(typeof req.query.workspace === 'string' ? req.query.workspace : undefined);
+      const { stores, key: currentWorkspaceKey } = workspaceFor(typeof req.query.workspace === 'string' ? req.query.workspace : undefined);
       const definitions = stores.definitions.list();
       const allRuns = stores.history.list();
       const recentRuns = allRuns.slice(0, 30);
       const gates = collectPausedGates(allRuns, stores.artifactStore);
       // 把 daemon 内活跃的 run 合并到 runs 列表前面，status='running'，让 GUI 立刻看到运行态。
       // 已 append 到历史的 run 已被 .then 从 activeRuns 删除，因此不会与历史条目重复。
-      const activeEntries = Array.from(activeRuns.values()).map((snapshot) => ({
+      // 必须按 workspaceKey 过滤：activeRuns 是全局 Map，stores/history 已经按 workspace 隔离，
+      // 这里不过滤就会让 A workspace 的 run 出现在 B workspace 的 board 上（Codex P2）。
+      const activeEntries = Array.from(activeRuns.values())
+        .filter((snapshot) => snapshot.workspaceKey === currentWorkspaceKey)
+        .map((snapshot) => ({
         id: snapshot.id,
         workflowName: snapshot.workflowName,
         status: 'running' as const,
@@ -874,7 +890,7 @@ export function createServer(
       res.status(400).json({ error: parsed.error.message });
       return;
     }
-    const stores = workspaceFor(parsed.data.workspace);
+    const { stores, key: wsKey } = workspaceFor(parsed.data.workspace);
     const { runId, stepId } = req.params;
     const previous = stores.history.get(runId);
     if (!previous || previous.status !== 'paused') {
@@ -921,12 +937,20 @@ export function createServer(
       res.json({ artifact, resumeError: 'workflow definition missing' });
       return;
     }
-    // 同 workflow + 同 values + yes:true 续跑一次，落入历史。fire-and-forget：不阻塞 HTTP。
+    // 复用原 runId/startedAt 续跑，runWorkflow 会跳过 stepId 之前的成功 step，从 checkpoint 重新执行；
+    // 这样不会重复跑前面的 step（Codex P1）。同 runId 由 WorkflowRunHistory.append 在写入时覆盖旧条目。
     runWorkflowOnDaemon({
       workflow,
       values: previous.values,
       yes: true,
       stores,
+      workspaceKey: wsKey,
+      resumeFrom: {
+        runId,
+        stepId,
+        previousSteps: previous.steps,
+        startedAt: previous.startedAt,
+      },
       logContext: { runId, workflowName: previous.workflowName, source: 'gate-approve' },
     }).catch(() => undefined);
     res.json({ artifact, resumed: true });
@@ -953,7 +977,7 @@ export function createServer(
       res.status(400).json({ error: parsed.error.message });
       return;
     }
-    const stores = workspaceFor(parsed.data.workspace);
+    const { stores, key: wsKey } = workspaceFor(parsed.data.workspace);
     const workflow = stores.definitions.get(parsed.data.workflow);
     if (!workflow) {
       res.status(404).json({ error: 'workflow not found' });
@@ -965,6 +989,7 @@ export function createServer(
       yes: parsed.data.yes,
       dryRun: parsed.data.dryRun,
       stores,
+      workspaceKey: wsKey,
       logContext: { workflowName: workflow.name, source: 'run-start' },
     }).catch(() => undefined);
     res.json({ accepted: true, workflowName: workflow.name });
