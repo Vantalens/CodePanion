@@ -24,15 +24,20 @@ namespace CodePanion.Gui
         private const int ReconnectMinSeconds = 2;
         private const int ReconnectMaxSeconds = 30;
         // N-20：WebView2 → native 消息白名单，未列入的 type 一律 warn 并丢弃。
+        // W-20 重建：webview 已改为工作流控制台，旧监听态输入（reply/event-reply/task-action/
+        // handoff-launch）的发送方已随旧 UI 一并删除，故从白名单移除。保留中性 ready/open-external，
+        // 其余全部是工作流控制台请求。
         private static readonly HashSet<string> AllowedWebMessageTypes = new HashSet<string>
         {
             "ready",
-            "reply",
-            "event-reply",
-            "task-action",
-            "handoff-launch",
             "open-external",
             "request-workflow-board",
+            "request-workflow-run",
+            "request-workflow-launch",
+            "request-gate-resolve",
+            "request-run-cancel",
+            "request-delivery",
+            "set-workspace",
         };
 
         private readonly DaemonClient _daemonClient;
@@ -78,6 +83,8 @@ namespace CodePanion.Gui
             _daemonClient.MonitorEventReceived += OnMonitorEventReceived;
             _daemonClient.WorkflowSnapshotReceived += OnWorkflowSnapshotReceived;
             _daemonClient.WorkflowEventReceived += OnWorkflowEventReceived;
+            // W-20 重建：实时 run 事件转发给工作流控制台 webview。
+            _daemonClient.WorkflowRunEventReceived += OnWorkflowRunEventReceived;
             _daemonClient.SessionsSnapshotReceived += OnSessionsSnapshotReceived;
             _daemonClient.SourcesSnapshotReceived += OnSourcesSnapshotReceived;
             _daemonClient.LogMessage += OnLogMessage;
@@ -213,52 +220,10 @@ namespace CodePanion.Gui
                 switch (type)
                 {
                     case "ready":
+                        // W-20 重建：webview 起来后只回连接状态；旧的 ReplayCachedSnapshots（会话/来源/旧快照）
+                        // 不再调用，控制台自己按需拉 /workflow/board。
                         SendMessageToWeb(new { type = "connection-status", connected = _isConnected });
-                        ReplayCachedSnapshots();
                         break;
-
-                    case "reply":
-                    {
-                        var sessionId = message["sessionId"]?.Value<string>();
-                        var value = message["value"]?.Value<string>();
-                        var mode = message["mode"]?.Value<string>() ?? "option";
-                        if (!string.IsNullOrWhiteSpace(sessionId) && !string.IsNullOrWhiteSpace(value))
-                        {
-                            HandleUserReply(sessionId!, value!, mode);
-                        }
-                        break;
-                    }
-
-                    case "event-reply":
-                    {
-                        var eventId = message["eventId"]?.Value<string>();
-                        var value = message["value"]?.Value<string>();
-                        if (!string.IsNullOrWhiteSpace(eventId) && !string.IsNullOrWhiteSpace(value))
-                        {
-                            HandleMonitorEventReply(eventId!, value!);
-                        }
-                        break;
-                    }
-
-                    case "task-action":
-                    {
-                        var threadId = message["threadId"]?.Value<string>();
-                        if (!string.IsNullOrWhiteSpace(threadId))
-                        {
-                            HandleTaskAction(threadId!, message);
-                        }
-                        break;
-                    }
-
-                    case "handoff-launch":
-                    {
-                        var threadId = message["threadId"]?.Value<string>();
-                        if (!string.IsNullOrWhiteSpace(threadId))
-                        {
-                            HandleHandoffLaunch(threadId!, message);
-                        }
-                        break;
-                    }
 
                     // J-09：前端 click 拦截后把外链 href 转给 host 端，统一走 OpenExternalLink
                     // （仍复用 N-19 弹确认 + http(s) 白名单的兜底逻辑）。
@@ -276,12 +241,74 @@ namespace CodePanion.Gui
                         break;
                     }
 
-                    // W-20：webview 切到 workflow 视图时按需拉一次 /workflow/board，单方向 push 回 webview。
-                    // 不放进 push 流（避免和 workflow-snapshot 路径互相干扰），webview 自己控制刷新节奏。
+                    // W-20：拉一次 /workflow/board，单方向 push 回 webview。
                     case "request-workflow-board":
                     {
                         var workspace = message["workspace"]?.Value<string>();
                         _ = HandleWorkflowBoardRequestAsync(workspace);
+                        break;
+                    }
+
+                    // W-20 重建：拉单次 run 详情（含 step output），push workflow-run 回 webview。
+                    case "request-workflow-run":
+                    {
+                        var runId = message["runId"]?.Value<string>();
+                        var workspace = message["workspace"]?.Value<string>();
+                        if (string.IsNullOrWhiteSpace(runId)) { AddLog("丢弃 request-workflow-run：runId 缺失"); break; }
+                        _ = HandleWorkflowRunDetailAsync(runId!, workspace);
+                        break;
+                    }
+
+                    // W-20 重建：从 board 启动 workflow run。成功后自动重拉 board。
+                    case "request-workflow-launch":
+                    {
+                        var workflow = message["workflow"]?.Value<string>();
+                        var workspace = message["workspace"]?.Value<string>();
+                        if (string.IsNullOrWhiteSpace(workflow)) { AddLog("丢弃 request-workflow-launch：workflow 缺失"); break; }
+                        _ = HandleWorkflowLaunchAsync(workflow!, workspace);
+                        break;
+                    }
+
+                    // W-20 重建：对 paused gate 做 approve/reject/retry 决策（可带 constraints/message）。
+                    case "request-gate-resolve":
+                    {
+                        var runId = message["runId"]?.Value<string>();
+                        var stepId = message["stepId"]?.Value<string>();
+                        var decision = message["decision"]?.Value<string>();
+                        var workspace = message["workspace"]?.Value<string>();
+                        var gateMessage = message["message"]?.Value<string>();
+                        var constraints = message["constraints"]?.ToObject<string[]>();
+                        if (string.IsNullOrWhiteSpace(runId) || string.IsNullOrWhiteSpace(stepId) || string.IsNullOrWhiteSpace(decision))
+                        { AddLog("丢弃 request-gate-resolve：runId/stepId/decision 缺失"); break; }
+                        _ = HandleGateResolveAsync(runId!, stepId!, decision!, workspace, gateMessage, constraints);
+                        break;
+                    }
+
+                    // W-20 重建：取消运行中的 run。
+                    case "request-run-cancel":
+                    {
+                        var runId = message["runId"]?.Value<string>();
+                        if (string.IsNullOrWhiteSpace(runId)) { AddLog("丢弃 request-run-cancel：runId 缺失"); break; }
+                        _ = HandleRunCancelAsync(runId!);
+                        break;
+                    }
+
+                    // W-20 重建：拉 delivery 文本（markdown|handoff），push workflow-delivery 回 webview。
+                    case "request-delivery":
+                    {
+                        var runId = message["runId"]?.Value<string>();
+                        var format = message["format"]?.Value<string>() ?? "markdown";
+                        var workspace = message["workspace"]?.Value<string>();
+                        if (string.IsNullOrWhiteSpace(runId)) { AddLog("丢弃 request-delivery：runId 缺失"); break; }
+                        _ = HandleDeliveryAsync(runId!, format, workspace);
+                        break;
+                    }
+
+                    // W-20 重建：webview 切换 workspace 后只记日志；后续 board/run 请求自带 workspace 参数。
+                    case "set-workspace":
+                    {
+                        var workspace = message["workspace"]?.Value<string>();
+                        AddLog($"workspace 切换为：{(string.IsNullOrWhiteSpace(workspace) ? "<全局>" : workspace)}");
                         break;
                     }
                 }
@@ -846,6 +873,62 @@ namespace CodePanion.Gui
             }
         }
 
+        // W-20 重建：拉单次 run 详情（含 step output），push workflow-run 回 webview。找不到 → run=null。
+        private async Task HandleWorkflowRunDetailAsync(string runId, string? workspace)
+        {
+            string? json = null;
+            try { json = await _daemonClient.FetchWorkflowRunJsonAsync(runId, workspace); }
+            catch (Exception ex) { AddLog($"处理 request-workflow-run 失败：{ex.Message}"); }
+            JToken? run = null;
+            if (!string.IsNullOrWhiteSpace(json))
+            {
+                try { run = JToken.Parse(json!)["run"]; } catch { /* 非法 JSON 视作无详情 */ }
+            }
+            await Dispatcher.InvokeAsync(() =>
+                SendMessageToWeb(new { type = "workflow-run", runId, run }));
+        }
+
+        // W-20 重建：拉 delivery 文本，push workflow-delivery 回 webview。
+        private async Task HandleDeliveryAsync(string runId, string format, string? workspace)
+        {
+            string? json = null;
+            try { json = await _daemonClient.FetchDeliveryJsonAsync(runId, format, workspace); }
+            catch (Exception ex) { AddLog($"处理 request-delivery 失败：{ex.Message}"); }
+            JToken? delivery = null;
+            if (!string.IsNullOrWhiteSpace(json))
+            {
+                try { delivery = JToken.Parse(json!); } catch { /* ignore */ }
+            }
+            await Dispatcher.InvokeAsync(() =>
+                SendMessageToWeb(new { type = "workflow-delivery", runId, format, delivery }));
+        }
+
+        // W-20 重建：启动 workflow run，结果走 workflow-action-result；成功后自动重拉 board。
+        private async Task HandleWorkflowLaunchAsync(string workflowName, string? workspace)
+        {
+            var (ok, body) = await _daemonClient.StartWorkflowRunAsync(workflowName, workspace);
+            await Dispatcher.InvokeAsync(() =>
+                SendMessageToWeb(new { type = "workflow-action-result", action = "launch", workflow = workflowName, workspace, ok, body }));
+            if (ok) await HandleWorkflowBoardRequestAsync(workspace);
+        }
+
+        // W-20 重建：gate 决策（approve/reject/retry，可带 constraints/message）；成功后自动重拉 board。
+        private async Task HandleGateResolveAsync(string runId, string stepId, string decision, string? workspace, string? message, string[]? constraints)
+        {
+            var (ok, body) = await _daemonClient.ResolveWorkflowGateAsync(runId, stepId, decision, workspace, message, constraints);
+            await Dispatcher.InvokeAsync(() =>
+                SendMessageToWeb(new { type = "workflow-action-result", action = "gate-resolve", runId, stepId, decision, workspace, ok, body }));
+            if (ok) await HandleWorkflowBoardRequestAsync(workspace);
+        }
+
+        // W-20 重建：取消运行中的 run，结果走 workflow-action-result。
+        private async Task HandleRunCancelAsync(string runId)
+        {
+            var (ok, body) = await _daemonClient.CancelRunAsync(runId);
+            await Dispatcher.InvokeAsync(() =>
+                SendMessageToWeb(new { type = "workflow-action-result", action = "cancel", runId, ok, body }));
+        }
+
         private void OnWorkflowEventReceived(object? sender, JToken workflowEvent)
         {
             Dispatcher.Invoke(() =>
@@ -854,6 +937,20 @@ namespace CodePanion.Gui
                 {
                     type = "workflow-event",
                     data = workflowEvent
+                });
+            });
+        }
+
+        // W-20 重建：把 daemon 的实时 run 事件原样转给控制台 webview。
+        // event 形如 { action:'run-start'|'step-start'|'step-output'|'step-finish'|'run-finish', runId, ... }。
+        private void OnWorkflowRunEventReceived(object? sender, JToken runEvent)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                SendMessageToWeb(new
+                {
+                    type = "workflow-run-event",
+                    @event = runEvent
                 });
             });
         }

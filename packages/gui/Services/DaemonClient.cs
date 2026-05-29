@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
 using System.Net.WebSockets;
@@ -32,6 +33,8 @@ namespace CodePanion.Gui.Services
         public event EventHandler<MonitorEventArgs>? MonitorEventReceived;
         public event EventHandler<JToken>? WorkflowSnapshotReceived;
         public event EventHandler<JToken>? WorkflowEventReceived;
+        // W-20 重建：工作流控制台的实时 run 事件（run-start/step-start/step-output/step-finish/run-finish）。
+        public event EventHandler<JToken>? WorkflowRunEventReceived;
         public event EventHandler<SessionInfo[]>? SessionsSnapshotReceived;
         public event EventHandler<MonitorSourceInfo[]>? SourcesSnapshotReceived;
         public event EventHandler<string>? LogMessage;
@@ -308,6 +311,15 @@ namespace CodePanion.Gui.Services
                         }
                         break;
 
+                    // W-20 重建：工作流控制台实时 run 事件。daemon 通过 observer socket 推
+                    // { type:'workflow-run-event', event:{ action, runId, ... } }，转给宿主再转 webview。
+                    case "workflow-run-event":
+                        if (json["event"] != null)
+                        {
+                            WorkflowRunEventReceived?.Invoke(this, json["event"]!);
+                        }
+                        break;
+
                     case "session-output":
                         SessionOutput?.Invoke(this, new SessionOutputEventArgs
                         {
@@ -405,6 +417,108 @@ namespace CodePanion.Gui.Services
             {
                 Log($"刷新 workflow board 失败：{ex.Message}");
                 return null;
+            }
+        }
+
+        // W-20 重建：拉单次 run 的完整记录（含每 step 的 output）。GET /workflow/runs/:runId。
+        public async Task<string?> FetchWorkflowRunJsonAsync(string runId, string? workspace = null)
+        {
+            return await GetWorkflowJsonAsync($"/workflow/runs/{Uri.EscapeDataString(runId)}", workspace, "拉 run 详情失败");
+        }
+
+        // W-20 重建：拉某 run 的 artifacts。GET /workflow/runs/:runId/artifacts。
+        public async Task<string?> FetchRunArtifactsJsonAsync(string runId, string? workspace = null)
+        {
+            return await GetWorkflowJsonAsync($"/workflow/runs/{Uri.EscapeDataString(runId)}/artifacts", workspace, "拉 run artifacts 失败");
+        }
+
+        // W-20 重建：拉 delivery 文本。GET /workflow/runs/:runId/delivery?format=markdown|handoff。
+        public async Task<string?> FetchDeliveryJsonAsync(string runId, string format = "markdown", string? workspace = null)
+        {
+            var extra = $"format={Uri.EscapeDataString(format)}";
+            return await GetWorkflowJsonAsync($"/workflow/runs/{Uri.EscapeDataString(runId)}/delivery", workspace, "拉 delivery 失败", extra);
+        }
+
+        // 共用：带 workspace 查询参数的 GET，原样返回 body 字符串（含非 2xx 时返回 null）。
+        private async Task<string?> GetWorkflowJsonAsync(string path, string? workspace, string failLabel, string? extraQuery = null)
+        {
+            try
+            {
+                var query = new List<string>();
+                if (!string.IsNullOrWhiteSpace(workspace)) query.Add($"workspace={Uri.EscapeDataString(workspace)}");
+                if (!string.IsNullOrWhiteSpace(extraQuery)) query.Add(extraQuery!);
+                var url = $"{_daemonUrl}{path}" + (query.Count > 0 ? "?" + string.Join("&", query) : "");
+                var request = new HttpRequestMessage(HttpMethod.Get, url);
+                request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {_token}");
+                var response = await _httpClient.SendAsync(request);
+                if (!response.IsSuccessStatusCode) return null;
+                return await response.Content.ReadAsStringAsync();
+            }
+            catch (Exception ex)
+            {
+                Log($"{failLabel}：{ex.Message}");
+                return null;
+            }
+        }
+
+        // W-20 重建：从 board 直接启动 workflow run。POST /workflow/runs。
+        public async Task<(bool ok, string? body)> StartWorkflowRunAsync(string workflowName, string? workspace = null)
+        {
+            try
+            {
+                var url = $"{_daemonUrl}/workflow/runs";
+                var payload = string.IsNullOrWhiteSpace(workspace)
+                    ? (object)new { workflow = workflowName }
+                    : new { workflow = workflowName, workspace };
+                var response = await PostJsonAsync(url, payload);
+                var body = await response.Content.ReadAsStringAsync();
+                return (response.IsSuccessStatusCode, body);
+            }
+            catch (Exception ex)
+            {
+                Log($"启动 workflow 失败：{ex.Message}");
+                return (false, null);
+            }
+        }
+
+        // W-20 重建：取消运行中的 run。POST /workflow/runs/:runId/cancel。
+        public async Task<(bool ok, string? body)> CancelRunAsync(string runId)
+        {
+            try
+            {
+                var url = $"{_daemonUrl}/workflow/runs/{Uri.EscapeDataString(runId)}/cancel";
+                var response = await PostJsonAsync(url, new { });
+                var body = await response.Content.ReadAsStringAsync();
+                return (response.IsSuccessStatusCode, body);
+            }
+            catch (Exception ex)
+            {
+                Log($"取消 run 失败：{ex.Message}");
+                return (false, null);
+            }
+        }
+
+        // W-20 重建：对 paused gate 做决策。POST /workflow/gates/:runId/:stepId/resolve。
+        // decision = approve | reject | retry；constraints/message 可选。
+        public async Task<(bool ok, string? body)> ResolveWorkflowGateAsync(
+            string runId, string stepId, string decision,
+            string? workspace = null, string? message = null, string[]? constraints = null)
+        {
+            try
+            {
+                var url = $"{_daemonUrl}/workflow/gates/{Uri.EscapeDataString(runId)}/{Uri.EscapeDataString(stepId)}/resolve";
+                var payload = new Dictionary<string, object?> { ["decision"] = decision };
+                if (!string.IsNullOrWhiteSpace(workspace)) payload["workspace"] = workspace;
+                if (!string.IsNullOrWhiteSpace(message)) payload["message"] = message;
+                if (constraints != null && constraints.Length > 0) payload["constraints"] = constraints;
+                var response = await PostJsonAsync(url, payload);
+                var body = await response.Content.ReadAsStringAsync();
+                return (response.IsSuccessStatusCode, body);
+            }
+            catch (Exception ex)
+            {
+                Log($"resolve gate 失败：{ex.Message}");
+                return (false, null);
             }
         }
 

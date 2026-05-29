@@ -5,319 +5,99 @@
     <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self' https://codepanion.local; script-src 'self' https://codepanion.local; style-src 'self' https://codepanion.local; img-src 'self' https://codepanion.local data:; font-src 'self' https://codepanion.local data:; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CodePanion - 任务操作台</title>
+    <title>CodePanion - 工作流控制台</title>
     <link rel="stylesheet" href="https://codepanion.local/chat.css">
-    <script src="https://codepanion.local/vendor/codepanion-markdown.js"></script>
 </head>
 <body>
+    <!-- W-20 重建：工作流控制台 shell。监听式界面（会话流 / 来源面板 / 接力 / 收件箱）已全部移除。
+         布局：顶栏（workspace + 连接） / 三栏（workflow & runs & gates | run 时间线 | 详情&人工门） / 底栏状态。 -->
     <div id="app-shell">
-        <nav id="source-rail" aria-label="全局导航">
-            <div class="rail-brand" title="CodePanion">CP</div>
-            <button class="rail-button active" type="button" data-view="active" title="我的待处理" aria-label="我的待处理">⌂</button>
-            <button class="rail-button" type="button" data-view="waiting" title="等待我" aria-label="等待我">!</button>
-            <button class="rail-button" type="button" data-view="running" title="运行中" aria-label="运行中">▶</button>
-            <button class="rail-button" type="button" data-view="error" title="失败" aria-label="失败">×</button>
-            <button class="rail-button" type="button" data-view="done" title="已完成" aria-label="已完成">✓</button>
-            <button class="rail-button" type="button" data-view="later" title="稍后 / 归档" aria-label="稍后 / 归档">◷</button>
-            <button class="rail-button" type="button" data-view="code" title="代码产物" aria-label="代码产物">{}</button>
-            <button class="rail-button" type="button" data-view="workflow" title="工作流 board" aria-label="工作流 board">◫</button>
-            <div class="rail-spacer"></div>
-            <div class="rail-status" title="本地 daemon 连接状态">
+        <header id="topbar">
+            <div class="brand">CodePanion</div>
+            <div class="workspace-bar">
+                <label for="workspace-input">workspace</label>
+                <input id="workspace-input" type="text" list="workspace-recents" autocomplete="off"
+                       placeholder="项目绝对路径（留空=全局）">
+                <datalist id="workspace-recents"></datalist>
+                <button id="workspace-apply" class="btn" type="button">应用</button>
+                <button id="workspace-clear" class="btn" type="button">全局</button>
+            </div>
+            <div class="conn" title="本地 daemon 连接状态">
                 <span class="status-dot"></span>
+                <span class="status-text">未连接</span>
             </div>
-        </nav>
+        </header>
 
-        <aside id="conversation-sidebar">
-            <header class="brand-row">
-                <div>
-                    <h1>CodePanion</h1>
-                    <p>统一多任务操作平台</p>
-                </div>
-                <div class="status-indicator">
-                    <span class="status-dot"></span>
-                    <span class="status-text">未连接</span>
-                </div>
-            </header>
+        <div id="console-body">
+            <aside id="console-sidebar">
+                <section class="side-section">
+                    <h3>可执行 workflow</h3>
+                    <div id="def-list" class="card-list"></div>
+                </section>
+                <section class="side-section">
+                    <h3>近期运行</h3>
+                    <div id="runs-list" class="card-list"></div>
+                </section>
+                <section class="side-section">
+                    <h3>人工门</h3>
+                    <div id="gates-list" class="card-list"></div>
+                </section>
+            </aside>
 
-            <section id="source-status-panel" aria-label="来源状态">
-                <div class="source-status-row" data-source-kind="vscode">
-                    <span class="source-status-dot" data-state="offline"></span>
-                    <div>
-                        <strong>VS Code 插件</strong>
-                        <p id="vscode-source-status">未连接</p>
+            <main id="console-center">
+                <header id="center-header">
+                    <div class="center-title-wrap">
+                        <h2 id="center-title">工作流控制台</h2>
+                        <span id="center-status" class="run-status-chip"></span>
                     </div>
-                </div>
-            </section>
-
-            <section class="queue-overview" aria-label="任务队列概览">
-                <div class="metric">
-                    <span>全部</span>
-                    <strong id="queue-total">0</strong>
-                </div>
-                <div class="metric urgent">
-                    <span>待处理</span>
-                    <strong id="queue-waiting">0</strong>
-                </div>
-                <div class="metric">
-                    <span>运行中</span>
-                    <strong id="queue-running">0</strong>
-                </div>
-                <div class="metric danger">
-                    <span>失败</span>
-                    <strong id="queue-error">0</strong>
-                </div>
-            </section>
-
-            <div class="sidebar-tools">
-                <button class="tool-button active" type="button" data-view="active">待处理</button>
-                <button class="tool-button" type="button" data-view="waiting">等待</button>
-                <button class="tool-button" type="button" data-view="running">运行中</button>
-                <button class="tool-button" type="button" data-view="error">失败</button>
-                <button class="tool-button" type="button" data-view="done">已完成</button>
-                <button class="tool-button" type="button" data-view="later">稍后</button>
-                <button class="tool-button" type="button" data-view="code">产物</button>
-            </div>
-            <div class="list-grouping" aria-label="任务分组方式">
-                <span class="list-grouping-label">分组</span>
-                <div class="list-grouping-buttons">
-                    <button class="group-button active" type="button" data-group-mode="workspace">项目</button>
-                    <button class="group-button" type="button" data-group-mode="source">来源</button>
-                    <button class="group-button" type="button" data-group-mode="none">队列</button>
-                </div>
-            </div>
-            <div id="batch-toolbar" class="batch-toolbar" hidden>
-                <div class="batch-toolbar-row">
-                    <button id="batch-toggle" class="action-button" type="button">批量选择</button>
-                    <span id="batch-selection-count" class="batch-selection-count">未选择任务</span>
-                </div>
-                <div class="batch-toolbar-row">
-                    <button id="batch-restore" class="action-button" type="button" disabled>批量恢复</button>
-                    <button id="batch-archive" class="action-button" type="button" disabled>批量归档</button>
-                    <button id="batch-snooze" class="action-button" type="button" disabled>稍后 30 分钟</button>
-                    <button id="batch-pin" class="action-button" type="button" disabled>批量置顶</button>
-                    <button id="batch-clear" class="action-button" type="button" disabled>清空</button>
-                </div>
-                <div class="batch-toolbar-row">
-                    <span class="batch-selection-count">批量优先级</span>
-                    <button id="batch-priority-high" class="priority-button priority-high" type="button" disabled>高</button>
-                    <button id="batch-priority-normal" class="priority-button priority-normal" type="button" disabled>中</button>
-                    <button id="batch-priority-low" class="priority-button priority-low" type="button" disabled>低</button>
-                </div>
-            </div>
-            <div id="conversation-list" class="conversation-list" aria-label="任务收件箱"></div>
-        </aside>
-
-        <main id="conversation-main">
-            <header id="conversation-header">
-                <div class="stage-title">
-                    <div class="crumb">任务工作台 / 当前焦点</div>
-                    <h2 id="conversation-title">当前任务</h2>
-                    <div class="stage-meta">
-                        <span id="stage-source">来源未选择</span>
-                        <span id="stage-capability">L0</span>
-                        <span id="stage-status">等待事件</span>
-                    </div>
-                </div>
-                <div class="stage-actions">
-                    <button id="stage-focus-reply" class="action-button primary" type="button" disabled>处理任务</button>
-                    <button id="stage-suggested-action" class="action-button primary" type="button" disabled hidden>建议动作</button>
-                    <button id="stage-suggested-secondary" class="action-button" type="button" disabled hidden>后续动作</button>
-                    <button id="stage-pin-task" class="action-button" type="button" disabled>置顶任务</button>
-                    <button id="stage-snooze-task" class="action-button" type="button" disabled>稍后 1 小时</button>
-                    <button id="stage-archive-task" class="action-button" type="button" disabled>归档任务</button>
-                    <button id="stage-copy-context" class="action-button" type="button" disabled>复制上下文</button>
-                </div>
-                <div class="priority-strip" aria-label="任务优先级">
-                    <span class="priority-strip-label">优先级</span>
-                    <div class="priority-strip-buttons">
-                        <button id="stage-priority-high" class="priority-button" type="button">高</button>
-                        <button id="stage-priority-normal" class="priority-button" type="button">中</button>
-                        <button id="stage-priority-low" class="priority-button" type="button">低</button>
-                    </div>
-                </div>
-                <div class="priority-strip" aria-label="任务排序">
-                    <span class="priority-strip-label">排序</span>
-                    <div class="priority-strip-buttons">
-                        <button id="stage-move-up" class="priority-button" type="button">上移</button>
-                        <button id="stage-move-down" class="priority-button" type="button">下移</button>
-                    </div>
-                </div>
-                <div id="stage-snooze-menu" class="task-action-menu" hidden></div>
-            </header>
-            <section id="task-spotlight" aria-label="当前任务聚焦">
-                <div class="spotlight-card emphasis">
-                    <span class="spotlight-label">下一步</span>
-                    <strong id="spotlight-next-action">请选择需要处理的任务</strong>
-                    <p id="spotlight-subaction">可从左侧任务列表中切换，或等待新的任务进入队列。</p>
-                </div>
-                <div class="spotlight-card">
-                    <span class="spotlight-label">项目 / 窗口</span>
-                    <strong id="spotlight-project">未绑定项目</strong>
-                    <p id="spotlight-workspace">当前没有可展示的任务上下文。</p>
-                </div>
-                <div class="spotlight-card">
-                    <span class="spotlight-label">任务管理</span>
-                    <strong id="spotlight-management">主队列中</strong>
-                    <p id="spotlight-updated">等待新的任务状态更新。</p>
-                </div>
-                <div class="spotlight-card">
-                    <span class="spotlight-label">进度概览</span>
-                    <strong id="spotlight-summary">0 条记录</strong>
-                    <p id="spotlight-breakdown">当前尚无可展示的任务记录。</p>
-                </div>
-            </section>
-            <section id="chat-container" aria-live="polite"></section>
-            <!-- W-20：workflow board 视图。rail 的 workflow 按钮激活时显示，其它视图隐藏。
-                 数据来自 daemon /workflow/board，按 workspace 隔离。GUI 把 workflow definitions /
-                 active runs / paused gates 三列展开，让 IDE 主屏第一层就是「我现在在跑什么、在等什么」。 -->
-            <section id="workflow-board-view" aria-label="工作流 board" hidden>
-                <header class="board-header">
-                    <h2>工作流 board</h2>
-                    <div class="board-actions">
-                        <button id="workflow-board-refresh" class="action-button" type="button">刷新</button>
-                    </div>
+                    <button id="run-cancel" class="btn danger" type="button" hidden>取消运行</button>
                 </header>
-                <div id="workflow-board-status" class="board-status">尚未拉取数据。</div>
-                <div class="board-grid">
-                    <section class="board-column" aria-label="可执行 workflow">
-                        <h3>可执行 workflow</h3>
-                        <div id="workflow-board-definitions" class="board-list"></div>
-                    </section>
-                    <section class="board-column" aria-label="近期运行">
-                        <h3>近期运行</h3>
-                        <div id="workflow-board-runs" class="board-list"></div>
-                    </section>
-                    <section class="board-column" aria-label="等待人工审核">
-                        <h3>人工门</h3>
-                        <div id="workflow-board-gates" class="board-list"></div>
-                    </section>
+                <div id="timeline-empty" class="empty-state">
+                    <strong>选择左侧一个运行查看时间线</strong>
+                    <span>或点一个 workflow 的「启动」开始新的运行。运行中的步骤输出会实时滚动到这里。</span>
                 </div>
-            </section>
-        </main>
+                <div id="timeline-steps" class="timeline" hidden></div>
+            </main>
 
-        <aside id="code-browser">
-            <section class="context-panel">
-                <header class="context-header">
-                    <div>
-                        <h2>任务详情</h2>
-                        <p id="drawer-subtitle">来源、能力边界与下一步动作</p>
+            <aside id="console-detail">
+                <!-- 人工门决策面板：选中一个 gate 时显示 -->
+                <section id="gate-panel" class="detail-section" hidden>
+                    <h3>人工门决策</h3>
+                    <p id="gate-target" class="detail-meta"></p>
+                    <label class="field-label" for="gate-constraints">约束（每行一条，注入续跑 values.constraints）</label>
+                    <textarea id="gate-constraints" rows="3" placeholder="例如：保持 TypeScript&#10;不要引入新依赖"></textarea>
+                    <label class="field-label" for="gate-message">备注（可选）</label>
+                    <input id="gate-message" type="text" autocomplete="off" placeholder="给本次决策的说明">
+                    <div class="gate-actions">
+                        <button id="gate-approve" class="btn primary" type="button">通过</button>
+                        <button id="gate-retry" class="btn" type="button">重试</button>
+                        <button id="gate-reject" class="btn danger" type="button">拒绝</button>
                     </div>
-                </header>
-                <div class="context-section">
-                    <span class="context-label">来源</span>
-                    <strong id="drawer-source-name">未选择任务</strong>
-                    <p id="drawer-source-detail">选择一个任务后显示来源状态。</p>
-                </div>
-                <div class="context-grid">
-                    <div>
-                        <span class="context-label">能力层级</span>
-                        <strong id="drawer-capability">L0</strong>
-                    </div>
-                    <div>
-                        <span class="context-label">数据边界</span>
-                        <strong id="drawer-privacy">本地优先</strong>
-                    </div>
-                </div>
-                <div class="context-section">
-                    <span class="context-label">动作</span>
-                    <div class="drawer-actions">
-                        <button id="drawer-focus-reply" class="action-button primary" type="button" disabled>处理任务</button>
-                        <button id="drawer-suggested-action" class="action-button primary" type="button" disabled hidden>建议动作</button>
-                        <button id="drawer-suggested-secondary" class="action-button" type="button" disabled hidden>后续动作</button>
-                        <button id="drawer-pin-task" class="action-button" type="button" disabled>置顶任务</button>
-                        <button id="drawer-snooze-task" class="action-button" type="button" disabled>稍后 1 小时</button>
-                        <button id="drawer-archive-task" class="action-button" type="button" disabled>归档任务</button>
-                        <button id="drawer-copy-workspace" class="action-button" type="button" disabled>复制工作区</button>
-                    </div>
-                    <div id="drawer-snooze-menu" class="task-action-menu" hidden></div>
-                    <p id="drawer-action-note">CodePanion 只展示真实可用动作；弱接入来源不会伪装成可接管。</p>
-                </div>
-                <div class="context-section">
-                    <span class="context-label">优先级</span>
-                    <div class="priority-strip drawer-priority" aria-label="任务优先级">
-                        <div class="priority-strip-buttons">
-                            <button id="drawer-priority-high" class="priority-button" type="button">高</button>
-                            <button id="drawer-priority-normal" class="priority-button" type="button">中</button>
-                            <button id="drawer-priority-low" class="priority-button" type="button">低</button>
-                        </div>
-                    </div>
-                </div>
-                <div class="context-section">
-                    <span class="context-label">排序</span>
-                    <div class="priority-strip drawer-priority" aria-label="任务排序">
-                        <div class="priority-strip-buttons">
-                            <button id="drawer-move-up" class="priority-button" type="button">上移</button>
-                            <button id="drawer-move-down" class="priority-button" type="button">下移</button>
-                        </div>
-                    </div>
-                </div>
-                <div class="context-section">
-                    <span class="context-label">接力导航</span>
-                    <div class="linked-task-panel">
-                        <div id="drawer-linked-session-panel" class="linked-task-card" hidden>
-                            <span class="linked-task-label">当前接力会话</span>
-                            <strong id="drawer-linked-session-title">未建立接力会话</strong>
-                            <p id="drawer-linked-session-note">转交建立后，可直接跳转到接力会话继续跟进。</p>
-                            <button id="drawer-jump-linked-session" class="action-button" type="button" disabled>打开接力会话</button>
-                        </div>
-                        <div id="drawer-parent-task-panel" class="linked-task-card" hidden>
-                            <span class="linked-task-label">来源任务</span>
-                            <strong id="drawer-parent-task-title">未关联来源任务</strong>
-                            <p id="drawer-parent-task-note">当前会话来自某个上游任务时，可直接返回原任务。</p>
-                            <button id="drawer-jump-parent-task" class="action-button" type="button" disabled>返回来源任务</button>
-                        </div>
-                    </div>
-                </div>
-                <div class="context-section">
-                    <span class="context-label">任务转交</span>
-                    <div class="handoff-panel">
-                        <div class="handoff-controls">
-                            <label class="handoff-target">
-                                <span>目标</span>
-                                <select id="drawer-handoff-target">
-                                    <option value="generic">通用</option>
-                                    <option value="codex">Codex</option>
-                                    <option value="claude-code">Claude Code</option>
-                                    <option value="opencode">OpenCode</option>
-                                </select>
-                            </label>
-                            <div class="drawer-actions handoff-actions">
-                                <button id="drawer-copy-handoff" class="action-button" type="button" disabled>复制交接包</button>
-                                <button id="drawer-copy-handoff-prompt" class="action-button" type="button" disabled>复制转交指令</button>
-                            </div>
-                            <div class="drawer-actions handoff-actions">
-                                <button id="drawer-start-handoff" class="action-button" type="button" disabled>启动并转交</button>
-                                <button id="drawer-mark-handoff-active" class="action-button" type="button" disabled>确认接手</button>
-                                <button id="drawer-return-handoff" class="action-button" type="button" disabled>回收到当前</button>
-                                <button id="drawer-clear-handoff" class="action-button" type="button" disabled>清除转交</button>
-                            </div>
-                        </div>
-                        <pre id="drawer-handoff-preview" class="handoff-preview">选择任务后显示标准化交接内容。</pre>
-                    </div>
-                </div>
-            </section>
+                </section>
 
-            <section class="artifact-panel">
-                <header class="code-header">
-                    <div>
-                        <h2>代码产物</h2>
-                        <p id="code-count">0 段代码</p>
-                    </div>
-                </header>
-                <div id="code-list" class="code-list"></div>
-                <article id="code-preview" class="code-preview">
-                    <div class="empty-code">
-                        <strong>暂无可预览产物</strong>
-                        <span>只展示真实代码块，不显示普通文本片段。</span>
-                    </div>
-                </article>
-            </section>
-        </aside>
+                <section class="detail-section">
+                    <h3>产物 <span id="artifact-count" class="count">0</span></h3>
+                    <div id="artifact-list" class="card-list"></div>
+                </section>
 
-        <footer id="omnibar">
-            <div class="omnibar-label">回复</div>
-            <input id="omnibar-input" type="text" autocomplete="off" placeholder="输入回复；或先在上方处理当前任务" disabled>
-            <button id="omnibar-submit" class="action-button primary" type="button" disabled>发送</button>
+                <section class="detail-section">
+                    <h3>交付摘要</h3>
+                    <div class="delivery-actions">
+                        <button id="delivery-markdown" class="btn" type="button" disabled>复制 Markdown</button>
+                        <button id="delivery-handoff" class="btn" type="button" disabled>复制 Handoff</button>
+                    </div>
+                    <pre id="delivery-output" class="output-pre">选中一个运行后可拉取交付摘要。</pre>
+                </section>
+
+                <section class="detail-section">
+                    <h3>步骤输出</h3>
+                    <pre id="step-output-detail" class="output-pre">点击中栏某个步骤查看其完整 stdout/stderr。</pre>
+                </section>
+            </aside>
+        </div>
+
+        <footer id="statusbar">
+            <span id="board-status">尚未拉取数据。</span>
         </footer>
     </div>
     <script src="https://codepanion.local/chat.js"></script>

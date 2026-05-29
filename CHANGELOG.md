@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **GUI 重建为工作流控制台，移除监听式界面**：主界面之前仍是改路线前的监听模型（VS Code 插件面板 / 按来源分组的任务队列 / 会话流 / 接力 PTY 面板 / 收件箱 / session 回复），与「个人 Agent AI IDE + 工作流控制台」定位冲突。本次把 GUI shell（chat.html/js/css）整体重写为工作流控制台：
+  - 顶栏 workspace 选择条（路径 + 最近列表 localStorage 持久化，空 = 全局 fallback）+ 连接状态。
+  - 三栏：左（可执行 workflow / 近期 runs / 人工门）、中（选中 run 的步骤时间线）、右（artifacts / delivery / 人工门决策 / 步骤输出）。
+  - 中栏接 daemon WS `workflow-run-event` 实时流（run-start / step-start / step-output / step-finish / run-finish），step stdout/stderr 实时滚动；[DaemonClient.cs](packages/gui/Services/DaemonClient.cs) 新增 `workflow-run-event` WS 分支转发。
+  - webview ↔ host 协议收敛为 `request-workflow-board/run/launch/gate-resolve/run-cancel/delivery` + `set-workspace`；旧的监听态输入 `reply/event-reply/task-action/handoff-launch` 从白名单移除。
+  - 已知限制（本轮不做）：GUI 内创建/编辑 workflow 定义（daemon 暂无该 HTTP 接口，仍用 CLI 写 `workflows.json`）；daemon 无「列出 workspaces」端点，故 workspace 由 GUI 客户端记最近路径。
+  - daemon 的监听端点（`/sessions`、`/sources`、`/workflow/snapshot`、`/workflow/threads/*`、handoff）保留，GUI 不再消费，彻底下线作为后续单独工作。
+  - jsdom 覆盖：删除失效的 `chatWorkflowSnapshot.test.mjs`，新增 `chatWorkflowConsole.test.mjs`（board 渲染 / run 选中拉详情 / `applyRunEvent` 五种实时事件 / gate 决策 payload / workspace 切换）。
+
 ### Added
 
 - **W-20 run 详情端点**：`GET /workflow/runs/:runId?workspace=...` 返回完整 run 记录（含每个 step 的 W-31 `output` stdout/stderr）。board 只给摘要，GUI run 卡片要展开 step 输出时走这个详情端点；找不到 → 404。
