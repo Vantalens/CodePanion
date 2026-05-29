@@ -2210,6 +2210,175 @@ test('W-32 approve 在原 runId 上从 checkpoint 续跑同 workflow，落 deliv
   }
 });
 
+test('W-32 retry 回到 checkpoint 前最近一个真正执行过的 step 重跑', async () => {
+  const {
+    WorkflowDefinitionManager,
+    WorkflowRunHistory,
+    parseWorkflowSteps,
+  } = await import('../dist/workflows/workflowDefinitionManager.js');
+  const dir = mkdtempSync(join(tmpdir(), 'codepanion-retry-'));
+  const prev = {
+    workflowEnv: process.env.CODEPANION_WORKFLOW_PATH,
+    historyEnv: process.env.CODEPANION_WORKFLOW_HISTORY_PATH,
+    artifactEnv: process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH,
+  };
+  process.env.CODEPANION_WORKFLOW_PATH = join(dir, 'workflows.json');
+  process.env.CODEPANION_WORKFLOW_HISTORY_PATH = join(dir, 'runs.ndjson');
+  process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH = join(dir, 'artifacts.ndjson');
+  try {
+    // 三步 workflow：build 真正执行，review 是 checkpoint，publish 续跑后再跑。
+    // 历史里 build 已经成功，停在 review checkpoint，用户决定 retry → build 应当被重跑一次。
+    new WorkflowDefinitionManager().save({
+      name: 'retry-target',
+      steps: parseWorkflowSteps([
+        'id=build;role=builder;tool=node;command=node;args=--version',
+        'id=review;role=reviewer;tool=node;command=node;args=--version;artifacts=human-decision;checkpoint=true;after=build',
+        'id=publish;role=builder;tool=node;command=node;args=--version;artifacts=delivery-note;after=review',
+      ]),
+    });
+    const runId = 'run-retry-1';
+    new WorkflowRunHistory().append({
+      id: runId,
+      workflowName: 'retry-target',
+      status: 'paused',
+      values: {},
+      startedAt: Date.now() - 5000,
+      endedAt: Date.now(),
+      steps: [
+        {
+          id: 'build',
+          tool: 'node',
+          role: 'builder',
+          artifacts: [],
+          status: 'success',
+          command: 'node',
+          args: ['--version'],
+          exitCode: 0,
+        },
+        {
+          id: 'review',
+          tool: 'node',
+          role: 'reviewer',
+          artifacts: ['human-decision'],
+          status: 'checkpoint',
+          command: 'node',
+          args: ['--version'],
+          message: 'manual checkpoint required',
+        },
+      ],
+    });
+
+    await withServer(async ({ port, token }) => {
+      const resolved = await request(port, token, 'POST', `/workflow/gates/${runId}/review/resolve`, {
+        decision: 'retry',
+      });
+      assert.equal(resolved.status, 200);
+      assert.equal(resolved.body.resumed, true);
+      // 关键断言：retry 把 resume 目标指向 checkpoint 前最近一个 success step（build），不是 checkpoint 本身。
+      assert.equal(resolved.body.resumeStepId, 'build');
+
+      // 等续跑完成（覆盖原 runId 历史条目）。
+      const deadline = Date.now() + 5000;
+      let resumed;
+      while (Date.now() < deadline) {
+        const runs = new WorkflowRunHistory().list();
+        resumed = runs.find((entry) => entry.id === runId);
+        if (resumed && resumed.status !== 'paused') break;
+        await new Promise((r) => setTimeout(r, 80));
+      }
+      assert.ok(resumed, '续跑应当覆盖原 paused 历史条目');
+      assert.equal(resumed.status, 'success', `retry 续跑应当成功，实际 status=${resumed?.status}`);
+      const buildEntries = resumed.steps.filter((s) => s.id === 'build');
+      assert.equal(buildEntries.length, 1, 'build 在 retry 续跑中应当且只重跑一次');
+      assert.equal(buildEntries[0].status, 'success');
+      const publishEntries = resumed.steps.filter((s) => s.id === 'publish');
+      assert.equal(publishEntries.length, 1, 'publish 应当在 retry 续跑里跑过');
+    });
+  } finally {
+    if (prev.workflowEnv === undefined) delete process.env.CODEPANION_WORKFLOW_PATH;
+    else process.env.CODEPANION_WORKFLOW_PATH = prev.workflowEnv;
+    if (prev.historyEnv === undefined) delete process.env.CODEPANION_WORKFLOW_HISTORY_PATH;
+    else process.env.CODEPANION_WORKFLOW_HISTORY_PATH = prev.historyEnv;
+    if (prev.artifactEnv === undefined) delete process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH;
+    else process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH = prev.artifactEnv;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('W-32 constraints 经 gate 决策注入 resumed run 的 values', async () => {
+  const {
+    WorkflowDefinitionManager,
+    WorkflowRunHistory,
+    parseWorkflowSteps,
+  } = await import('../dist/workflows/workflowDefinitionManager.js');
+  const dir = mkdtempSync(join(tmpdir(), 'codepanion-gate-constraints-'));
+  const prev = {
+    workflowEnv: process.env.CODEPANION_WORKFLOW_PATH,
+    historyEnv: process.env.CODEPANION_WORKFLOW_HISTORY_PATH,
+    artifactEnv: process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH,
+  };
+  process.env.CODEPANION_WORKFLOW_PATH = join(dir, 'workflows.json');
+  process.env.CODEPANION_WORKFLOW_HISTORY_PATH = join(dir, 'runs.ndjson');
+  process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH = join(dir, 'artifacts.ndjson');
+  try {
+    new WorkflowDefinitionManager().save({
+      name: 'constraints-target',
+      steps: parseWorkflowSteps([
+        'id=review;role=reviewer;tool=node;command=node;args=--version;artifacts=human-decision;checkpoint=true',
+        'id=publish;role=builder;tool=node;command=node;args=--version;artifacts=delivery-note;after=review',
+      ]),
+    });
+    const runId = 'run-constraints-1';
+    new WorkflowRunHistory().append({
+      id: runId,
+      workflowName: 'constraints-target',
+      status: 'paused',
+      values: {},
+      startedAt: Date.now() - 5000,
+      endedAt: Date.now(),
+      steps: [{
+        id: 'review',
+        tool: 'node',
+        role: 'reviewer',
+        artifacts: ['human-decision'],
+        status: 'checkpoint',
+        command: 'node',
+        args: ['--version'],
+        message: 'manual checkpoint required',
+      }],
+    });
+
+    await withServer(async ({ port, token }) => {
+      const resolved = await request(port, token, 'POST', `/workflow/gates/${runId}/review/resolve`, {
+        decision: 'approve',
+        constraints: ['use TypeScript', 'no external deps'],
+      });
+      assert.equal(resolved.status, 200);
+      assert.equal(resolved.body.resumed, true);
+
+      const deadline = Date.now() + 5000;
+      let resumed;
+      while (Date.now() < deadline) {
+        const runs = new WorkflowRunHistory().list();
+        resumed = runs.find((entry) => entry.id === runId);
+        if (resumed && resumed.status !== 'paused') break;
+        await new Promise((r) => setTimeout(r, 80));
+      }
+      assert.ok(resumed, '续跑应当覆盖原 paused 历史条目');
+      // constraints 必须并入 values：续跑后的 run 状态里能查到，后续 step 可通过 {constraints} 模板引用。
+      assert.equal(resumed.values.constraints, 'use TypeScript | no external deps');
+    });
+  } finally {
+    if (prev.workflowEnv === undefined) delete process.env.CODEPANION_WORKFLOW_PATH;
+    else process.env.CODEPANION_WORKFLOW_PATH = prev.workflowEnv;
+    if (prev.historyEnv === undefined) delete process.env.CODEPANION_WORKFLOW_HISTORY_PATH;
+    else process.env.CODEPANION_WORKFLOW_HISTORY_PATH = prev.historyEnv;
+    if (prev.artifactEnv === undefined) delete process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH;
+    else process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH = prev.artifactEnv;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('W-20 board endpoint 聚合 workflow definitions、recent runs、pending gates', async () => {
   const {
     WorkflowDefinitionManager,

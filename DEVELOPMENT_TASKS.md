@@ -72,5 +72,9 @@ CodePanion 后续专注：
 
 - [x] **W-30** 支持同一模型绑定不同角色 prompt、权限和上下文策略。
 - [-] **W-31** 支持不同 provider / model 在同一 workflow 中协作。
-- [-] **W-32** 支持人工在计划、审查、交付门中批准、拒绝、要求重试或追加约束。
+- [x] **W-32** 支持人工在计划、审查、交付门中批准、拒绝、要求重试或追加约束。
+  - approve：复用原 runId 从 checkpoint 之后续跑（PR #8）
+  - reject：仅落 human-decision artifact，run 维持 paused
+  - retry：复用原 runId，回到 checkpoint 前最近一个 success step 重跑该 step，checkpoint 因 yes:true 自动跳过
+  - constraints：列表并入 resumed run 的 `values.constraints`，后续 step 可用 `{constraints}` 模板引用
 - [ ] **W-33** 每次完成 workflow 后生成可复盘交付摘要，并能复制给 Codex / Claude Code / OpenCode 继续处理。

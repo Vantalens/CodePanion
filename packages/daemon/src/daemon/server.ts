@@ -882,8 +882,12 @@ export function createServer(
   });
 
   // W-32 收尾：人工对当前停在 checkpoint 的 run/step 做决定，落一条 human-decision artifact。
-  // approve 分支会在 daemon 内 fire-and-forget 触发同 workflow 的续跑（带 yes:true），返回 newRunId；
-  // reject / retry 仅落 artifact 不续跑（retry 留给后续轮次让人重新发起）。
+  // 三种决策：
+  //   approve  → 复用原 runId 从 checkpoint 之后续跑（PR #8 修复，不重跑前序 step）。
+  //   reject   → 只落 artifact，run 永远停在 paused，由上层决定是否归档。
+  //   retry    → 复用原 runId，但 resumeFrom 指向 checkpoint 前最近一个真正执行过的 step；
+  //              那个 step 被重跑一次后，checkpoint 因为 yes:true 自动跳过，继续向后走。
+  // constraints 字段（任何决策都可带）会被并入 values，subsequent step 可通过 {constraints} 模板变量引用。
   app.post('/workflow/gates/:runId/:stepId/resolve', (req, res) => {
     const parsed = ResolveWorkflowGateRequestSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
@@ -904,8 +908,9 @@ export function createServer(
     }
     const lines: string[] = [`decision=${parsed.data.decision}`];
     if (parsed.data.message) lines.push(`message=${parsed.data.message}`);
-    if (parsed.data.constraints && parsed.data.constraints.length > 0) {
-      lines.push(`constraints=${parsed.data.constraints.join(' | ')}`);
+    const constraintList = parsed.data.constraints ?? [];
+    if (constraintList.length > 0) {
+      lines.push(`constraints=${constraintList.join(' | ')}`);
     }
     let artifact;
     try {
@@ -925,35 +930,53 @@ export function createServer(
       return;
     }
 
-    if (parsed.data.decision !== 'approve') {
+    if (parsed.data.decision === 'reject') {
       res.json({ artifact });
       return;
     }
 
     const workflow = stores.definitions.get(previous.workflowName);
     if (!workflow) {
-      // approve 了但找不到 definition：仍返回 artifact，前端可显示「需要重新导入 workflow」。
-      logger.warn({ runId, workflowName: previous.workflowName }, 'approve 时 workflow definition 缺失，跳过续跑');
+      // approve/retry 了但找不到 definition：仍返回 artifact，前端可显示「需要重新导入 workflow」。
+      logger.warn({ runId, workflowName: previous.workflowName, decision: parsed.data.decision }, 'gate resolve 时 workflow definition 缺失，跳过续跑');
       res.json({ artifact, resumeError: 'workflow definition missing' });
       return;
     }
-    // 复用原 runId/startedAt 续跑，runWorkflow 会跳过 stepId 之前的成功 step，从 checkpoint 重新执行；
-    // 这样不会重复跑前面的 step（Codex P1）。同 runId 由 WorkflowRunHistory.append 在写入时覆盖旧条目。
+
+    // retry 时往前找最近一个真正执行过的 step（previous.steps 末尾是 checkpoint 本身，倒数第二就是被审查的那一步）。
+    // 找不到（例如 checkpoint 是 workflow 第一步）就退回 approve 语义，从 checkpoint 之后继续。
+    let resumeStepId = stepId;
+    if (parsed.data.decision === 'retry') {
+      const checkpointIdx = previous.steps.findIndex((step) => step.id === stepId);
+      for (let i = checkpointIdx - 1; i >= 0; i -= 1) {
+        const candidate = previous.steps[i];
+        if (candidate.status === 'success') {
+          resumeStepId = candidate.id;
+          break;
+        }
+      }
+    }
+
+    // constraints 并入 values，让后续 step 的 command/args 通过 {constraints} 模板变量直接拿到人工补充的约束。
+    const resumedValues = constraintList.length > 0
+      ? { ...previous.values, constraints: constraintList.join(' | ') }
+      : previous.values;
+
     runWorkflowOnDaemon({
       workflow,
-      values: previous.values,
+      values: resumedValues,
       yes: true,
       stores,
       workspaceKey: wsKey,
       resumeFrom: {
         runId,
-        stepId,
+        stepId: resumeStepId,
         previousSteps: previous.steps,
         startedAt: previous.startedAt,
       },
-      logContext: { runId, workflowName: previous.workflowName, source: 'gate-approve' },
+      logContext: { runId, workflowName: previous.workflowName, source: `gate-${parsed.data.decision}`, resumeStepId },
     }).catch(() => undefined);
-    res.json({ artifact, resumed: true });
+    res.json({ artifact, resumed: true, resumeStepId });
   });
 
   // W-32 / cancel：让用户停掉 daemon 内正在跑的 workflow。触发 AbortController →
