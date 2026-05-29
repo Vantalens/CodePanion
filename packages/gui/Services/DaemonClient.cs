@@ -383,6 +383,31 @@ namespace CodePanion.Gui.Services
             }
         }
 
+        // W-20：拉一次 daemon 的 /workflow/board 数据（workflow definitions + recent runs + paused gates）。
+        // webview 端按需触发，不放进 push 流，避免和现有 workflow-snapshot 路径互相干扰。
+        // workspace 为空 → 走 daemon fallback 全局 stores；非空 → 按 workspace 隔离。
+        public async Task<string?> FetchWorkflowBoardJsonAsync(string? workspace = null)
+        {
+            try
+            {
+                var url = $"{_daemonUrl}/workflow/board";
+                if (!string.IsNullOrWhiteSpace(workspace))
+                {
+                    url += $"?workspace={Uri.EscapeDataString(workspace)}";
+                }
+                var request = new HttpRequestMessage(HttpMethod.Get, url);
+                request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {_token}");
+                var response = await _httpClient.SendAsync(request);
+                if (!response.IsSuccessStatusCode) return null;
+                return await response.Content.ReadAsStringAsync();
+            }
+            catch (Exception ex)
+            {
+                Log($"刷新 workflow board 失败：{ex.Message}");
+                return null;
+            }
+        }
+
         public async Task<bool> SendReplyAsync(string sessionId, string text, string mode = "option")
         {
             try

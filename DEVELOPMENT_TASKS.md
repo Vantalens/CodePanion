@@ -62,6 +62,10 @@ CodePanion 后续专注：
 ## P2：GUI 从会话流转向 workflow board
 
 - [-] **W-20** 将主界面第一层重排为 workspace / workflow 列表，而不是外部会话列表。
+  - rail 增加 ◫ workflow 视图按钮；切到该视图后 main 区从 chat container 切换为 workflow board
+  - 新增 webview ↔ host 协议 `request-workflow-board` / `workflow-board`，host 端走 [DaemonClient.FetchWorkflowBoardJsonAsync](packages/gui/Services/DaemonClient.cs) 拉 daemon `/workflow/board`
+  - 三列布局：可执行 workflow / 近期 runs / 等待人工门，按 status 染色 left border
+  - 待办：在该视图里点 workflow 直接 POST `/workflow/runs`、点 gate 跳到决策抽屉、按 workspace 切换
 - [ ] **W-21** 中央区域展示 workflow 节点、当前角色、状态、阻塞点和人工审核门。
 - [ ] **W-22** 右侧抽屉展示角色、模型、权限、artifact 和原始执行记录。
 - [ ] **W-23** 保留 `等待我 / 失败 / 需审阅 / 运行中 / 完成`，但状态挂到 workflow 节点和 artifact。

@@ -15,7 +15,10 @@ const state = {
     openSnoozeMenuId: '',
     groupMode: 'workspace',
     batchMode: false,
-    selectedBatchConversationIds: new Set()
+    selectedBatchConversationIds: new Set(),
+    // W-20：workflow board 视图数据。null = 未拉过 / 拉失败；object 形如 daemon /workflow/board 返回。
+    workflowBoard: null,
+    workflowBoardError: '',
 };
 
 const MAX_MESSAGES = 5000;
@@ -2295,6 +2298,10 @@ function handleMessage(message) {
         case 'workflow-event':
             applyWorkflowEvent(message.data || message);
             break;
+        // W-20：host 把 /workflow/board 拉到的数据 push 回来。null 表示拉失败，前端展示错误状态。
+        case 'workflow-board':
+            applyWorkflowBoard(message.board, message.error);
+            break;
         case 'source-registered':
             if (message.source) {
                 const sourceId = message.source.id || message.source.Id || generateId();
@@ -3181,9 +3188,138 @@ function bindViewButtons() {
                     state.activeConversation = state.codeBlocks[state.codeBlocks.length - 1].conversationId;
                 }
             }
+            // W-20：切到 workflow 视图时拉一次 board，其它视图仍走原有 chat 流。
+            if (state.activeView === 'workflow') requestWorkflowBoard();
+            applyWorkflowBoardVisibility();
             renderAll();
         });
     });
+    const refresh = document.getElementById('workflow-board-refresh');
+    if (refresh && refresh.dataset.bound !== '1') {
+        refresh.dataset.bound = '1';
+        refresh.addEventListener('click', () => requestWorkflowBoard());
+    }
+}
+
+// W-20：toggle 主区 chat container 与 workflow board 的可见性。workflow 视图时显示 board、
+// 其它视图回到原 chat container。stage header / spotlight 仍跟着 main 走，不动它们的可见性。
+function applyWorkflowBoardVisibility() {
+    const board = document.getElementById('workflow-board-view');
+    const chat = document.getElementById('chat-container');
+    const spotlight = document.getElementById('task-spotlight');
+    const isBoard = state.activeView === 'workflow';
+    if (board) board.hidden = !isBoard;
+    if (chat) chat.hidden = isBoard;
+    if (spotlight) spotlight.hidden = isBoard;
+}
+
+// W-20：webview 端按需触发 host 端拉 /workflow/board，failure → applyWorkflowBoard 接到 null + error。
+function requestWorkflowBoard() {
+    const status = document.getElementById('workflow-board-status');
+    if (status) status.textContent = '加载中…';
+    sendToHost({ type: 'request-workflow-board' });
+}
+
+// W-20：渲染 host 端拉回的 /workflow/board 数据。三列：可执行 workflow / 近期 run / 等待人工门。
+function applyWorkflowBoard(board, error) {
+    state.workflowBoard = board || null;
+    state.workflowBoardError = error || '';
+    const status = document.getElementById('workflow-board-status');
+    const defs = document.getElementById('workflow-board-definitions');
+    const runs = document.getElementById('workflow-board-runs');
+    const gates = document.getElementById('workflow-board-gates');
+    if (!defs || !runs || !gates) return;
+    defs.innerHTML = '';
+    runs.innerHTML = '';
+    gates.innerHTML = '';
+    if (error) {
+        if (status) status.textContent = `加载失败：${error}`;
+        return;
+    }
+    if (!board) {
+        if (status) status.textContent = 'daemon 未返回数据。';
+        return;
+    }
+    const workflows = Array.isArray(board.workflows) ? board.workflows : [];
+    const runEntries = Array.isArray(board.runs) ? board.runs : [];
+    const gateEntries = Array.isArray(board.gates) ? board.gates : [];
+    if (status) {
+        status.textContent = `workflows=${workflows.length} · runs=${runEntries.length} · gates=${gateEntries.length}`;
+    }
+    workflows.forEach(workflow => defs.appendChild(renderWorkflowDefinitionCard(workflow)));
+    runEntries.forEach(run => runs.appendChild(renderWorkflowRunCard(run)));
+    gateEntries.forEach(gate => gates.appendChild(renderWorkflowGateCard(gate)));
+    if (workflows.length === 0) defs.appendChild(emptyHint('当前 workspace 没有可执行 workflow。'));
+    if (runEntries.length === 0) runs.appendChild(emptyHint('近期没有 workflow 运行记录。'));
+    if (gateEntries.length === 0) gates.appendChild(emptyHint('没有等待人工审核的门。'));
+}
+
+function emptyHint(text) {
+    const div = document.createElement('div');
+    div.className = 'board-empty';
+    div.textContent = text;
+    return div;
+}
+
+function renderWorkflowDefinitionCard(workflow) {
+    const card = document.createElement('div');
+    card.className = 'board-card';
+    const title = document.createElement('strong');
+    title.textContent = workflow.name || 'unknown';
+    card.appendChild(title);
+    if (workflow.description) {
+        const desc = document.createElement('p');
+        desc.className = 'board-card-desc';
+        desc.textContent = workflow.description;
+        card.appendChild(desc);
+    }
+    const meta = document.createElement('p');
+    meta.className = 'board-card-meta';
+    const stepCount = typeof workflow.stepCount === 'number' ? workflow.stepCount : 0;
+    meta.textContent = `${stepCount} 步`;
+    card.appendChild(meta);
+    return card;
+}
+
+function renderWorkflowRunCard(run) {
+    const card = document.createElement('div');
+    card.className = 'board-card';
+    card.dataset.status = run.status || 'unknown';
+    const title = document.createElement('strong');
+    title.textContent = run.workflowName || run.id || 'unknown run';
+    card.appendChild(title);
+    const meta = document.createElement('p');
+    meta.className = 'board-card-meta';
+    const stepCount = typeof run.stepCount === 'number' ? run.stepCount : 0;
+    const status = run.status || 'unknown';
+    meta.textContent = `${status} · ${stepCount} steps · ${run.id || ''}`;
+    card.appendChild(meta);
+    if (run.currentStepId) {
+        const current = document.createElement('p');
+        current.className = 'board-card-detail';
+        current.textContent = `current: ${run.currentStepId}${run.currentStepStatus ? ` (${run.currentStepStatus})` : ''}`;
+        card.appendChild(current);
+    }
+    return card;
+}
+
+function renderWorkflowGateCard(gate) {
+    const card = document.createElement('div');
+    card.className = 'board-card board-gate';
+    const title = document.createElement('strong');
+    title.textContent = `${gate.workflowName || 'workflow'} / ${gate.stepId || 'step'}`;
+    card.appendChild(title);
+    const meta = document.createElement('p');
+    meta.className = 'board-card-meta';
+    meta.textContent = `runId=${gate.runId || ''} · role=${gate.role || 'n/a'}`;
+    card.appendChild(meta);
+    if (gate.title) {
+        const detail = document.createElement('p');
+        detail.className = 'board-card-detail';
+        detail.textContent = gate.title;
+        card.appendChild(detail);
+    }
+    return card;
 }
 
 // J-01：conversation 列表点击走事件委托，rerender 时无需 add/remove listener，
