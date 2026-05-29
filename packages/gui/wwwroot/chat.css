@@ -2046,6 +2046,110 @@ select:focus {
     background: var(--muted-2);
 }
 
+/* W-20：workflow board 视图。三列布局展示 workflow definitions / 近期 runs / 等待人工门，
+   GUI 主屏第一层从「会话流」转向「我现在在编排什么 workflow、在等什么、需要做什么决定」。 */
+#workflow-board-view {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 24px;
+    overflow-y: auto;
+    background: var(--bg);
+    color: var(--muted);
+}
+
+#workflow-board-view .board-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+#workflow-board-view .board-header h2 {
+    margin: 0;
+    font-size: 18px;
+    color: var(--accent);
+}
+
+#workflow-board-view .board-status {
+    color: var(--muted-2);
+    font-size: 12px;
+}
+
+#workflow-board-view .board-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+    min-height: 0;
+}
+
+#workflow-board-view .board-column {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 12px;
+    background: var(--accent-soft);
+    min-height: 0;
+}
+
+#workflow-board-view .board-column h3 {
+    margin: 0 0 4px 0;
+    font-size: 13px;
+    color: var(--muted);
+    font-weight: 600;
+}
+
+#workflow-board-view .board-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow-y: auto;
+}
+
+#workflow-board-view .board-card {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    border: 1px solid var(--line-strong);
+    border-radius: 6px;
+    padding: 10px;
+    background: var(--bg);
+}
+
+#workflow-board-view .board-card strong {
+    color: var(--accent);
+    font-size: 13px;
+}
+
+#workflow-board-view .board-card-desc,
+#workflow-board-view .board-card-meta,
+#workflow-board-view .board-card-detail {
+    margin: 0;
+    font-size: 12px;
+    color: var(--muted);
+}
+
+#workflow-board-view .board-card-meta {
+    color: var(--muted-2);
+}
+
+#workflow-board-view .board-card[data-status="paused"] { border-left: 3px solid #e0af68; }
+#workflow-board-view .board-card[data-status="failed"] { border-left: 3px solid #f7768e; }
+#workflow-board-view .board-card[data-status="success"] { border-left: 3px solid #9ece6a; }
+#workflow-board-view .board-card[data-status="running"] { border-left: 3px solid var(--accent); }
+
+#workflow-board-view .board-gate { border-left: 3px solid #e0af68; }
+
+#workflow-board-view .board-empty {
+    color: var(--muted-2);
+    font-size: 12px;
+    padding: 8px;
+    text-align: center;
+    font-style: italic;
+}
+
 /* 窄屏：单栏 fallback */
 @media (max-width: 760px) {
     #app-shell {
@@ -2059,5 +2163,8 @@ select:focus {
     }
     #app-shell.show-main #conversation-main {
         display: block;
+    }
+    #workflow-board-view .board-grid {
+        grid-template-columns: 1fr;
     }
 }

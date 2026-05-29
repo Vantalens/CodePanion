@@ -32,6 +32,7 @@ namespace CodePanion.Gui
             "task-action",
             "handoff-launch",
             "open-external",
+            "request-workflow-board",
         };
 
         private readonly DaemonClient _daemonClient;
@@ -272,6 +273,15 @@ namespace CodePanion.Gui
                         {
                             AddLog($"忽略非法 open-external href：{href ?? "<empty>"}");
                         }
+                        break;
+                    }
+
+                    // W-20：webview 切到 workflow 视图时按需拉一次 /workflow/board，单方向 push 回 webview。
+                    // 不放进 push 流（避免和 workflow-snapshot 路径互相干扰），webview 自己控制刷新节奏。
+                    case "request-workflow-board":
+                    {
+                        var workspace = message["workspace"]?.Value<string>();
+                        _ = HandleWorkflowBoardRequestAsync(workspace);
                         break;
                     }
                 }
@@ -810,6 +820,29 @@ namespace CodePanion.Gui
             catch (Exception ex)
             {
                 AddLog($"刷新 daemon 快照失败：{ex.Message}");
+            }
+        }
+
+        // W-20：响应 webview 端 request-workflow-board，按 workspace 拉 /workflow/board，
+        // 解析后单向 push 一条 workflow-board 消息回 webview。失败时 push null 让前端展示空状态。
+        private async Task HandleWorkflowBoardRequestAsync(string? workspace)
+        {
+            try
+            {
+                var json = await _daemonClient.FetchWorkflowBoardJsonAsync(workspace);
+                JToken? board = null;
+                if (!string.IsNullOrWhiteSpace(json))
+                {
+                    board = JToken.Parse(json!);
+                }
+                await Dispatcher.InvokeAsync(() =>
+                    SendMessageToWeb(new { type = "workflow-board", workspace, board }));
+            }
+            catch (Exception ex)
+            {
+                AddLog($"处理 request-workflow-board 失败：{ex.Message}");
+                await Dispatcher.InvokeAsync(() =>
+                    SendMessageToWeb(new { type = "workflow-board", workspace, board = (object?)null, error = ex.Message }));
             }
         }
 

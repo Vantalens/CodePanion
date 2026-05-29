@@ -20,6 +20,7 @@
             <button class="rail-button" type="button" data-view="done" title="已完成" aria-label="已完成">✓</button>
             <button class="rail-button" type="button" data-view="later" title="稍后 / 归档" aria-label="稍后 / 归档">◷</button>
             <button class="rail-button" type="button" data-view="code" title="代码产物" aria-label="代码产物">{}</button>
+            <button class="rail-button" type="button" data-view="workflow" title="工作流 board" aria-label="工作流 board">◫</button>
             <div class="rail-spacer"></div>
             <div class="rail-status" title="本地 daemon 连接状态">
                 <span class="status-dot"></span>
@@ -166,6 +167,32 @@
                 </div>
             </section>
             <section id="chat-container" aria-live="polite"></section>
+            <!-- W-20：workflow board 视图。rail 的 workflow 按钮激活时显示，其它视图隐藏。
+                 数据来自 daemon /workflow/board，按 workspace 隔离。GUI 把 workflow definitions /
+                 active runs / paused gates 三列展开，让 IDE 主屏第一层就是「我现在在跑什么、在等什么」。 -->
+            <section id="workflow-board-view" aria-label="工作流 board" hidden>
+                <header class="board-header">
+                    <h2>工作流 board</h2>
+                    <div class="board-actions">
+                        <button id="workflow-board-refresh" class="action-button" type="button">刷新</button>
+                    </div>
+                </header>
+                <div id="workflow-board-status" class="board-status">尚未拉取数据。</div>
+                <div class="board-grid">
+                    <section class="board-column" aria-label="可执行 workflow">
+                        <h3>可执行 workflow</h3>
+                        <div id="workflow-board-definitions" class="board-list"></div>
+                    </section>
+                    <section class="board-column" aria-label="近期运行">
+                        <h3>近期运行</h3>
+                        <div id="workflow-board-runs" class="board-list"></div>
+                    </section>
+                    <section class="board-column" aria-label="等待人工审核">
+                        <h3>人工门</h3>
+                        <div id="workflow-board-gates" class="board-list"></div>
+                    </section>
+                </div>
+            </section>
         </main>
 
         <aside id="code-browser">
