@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `format=markdown`（默认）→ delivery-note 原文加上 workflow/status/runId/steps header
   - `format=handoff` → 在 markdown 外再包一层 continuation prompt，可整段贴到 `codex exec` / `claude -p` / `opencode run` 让外部 AI 接着推进
   - 找不到 delivery-note（run 还没跑完、或 paused 且未生成 note）→ 404
+- **W-31 step output 持久化**：`WorkflowStepRunSchema` 新增可选 `output: { stdout, stderr, truncated }`，`runWorkflow.executor` 接受 `ExecutorResult` 联合类型（保留 `Promise<number>` 旧形态）。
+  - `daemonWorkflowExecutor` 在 spawn 子进程时同时把 stdout/stderr 累积到 buffer，每流 cap 32KB；超过 cap 后 WS 推送照旧但持久化打 `truncated=true`
+  - `recordDeliveryNote` 自动追加 `## Step output preview` 段，每个 step 取 stdout/stderr 头 30 + 末 10 行，让续作的外部 AI 在 handoff 时能看到上一轮 provider 真实返回
 
 ### Positioning
 

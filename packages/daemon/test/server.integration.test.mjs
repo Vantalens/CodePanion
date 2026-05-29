@@ -2124,6 +2124,82 @@ test('W-32 approve 触发 daemon 续跑，观察者通过 WS 收到 workflow-run
   }
 });
 
+test('W-31 daemon executor 落 stdout/stderr 到 stepRun.output，delivery-note 带 preview', async () => {
+  const {
+    WorkflowDefinitionManager,
+    WorkflowRunHistory,
+    WorkflowArtifactStore,
+    parseWorkflowSteps,
+  } = await import('../dist/workflows/workflowDefinitionManager.js');
+  const dir = mkdtempSync(join(tmpdir(), 'codepanion-stepout-'));
+  const prev = {
+    workflowEnv: process.env.CODEPANION_WORKFLOW_PATH,
+    historyEnv: process.env.CODEPANION_WORKFLOW_HISTORY_PATH,
+    artifactEnv: process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH,
+  };
+  process.env.CODEPANION_WORKFLOW_PATH = join(dir, 'workflows.json');
+  process.env.CODEPANION_WORKFLOW_HISTORY_PATH = join(dir, 'runs.ndjson');
+  process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH = join(dir, 'artifacts.ndjson');
+  try {
+    // 用 `node -e` 在 stdout / stderr 都写一段确定字符串，方便断言 stepRun.output 是否真的捕获到。
+    // 同时验证 delivery-note 里把 stdout/stderr 都摘进 ## Step output preview 区。
+    // parseWorkflowSteps 用 ; 分字段，inline node JS 会撞分隔符；改成直接构造 step 描述更直接。
+    new WorkflowDefinitionManager().save({
+      name: 'stepout-target',
+      steps: [{
+        id: 'probe',
+        role: 'builder',
+        tool: 'node',
+        provider: 'local',
+        permissions: [],
+        contextPolicy: {},
+        artifacts: ['patch-summary'],
+        command: 'node',
+        args: ['-e', "process.stdout.write('CP_OUT_OK\\n');process.stderr.write('CP_ERR_OK\\n');"],
+        values: {},
+        dependsOn: [],
+        checkpoint: false,
+      }],
+    });
+
+    await withServer(async ({ port, token }) => {
+      const start = await request(port, token, 'POST', '/workflow/runs', { workflow: 'stepout-target' });
+      assert.equal(start.status, 200);
+      const deadline = Date.now() + 5000;
+      let finished;
+      while (Date.now() < deadline) {
+        const runs = new WorkflowRunHistory().list();
+        finished = runs.find((entry) => entry.workflowName === 'stepout-target' && entry.status !== 'paused');
+        if (finished && finished.status === 'success') break;
+        await new Promise((r) => setTimeout(r, 80));
+      }
+      assert.ok(finished, 'daemon executor 应当跑完 stepout-target');
+      assert.equal(finished.status, 'success');
+      const probeStep = finished.steps.find((s) => s.id === 'probe');
+      assert.ok(probeStep, '应当能在 finished.steps 找到 probe');
+      assert.ok(probeStep.output, 'stepRun.output 应当被 daemon executor 落进 run 历史');
+      assert.match(probeStep.output.stdout, /CP_OUT_OK/, 'stepRun.output.stdout 应当包含 stdout 真实输出');
+      assert.match(probeStep.output.stderr, /CP_ERR_OK/, 'stepRun.output.stderr 应当包含 stderr 真实输出');
+      assert.equal(probeStep.output.truncated, false);
+
+      // delivery-note 必须把 step 输出摘要带上，方便复制给外部 AI 时一眼看到上一轮 provider 返回了什么。
+      const note = new WorkflowArtifactStore().list(finished.id).find((a) => a.type === 'delivery-note');
+      assert.ok(note, '应当有 delivery-note artifact');
+      assert.match(note.content, /## Step output preview/);
+      assert.match(note.content, /CP_OUT_OK/);
+      assert.match(note.content, /CP_ERR_OK/);
+    });
+  } finally {
+    if (prev.workflowEnv === undefined) delete process.env.CODEPANION_WORKFLOW_PATH;
+    else process.env.CODEPANION_WORKFLOW_PATH = prev.workflowEnv;
+    if (prev.historyEnv === undefined) delete process.env.CODEPANION_WORKFLOW_HISTORY_PATH;
+    else process.env.CODEPANION_WORKFLOW_HISTORY_PATH = prev.historyEnv;
+    if (prev.artifactEnv === undefined) delete process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH;
+    else process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH = prev.artifactEnv;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('W-32 approve 在原 runId 上从 checkpoint 续跑同 workflow，落 delivery-note', async () => {
   const {
     WorkflowDefinitionManager,
