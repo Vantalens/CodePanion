@@ -2,7 +2,7 @@
 
 ## 目标
 
-CodePanion 的新主线是个人本地 AI 工作流操作台。用户从一个产品目标出发，在本机完成任务拆分、AI 角色分工、多模型协作、人工审核和产品产出归档。外部工具不再是被动监听对象，只能作为用户显式调用的 workflow 执行器或上下文输入。
+CodePanion 的主线是「个人 Agent AI IDE + 本地 AI 工作流控制台」：CodePanion 自身是 Agent IDE，通过逆向接口和 API 调用 Codex / Claude Code / OpenCode 等外部 AI 编程工具的能力，并在本地把这些调用编排成可审核、可归档的多步骤 workflow。用户从一个产品目标出发，在本机完成任务拆分、AI 角色分工、多模型协作、人工审核和产品产出归档。外部工具不再是被动监听对象，也不是被「派活」的接收方，而是 CodePanion 主动调用的能力源。
 
 ## 参考原则
 
@@ -91,13 +91,14 @@ CodePanion 支持两种使用方式：
 
 模型选择不应成为产品入口。用户面对的是角色和 workflow；模型只是角色配置的一部分。
 
-## 执行器边界
+## 能力源边界
 
-Codex、Claude Code、OpenCode 和 CLI/PTTY 都应被抽象为 executor：
+Codex、Claude Code、OpenCode 和本地 CLI/PTY 都是 CodePanion 主动调用的**能力源**，统一抽象为一个 capability source：
 
-- `executor`：能执行某个 workflow 节点，例如运行编码任务、测试命令或文档生成。
+- `capability source`：CodePanion 通过逆向接口 / API / CLI / SDK 调用的外部能力，能完成某个 workflow 节点，例如运行编码任务、测试命令或文档生成。
+- CodePanion 是调用方，能力源是被调用方；workflow 角色与能力源的绑定描述「这个角色会调用谁」，而不是「这个角色把任务派给谁」。
 
-上下文输入不独立成为监听来源。用户可以手动选择文件、目录、历史记录或诊断文本交给 workflow，但 CodePanion 不主动监听外部窗口，也不猜测闭源工具内部状态。任何写回、命令执行或跨工具调用都必须是用户显式授权的 executor 行为。
+上下文输入不独立成为监听来源。用户可以手动选择文件、目录、历史记录或诊断文本交给 workflow，但 CodePanion 不主动监听外部窗口，也不读取闭源工具的私有存储或登录态。任何写回、命令执行或跨工具调用都必须是用户显式授权的能力源调用。
 
 ## GUI 形态
 
@@ -117,7 +118,7 @@ GUI 的第一屏应从“会话流”转向“workflow board”：
 - 更新定位、路线图、开发任务和架构叙事
 - 定义 workspace / role / workflow / human gate / artifact 模型
 - 从当前路线中移除监听来源设计
-- 将 handoff 叙事收敛为 executor / role assignment 叙事
+- 将 handoff 叙事收敛为「角色调用能力源」叙事（CodePanion 是调用方）
 - 暂不改 daemon / GUI 运行时代码
 
 后续代码实现应优先复用现有 `workflowManager`、`workflowDefinitionManager`、`WorkflowRunHistory`、GUI 任务状态和 handoff 回流结构。

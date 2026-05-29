@@ -5,6 +5,19 @@ All notable changes to CodePanion will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Positioning
+
+- 产品定位明确为「个人 Agent AI IDE + AI 工作流控制台」双重身份：CodePanion 自身是 Agent IDE，通过逆向接口和 API 主动调用 Codex / Claude Code / OpenCode 等外部 AI 编程工具的能力作为可编排能力源（不是把任务派给它们，也不是被动监听它们）。同步更新 README、POSITIONING、PRODUCT_ROADMAP、LOCAL_AI_WORKFLOW、DEVELOPMENT_TASKS。
+
+### Fixed
+
+- **gate 续跑不再从头重跑**（Codex P1）：人工在 paused checkpoint 上批准后，daemon 复用原 runId 和 startedAt，只跑 checkpoint 之后的 step，前序已成功 step 不重复执行。`runWorkflow` 新增 `resumeFrom: { runId, stepId, previousSteps, startedAt }` 参数。
+- **board 按 workspace 过滤 active runs**（Codex P2）：`/workflow/board?workspace=...` 之前会把全局 `activeRuns` Map 里所有 workspace 的 active run 都合并出去，导致 A workspace 在跑时 B workspace 的 board 也能看到。`ActiveRunSnapshot` 新增 `workspaceKey`，board endpoint 按当前 workspace key 过滤。
+- **daemon 编译恢复**：上一轮 CodeQL autofix 在 `server.ts` / `workspaceManager.ts` 留下未导入的 `HOME_DIR` / `pathSep` / `isAbsolute` / `existsSync` / `sep` 以及一段 `... ? false : false` 的死代码，daemon TypeScript 编译失败。已补齐导入、去掉死代码、统一用 `node:path` 的 `sep`。
+- **修正 workspace root 的错误边界**：autofix 把 workspace root 限定在 `~/.codepanion`（HOME_DIR）下，但 workspace 是用户项目目录、不是 daemon 私有目录。还原为「root 只做 `resolve()` 归一化」，并在 `readConfig` 用新增的 [`packages/daemon/src/workflows/pathSafety.ts`](packages/daemon/src/workflows/pathSafety.ts) 的 `ensurePathInside(workflowPath, this.root, ...)` 校验派生路径不逃出 root，给 CodeQL 提供它需要看到的 containment 数据流。
+
 ## [0.2.0] - 2026-05-12
 
 ### Added
