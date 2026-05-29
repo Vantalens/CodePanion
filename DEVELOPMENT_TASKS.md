@@ -17,13 +17,13 @@
 
 ## 当前产品标准
 
-> **本地优先、供应商中立、面向个人开发者的 AI 工作流操作台。**
+> **本地优先、供应商中立、面向个人开发者的 Agent AI IDE + AI 工作流控制台。**
 
 CodePanion 后续专注：
 
 1. **任务拆分**：把用户目标拆成可审核、可执行、可回收的 workflow 节点。
 2. **角色协作**：用 Orchestrator、Planner、Builder、Tester、Reviewer、Docs Writer 等角色推进开发。
-3. **显式执行器**：Codex、Claude Code、OpenCode、CLI/PTTY 等只能作为用户显式调用的 executor。
+3. **能力源调用**：通过逆向接口 / API / CLI 调用 Codex、Claude Code、OpenCode、本地 CLI/PTY 等外部能力 —— CodePanion 是调用方，把它们当作可编排的能力源，不是把任务派给它们。
 4. **人工审核**：需求、计划、审查、交付等关键节点必须能由用户批准、拒绝或要求重试。
 5. **产出闭环**：记录计划、变更摘要、测试结果、审查报告、人工决策和交付摘要。
 
