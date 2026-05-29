@@ -113,8 +113,12 @@ import {
   runWorkflow,
   type WorkflowDefinition,
   type WorkflowStepRun,
+  type AgentStepRequest,
 } from '../workflows/workflowDefinitionManager.js';
+import { readFileSync } from 'node:fs';
 import { join as joinPath, resolve as resolvePath } from 'node:path';
+import { chatCompletion, ModelClientError, type ChatMessage } from '../models/modelClient.js';
+import type { ModelBackend } from '../config.js';
 import { logger, maskString } from '../logger.js';
 import { VERSION } from '../shared/version.js';
 
@@ -744,6 +748,64 @@ export function createServer(
     // step-start hook 在调 executor 之前触发，所以 executor 内拿到 chunk 时 currentContext 已就绪。
     let currentContext: { runId: string; workflowName: string; stepId: string } | undefined;
     const controller = new AbortController();
+
+    // 执行模型两轴重构：architecture=agent 的 step 走这个进程内 agent executor（slice 1 = single-call）。
+    // 解析顺序：model 取 step.model → role 绑定.model → cfg.defaultModel 中第一个能在 cfg.models 命中的；
+    // role 的 system prompt 取自该 workspace roleBindings[role].promptPath 的 .md。调 modelClient 后把返回
+    // 文本通过 step-output 事件实时推 WS，并作为 ExecutorResult.stdout 落进 history。
+    const daemonAgentExecutor = async (req: AgentStepRequest) => {
+      let systemPrompt: string | undefined;
+      let roleModel: string | undefined;
+      if (req.role && opts.workspaceKey) {
+        try {
+          const wsConfig = new CodePanionWorkspaceManager(opts.workspaceKey).readConfig();
+          const binding = wsConfig?.roleBindings?.[req.role];
+          if (binding) {
+            roleModel = binding.model;
+            if (binding.promptPath) {
+              try {
+                systemPrompt = readFileSync(joinPath(opts.workspaceKey, binding.promptPath), 'utf8');
+              } catch { /* prompt 文件缺失 → 无 system prompt，不致命 */ }
+            }
+          }
+        } catch { /* workspace config 读不到 → 退回无 role 信息 */ }
+      }
+      const candidates = [req.model, roleModel, cfg.defaultModel].filter((x): x is string => Boolean(x));
+      let backend: ModelBackend | undefined;
+      let chosenModel: string | undefined;
+      for (const id of candidates) {
+        if (cfg.models && cfg.models[id]) { backend = cfg.models[id]; chosenModel = id; break; }
+      }
+      if (!backend) {
+        return {
+          exitCode: 1,
+          stdout: '',
+          stderr: `未找到模型后端：候选 model=[${candidates.join(', ') || '(无)'}]，请在 config.json 的 models / defaultModel 里配置`,
+        };
+      }
+      const messages: ChatMessage[] = [];
+      if (systemPrompt && systemPrompt.trim()) messages.push({ role: 'system', content: systemPrompt });
+      messages.push({ role: 'user', content: req.prompt });
+      try {
+        const result = await chatCompletion({ backend, messages, signal: controller.signal });
+        // 实时把模型返回推给 WS observer（非流式，一次性整段）。
+        workflows.emitRunEvent({
+          action: 'step-output',
+          runId: req.runId,
+          workflowName: opts.workflow.name,
+          stepId: req.stepId,
+          stream: 'stdout',
+          chunk: result.text,
+          truncated: false,
+        });
+        logger.info({ ...opts.logContext, runId: req.runId, stepId: req.stepId, model: chosenModel, usage: result.usage }, 'agent step 完成');
+        return { exitCode: 0, stdout: result.text, stderr: '', truncated: false };
+      } catch (err) {
+        const msg = err instanceof ModelClientError ? err.message : (err instanceof Error ? err.message : String(err));
+        return { exitCode: 1, stdout: '', stderr: `模型调用失败：${msg}` };
+      }
+    };
+
     const promise = runWorkflow({
       workflow: opts.workflow,
       values: opts.values,
@@ -751,6 +813,7 @@ export function createServer(
       dryRun: opts.dryRun,
       artifactStore: store,
       resumeFrom: opts.resumeFrom,
+      agentExecutor: daemonAgentExecutor,
       executor: (command, args) => daemonWorkflowExecutor(
         command,
         args,

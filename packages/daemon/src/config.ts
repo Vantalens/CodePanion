@@ -115,6 +115,18 @@ const RetentionSchema = z
     workflow: { ...RETENTION_DEFAULTS.workflow },
   });
 
+// 执行模型两轴重构：模型 API 后端。architecture=agent 的 step 通过 modelClient 调这里配置的后端。
+// 目前只支持 OpenAI 兼容的 /chat/completions（DeepSeek 等都用这套），baseURL 不带末尾 /chat/completions。
+// apiKey 是敏感凭据：config.json 由 writeOwnerOnly 以 0600 / Windows ACL 保护，logger 已对 apiKey 脱敏。
+const ModelBackendSchema = z.object({
+  kind: z.literal('openai-compatible').default('openai-compatible'),
+  baseURL: z.string().min(1),
+  apiKey: z.string().default(''),
+  model: z.string().min(1),
+  temperature: z.number().optional(),
+  maxTokens: z.number().int().positive().optional(),
+});
+
 const ConfigSchema = z.object({
   port: z.number().int().min(1024).max(65535).default(7777),
   token: z.string().min(16),
@@ -133,9 +145,14 @@ const ConfigSchema = z.object({
     { label: '全部接受', text: '1\n' },
     { label: '取消', text: 'no\n' },
   ]),
+  // 模型后端注册表：key 是 model id（被 step.model / roleBinding.model / defaultModel 引用）。
+  models: z.record(z.string().min(1), ModelBackendSchema).default({}),
+  // 未在 step / role 指定 model 时回退的 model id。
+  defaultModel: z.string().optional(),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
+export type ModelBackend = z.infer<typeof ModelBackendSchema>;
 export type Template = z.infer<typeof TemplateSchema>;
 export type RetentionConfig = z.infer<typeof RetentionSchema>;
 

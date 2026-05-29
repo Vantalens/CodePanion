@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **执行模型两轴化（architecture × model，slice 1 = single-call）**：workflow step 执行从「shell 出去调外部 CLI（codex exec / claude -p / opencode run）」改为「进程内 agent 架构 × 模型 API 后端」两条正交轴——一切在 CodePanion 内进行。
+  - step 新增 `architecture: 'shell' | 'agent'`。`shell` 仍 spawn 本机命令（跑测试等）；`agent` 由 CodePanion 进程内 agent 运行时组 prompt → 调模型 API（slice 1 单次 `/chat/completions`）→ 捕获返回文本为 step output / artifact，并通过 WS `step-output` 实时推送。
+  - 历史 `provider` 兼容派生：`local→shell`，`codex/claude-code/opencode→agent`（不再 shell 外部 CLI；旧 `providerInvocation` 的 CLI 拼装退役）。
+  - config.json 新增 `models`（OpenAI 兼容后端：baseURL/apiKey/model，0600 保护）+ `defaultModel`；新增 [modelClient.ts](packages/daemon/src/models/modelClient.ts)（内置 fetch，零 SDK 依赖）。
+  - daemon `runWorkflowOnDaemon` 注入 `agentExecutor`：按 `step.model → role 绑定.model → defaultModel` 解析后端，按 `step.role → workspace roleBindings[role].promptPath` 读 system prompt，调 modelClient。
+  - 已知边界（本轮不做）：tool-use 循环（读写文件 / 跑命令 / 沙箱）、GUI 里编辑模型后端。
+  - 真实联网验证需用户用自己的 key（config.json 填 DeepSeek 后端 + `architecture=agent` 的 step）。
+
 ### Changed
 
 - **GUI 重建为工作流控制台，移除监听式界面**：主界面之前仍是改路线前的监听模型（VS Code 插件面板 / 按来源分组的任务队列 / 会话流 / 接力 PTY 面板 / 收件箱 / session 回复），与「个人 Agent AI IDE + 工作流控制台」定位冲突。本次把 GUI shell（chat.html/js/css）整体重写为工作流控制台：
