@@ -2379,6 +2379,94 @@ test('W-32 constraints 经 gate 决策注入 resumed run 的 values', async () =
   }
 });
 
+test('W-33 delivery endpoint 返回 markdown 与 handoff 两种格式，找不到 delivery-note 时 404', async () => {
+  const {
+    WorkflowRunHistory,
+    WorkflowArtifactStore,
+  } = await import('../dist/workflows/workflowDefinitionManager.js');
+  const dir = mkdtempSync(join(tmpdir(), 'codepanion-delivery-'));
+  const prev = {
+    workflowEnv: process.env.CODEPANION_WORKFLOW_PATH,
+    historyEnv: process.env.CODEPANION_WORKFLOW_HISTORY_PATH,
+    artifactEnv: process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH,
+  };
+  process.env.CODEPANION_WORKFLOW_PATH = join(dir, 'workflows.json');
+  process.env.CODEPANION_WORKFLOW_HISTORY_PATH = join(dir, 'runs.ndjson');
+  process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH = join(dir, 'artifacts.ndjson');
+  try {
+    const runId = 'run-delivery-1';
+    new WorkflowRunHistory().append({
+      id: runId,
+      workflowName: 'delivery-demo',
+      status: 'success',
+      values: {},
+      startedAt: Date.now() - 1000,
+      endedAt: Date.now(),
+      steps: [
+        { id: 'build', tool: 'node', role: 'builder', artifacts: [], status: 'success', command: 'node', args: ['--version'], exitCode: 0 },
+        { id: 'publish', tool: 'node', role: 'builder', artifacts: ['delivery-note'], status: 'success', command: 'node', args: ['--version'], exitCode: 0 },
+      ],
+    });
+    const store = new WorkflowArtifactStore();
+    store.append({
+      runId,
+      workflowName: 'delivery-demo',
+      stepId: 'publish',
+      role: 'builder',
+      type: 'delivery-note',
+      title: 'delivery-demo success',
+      content: 'workflow=delivery-demo\nrunId=run-delivery-1\nstatus=success\nsteps=2\n\n## Steps\n- build [node role=builder] success\n- publish [node role=builder] success',
+      files: ['README.md'],
+    });
+
+    await withServer(async ({ port, token }) => {
+      // 默认 markdown 格式：返回 delivery-note 原文 + header。
+      const md = await request(port, token, 'GET', `/workflow/runs/${runId}/delivery`);
+      assert.equal(md.status, 200);
+      assert.equal(md.body.runId, runId);
+      assert.equal(md.body.workflowName, 'delivery-demo');
+      assert.equal(md.body.status, 'success');
+      assert.equal(md.body.format, 'markdown');
+      assert.ok(md.body.content.startsWith('# CodePanion delivery note: delivery-demo'), 'markdown 应当带 header');
+      assert.ok(md.body.content.includes('## Steps'), 'markdown 应当包含原 delivery-note 正文');
+      assert.deepEqual(md.body.files, ['README.md']);
+
+      // handoff 格式：把 markdown 包进 continuation prompt，可直接喂给 Codex / Claude Code / OpenCode。
+      const ho = await request(port, token, 'GET', `/workflow/runs/${runId}/delivery?format=handoff`);
+      assert.equal(ho.status, 200);
+      assert.equal(ho.body.format, 'handoff');
+      assert.ok(ho.body.content.includes('continuing a CodePanion workflow'), 'handoff 必须带 continuation 引子');
+      assert.ok(ho.body.content.includes('## Steps'), 'handoff 仍要包含 delivery-note 正文');
+      assert.ok(ho.body.content.includes('Please continue this workflow'), 'handoff 必须带行动指令尾部');
+
+      // 没有 delivery-note 的 run → 404。
+      new WorkflowRunHistory().append({
+        id: 'run-no-delivery',
+        workflowName: 'delivery-demo',
+        status: 'paused',
+        values: {},
+        startedAt: Date.now() - 500,
+        endedAt: Date.now(),
+        steps: [],
+      });
+      const missing = await request(port, token, 'GET', `/workflow/runs/run-no-delivery/delivery`);
+      assert.equal(missing.status, 404);
+
+      // 不存在的 runId → 404。
+      const unknown = await request(port, token, 'GET', `/workflow/runs/run-does-not-exist/delivery`);
+      assert.equal(unknown.status, 404);
+    });
+  } finally {
+    if (prev.workflowEnv === undefined) delete process.env.CODEPANION_WORKFLOW_PATH;
+    else process.env.CODEPANION_WORKFLOW_PATH = prev.workflowEnv;
+    if (prev.historyEnv === undefined) delete process.env.CODEPANION_WORKFLOW_HISTORY_PATH;
+    else process.env.CODEPANION_WORKFLOW_HISTORY_PATH = prev.historyEnv;
+    if (prev.artifactEnv === undefined) delete process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH;
+    else process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH = prev.artifactEnv;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('W-20 board endpoint 聚合 workflow definitions、recent runs、pending gates', async () => {
   const {
     WorkflowDefinitionManager,

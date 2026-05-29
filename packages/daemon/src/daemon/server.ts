@@ -832,6 +832,69 @@ export function createServer(
     }
   });
 
+  // W-33：把某次 run 的 delivery-note 拉成可直接喂给外部 AI（Codex / Claude Code / OpenCode）的文本。
+  // - format=markdown（默认）：delivery-note 原文加上一个简单的元信息 header，适合做归档或人读。
+  // - format=handoff：在原文外再包一层 continuation prompt，可整段粘到 codex exec / claude -p / opencode run。
+  // 找不到 delivery-note 时回 404，调用方据此提示 GUI 「该 run 还没产出交付摘要」。
+  app.get('/workflow/runs/:runId/delivery', (req, res) => {
+    try {
+      const { stores } = workspaceFor(typeof req.query.workspace === 'string' ? req.query.workspace : undefined);
+      const { runId } = req.params;
+      const run = stores.history.get(runId);
+      if (!run) {
+        res.status(404).json({ error: 'workflow run not found' });
+        return;
+      }
+      // 同一 runId 上可能落多条 delivery-note（续跑时 recordDeliveryNote 会再写一条覆盖语义不强），
+      // 这里取最新一条（createdAt 最大）作为当前交付状态。
+      const candidates = stores.artifactStore.list(runId).filter((entry) => entry.type === 'delivery-note');
+      if (candidates.length === 0) {
+        res.status(404).json({ error: 'delivery-note not found for this run' });
+        return;
+      }
+      const note = candidates.reduce((best, cur) => (cur.createdAt > best.createdAt ? cur : best));
+      const formatRaw = typeof req.query.format === 'string' ? req.query.format : 'markdown';
+      const format = formatRaw === 'handoff' ? 'handoff' : 'markdown';
+      const header = [
+        `# CodePanion delivery note: ${run.workflowName}`,
+        '',
+        `- Status: ${run.status}`,
+        `- Run ID: ${runId}`,
+        `- Steps: ${run.steps.length}`,
+        '',
+      ].join('\n');
+      const body = `${header}${note.content}`;
+      const content = format === 'handoff'
+        ? [
+            'You are continuing a CodePanion workflow that was previously run.',
+            'Below is the delivery note from the prior run; treat it as the source of truth for what has already been done.',
+            '',
+            '---',
+            '',
+            body,
+            '',
+            '---',
+            '',
+            'Please continue this workflow:',
+            '- If the previous run ended in `paused` or `failed`, focus on the blocker before doing anything else.',
+            '- Honor every constraint recorded above; do not regress prior artifacts.',
+            '- If the previous run ended in `success`, propose the next iteration consistent with the existing artifacts.',
+            '- Return a short patch summary at the end so the next run can be appended.',
+          ].join('\n')
+        : body;
+      res.json({
+        runId,
+        workflowName: run.workflowName,
+        status: run.status,
+        format,
+        content,
+        files: note.files,
+      });
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message ?? 'invalid workspace' });
+    }
+  });
+
   // W-20 起手：一个 endpoint 聚合 GUI 主面板所需的 board 视图——可选执行的 workflow definitions、
   // 最近若干次 run、当前等待人工审核的 gates。GUI 渲染左侧 workflow 列表 + 中央 board + 右侧人工门。
   app.get('/workflow/board', (req, res) => {

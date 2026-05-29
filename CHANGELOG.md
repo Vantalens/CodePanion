@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `retry` → 复用原 runId，回到 checkpoint 前最近一个 success step 重新执行；checkpoint 因 `yes:true` 自动跳过
   - `reject` → 不续跑，仅落 human-decision artifact
   - 任何决策都可携带 `constraints` 列表，会作为 `constraints` 字段并入 resumed run 的 values，后续 step 可通过 `{constraints}` 模板引用
+- **W-33 delivery export endpoint**：`GET /workflow/runs/:runId/delivery?workspace=...&format=markdown|handoff` 把最新一条 `delivery-note` artifact 拉成可直接复制的文本：
+  - `format=markdown`（默认）→ delivery-note 原文加上 workflow/status/runId/steps header
+  - `format=handoff` → 在 markdown 外再包一层 continuation prompt，可整段贴到 `codex exec` / `claude -p` / `opencode run` 让外部 AI 接着推进
+  - 找不到 delivery-note（run 还没跑完、或 paused 且未生成 note）→ 404
 
 ### Positioning
 

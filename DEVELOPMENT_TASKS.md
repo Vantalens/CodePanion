@@ -77,4 +77,7 @@ CodePanion 后续专注：
   - reject：仅落 human-decision artifact，run 维持 paused
   - retry：复用原 runId，回到 checkpoint 前最近一个 success step 重跑该 step，checkpoint 因 yes:true 自动跳过
   - constraints：列表并入 resumed run 的 `values.constraints`，后续 step 可用 `{constraints}` 模板引用
-- [ ] **W-33** 每次完成 workflow 后生成可复盘交付摘要，并能复制给 Codex / Claude Code / OpenCode 继续处理。
+- [x] **W-33** 每次完成 workflow 后生成可复盘交付摘要，并能复制给 Codex / Claude Code / OpenCode 继续处理。
+  - delivery-note 由 `recordDeliveryNote` 在每次 workflow 结束（含 paused/failed）自动落条
+  - `GET /workflow/runs/:runId/delivery?format=markdown|handoff` 把最新 delivery-note 拉成可直接复制的文本
+  - `format=handoff` 在 delivery-note 外再包一层 continuation prompt，可整段贴到 `codex exec` / `claude -p` / `opencode run`
