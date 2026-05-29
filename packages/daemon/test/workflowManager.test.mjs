@@ -427,6 +427,10 @@ test('WorkflowManager updates and persists task-state metadata', async () => {
       snoozedUntil: 123456789,
       priority: 'high',
       sortOrder: 120,
+      assignmentStatus: 'assigned',
+      assignedRole: 'builder',
+      executor: 'codex',
+      executorRunId: 'run-42',
       handoffStatus: 'pending',
       handoffTarget: 'codex',
       handoffSessionId: 'session-42',
@@ -437,6 +441,10 @@ test('WorkflowManager updates and persists task-state metadata', async () => {
     assert.equal(updated.taskState.snoozedUntil, 123456789);
     assert.equal(updated.taskState.priority, 'high');
     assert.equal(updated.taskState.sortOrder, 120);
+    assert.equal(updated.taskState.assignmentStatus, 'assigned');
+    assert.equal(updated.taskState.assignedRole, 'builder');
+    assert.equal(updated.taskState.executor, 'codex');
+    assert.equal(updated.taskState.executorRunId, 'run-42');
     assert.equal(updated.taskState.handoffStatus, 'pending');
     assert.equal(updated.taskState.handoffTarget, 'codex');
     assert.equal(updated.taskState.handoffSessionId, 'session-42');
@@ -451,9 +459,21 @@ test('WorkflowManager updates and persists task-state metadata', async () => {
     assert.equal(snapshot.threads[0].taskState.snoozedUntil, 123456789);
     assert.equal(snapshot.threads[0].taskState.priority, 'high');
     assert.equal(snapshot.threads[0].taskState.sortOrder, 120);
+    assert.equal(snapshot.threads[0].taskState.assignmentStatus, 'assigned');
+    assert.equal(snapshot.threads[0].taskState.assignedRole, 'builder');
+    assert.equal(snapshot.threads[0].taskState.executor, 'codex');
+    assert.equal(snapshot.threads[0].taskState.executorRunId, 'run-42');
     assert.equal(snapshot.threads[0].taskState.handoffStatus, 'pending');
     assert.equal(snapshot.threads[0].taskState.handoffTarget, 'codex');
     assert.equal(snapshot.threads[0].taskState.handoffSessionId, 'session-42');
+
+    // 回到 idle 应同时清空 assignedRole/executor/executorRunId，避免持久化「idle 却挂 builder/codex」的脏状态。
+    const cleared = restored.updateTaskState('thread:task-state', { assignmentStatus: 'idle' });
+    assert.ok(cleared);
+    assert.equal(cleared.taskState.assignmentStatus, 'idle');
+    assert.equal(cleared.taskState.assignedRole, null);
+    assert.equal(cleared.taskState.executor, null);
+    assert.equal(cleared.taskState.executorRunId, null);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -69,6 +69,10 @@ export class WorkflowManager {
     snoozedUntil?: number | null;
     priority?: 'high' | 'normal' | 'low';
     sortOrder?: number;
+    assignmentStatus?: 'idle' | 'planned' | 'assigned' | 'running' | 'returned';
+    assignedRole?: string | null;
+    executor?: string | null;
+    executorRunId?: string | null;
     handoffStatus?: 'idle' | 'pending' | 'active' | 'returned';
     handoffTarget?: 'generic' | 'codex' | 'claude-code' | 'opencode' | null;
     handoffSessionId?: string | null;
@@ -193,6 +197,14 @@ export class WorkflowManager {
   onEvent(listener: WorkflowListener) {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  /**
+   * 让 daemon 内部 runWorkflow（W-32 approve 续跑）把进度推到现有 listener 总线上，
+   * GUI 通过 onEvent 订阅 WsServerEvent 时即可拿到 workflow-run-event，不必 polling 历史文件。
+   */
+  emitRunEvent(event: Extract<WsServerEvent, { type: 'workflow-run-event' }>['event']): void {
+    this.broadcast({ type: 'workflow-run-event', event });
   }
 
   private broadcast(event: WsServerEvent) {
@@ -354,6 +366,25 @@ function normalizeTaskState(taskState?: Partial<WorkflowTaskState> | null): Work
   const sortOrder = typeof taskState?.sortOrder === 'number' && Number.isFinite(taskState.sortOrder)
     ? taskState.sortOrder
     : undefined;
+  const assignmentStatus = taskState?.assignmentStatus === 'planned'
+    || taskState?.assignmentStatus === 'assigned'
+    || taskState?.assignmentStatus === 'running'
+    || taskState?.assignmentStatus === 'returned'
+    ? taskState.assignmentStatus
+    : 'idle';
+  // 当回到 idle 时，强制清空 role/executor/executorRunId，避免持久化「idle 却挂着 builder/codex」的不一致状态。
+  const rawAssignedRole = typeof taskState?.assignedRole === 'string' && taskState.assignedRole.trim().length > 0
+    ? taskState.assignedRole
+    : null;
+  const rawExecutor = typeof taskState?.executor === 'string' && taskState.executor.trim().length > 0
+    ? taskState.executor
+    : null;
+  const rawExecutorRunId = typeof taskState?.executorRunId === 'string' && taskState.executorRunId.trim().length > 0
+    ? taskState.executorRunId
+    : null;
+  const assignedRole = assignmentStatus === 'idle' ? null : rawAssignedRole;
+  const executor = assignmentStatus === 'idle' ? null : rawExecutor;
+  const executorRunId = assignmentStatus === 'idle' ? null : rawExecutorRunId;
   const handoffStatus = taskState?.handoffStatus === 'pending' || taskState?.handoffStatus === 'active' || taskState?.handoffStatus === 'returned'
     ? taskState.handoffStatus
     : 'idle';
@@ -372,6 +403,10 @@ function normalizeTaskState(taskState?: Partial<WorkflowTaskState> | null): Work
     snoozedUntil,
     priority,
     sortOrder,
+    assignmentStatus,
+    assignedRole,
+    executor,
+    executorRunId,
     handoffStatus,
     handoffTarget,
     handoffSessionId,

@@ -1,6 +1,6 @@
 # CodePanion 开发指南
 
-本文档面向希望参与 CodePanion 开发或基于 CodePanion 进行二次开发的开发者。CodePanion 当前定位为个人本地 AI 工作流中控台，开发优先级应先服务“统一接入、状态总览、提醒、上下文查看和接管”，再逐步扩展到本地工作流编排。
+本文档面向希望参与 CodePanion 开发或基于 CodePanion 进行二次开发的开发者。CodePanion 当前定位为个人本地 AI 工作流操作台，开发优先级应服务“任务拆分、AI 角色协作、显式 executor、人工审核和产品产出归档”。旧的监听、监控源和被动状态采集路线不再作为开发主线。
 
 ## 目录
 
@@ -122,12 +122,12 @@ CodePanion/
 │   │   │   │   ├── notify.ts  # notify 命令
 │   │   │   │   ├── reply.ts   # reply 命令
 │   │   │   │   └── install.ts # install 命令
-│   │   │   ├── adapters/      # 本地工作流适配器
+│   │   │   ├── adapters/      # 旧适配兼容层
 │   │   │   ├── daemon/        # 守护进程核心
 │   │   │   │   ├── boot.ts    # 守护进程启动
 │   │   │   │   ├── server.ts  # HTTP/WebSocket 服务器
 │   │   │   │   ├── sessionManager.ts  # CLI 会话管理
-│   │   │   │   ├── sourceManager.ts   # 多源注册与事件管理
+│   │   │   │   ├── sourceManager.ts   # 旧来源兼容层
 │   │   │   │   ├── workflowManager.ts # 工作流线程聚合
 │   │   │   │   ├── notifier.ts        # 通知系统
 │   │   │   │   └── pidfile.ts         # PID 文件管理
@@ -150,11 +150,13 @@ CodePanion/
 │       ├── Models/            # 视图模型
 │       ├── Services/          # 服务层
 │       └── CodePanion.Gui.csproj
-│   └── vscode-extension/      # VS Code 监控源扩展
+│   └── vscode-extension/      # 旧 VS Code 扩展兼容层
 ├── docs/                      # 文档
 │   ├── ARCHITECTURE.md
 │   ├── API.md
-│   ├── USER_GUIDE.md
+│   ├── LOCAL_AI_WORKFLOW.md
+│   ├── POSITIONING.md
+│   ├── PRODUCT_ROADMAP.md
 │   └── DEVELOPMENT.md
 ├── .gitignore
 ├── package.json
@@ -184,17 +186,16 @@ git diff --check
 - WebView 断网后仍能加载本地 `chat.html`、`chat.css`、`chat.js` 和 `vendor/codepanion-markdown.js`。
 - Markdown 内容必须经过安全渲染，不能执行 `<script>`、`onerror=` 等 HTML。
 
-### 多源监控开发边界
+### 工作流开发边界
 
-新增监控来源时优先使用 `/sources/register` 和 `/events`，不要直接复用 PTY 会话协议。来源应提供 `kind`、`name`、`windowTitle` 或 `workspace`，GUI 依靠这些字段区分多窗口。
-
-默认禁止系统级 OCR 和全局窗口内容读取。需要更强监控能力时，应先为具体工具实现插件、扩展或外部适配器。
+新增能力时优先判断它是否服务于本地 AI 工作流闭环：任务拆分、角色执行、人工审核和 artifact 归档。不要新增外部窗口监听、进程识别、被动状态采集或多源监控看板能力。
 
 开发时先判断新能力属于哪一层：
 
-- **阶段 1**：是否提升了个人本地控制台的接入质量、可见性、提醒或接管能力。
-- **阶段 2**：是否属于工作流模板、任务编排、结果归档或流程复用。
-- 不要把多用户、权限、共享空间或企业协作能力引入当前路线。
+- **P1 模型层**：workspace、role、workflow、human gate、artifact、executor。
+- **P2 GUI 层**：workflow board、节点状态、角色权限、审核门和产出视图。
+- **P3 执行层**：显式 executor、多模型路由、角色上下文和失败重试。
+- 不要把多用户、权限审批平台、共享空间或企业协作能力引入当前路线。
 
 ### 1. 创建功能分支
 
@@ -214,7 +215,7 @@ git checkout -b feature/your-feature-name
 npm test
 ```
 
-该命令会先构建 daemon TypeScript，再运行 `packages/daemon/test/*.test.mjs`。如果本次改动涉及协议、会话状态、提示检测、来源事件或 workflow 聚合，应同步补上对应测试后再合并。
+该命令会先构建 daemon TypeScript，再运行 `packages/daemon/test/*.test.mjs`。如果本次改动涉及协议、会话状态、提示检测、workflow 聚合、executor 或 artifact，应同步补上对应测试后再合并。
 
 ### 4. 提交
 
@@ -515,7 +516,7 @@ dotnet build packages/gui/CodePanion.Gui.csproj -c Release
 git diff --check
 ```
 
-阶段 1 的完整验收边界见 [PHASE1_ACCEPTANCE.md](PHASE1_ACCEPTANCE.md)。
+当前验收边界以 [../DEVELOPMENT_TASKS.md](../DEVELOPMENT_TASKS.md) 为准。
 
 ---
 

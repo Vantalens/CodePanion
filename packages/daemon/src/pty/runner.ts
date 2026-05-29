@@ -82,6 +82,44 @@ function resolveExecutable(name: string): string {
   return name;
 }
 
+/**
+ * daemon 进程内部跑 PTY 命令用的最小 executor：
+ * - 不调用 checkHealth / registerSession（runWithPty 的那条路径会反向 fetch daemon 自己 + 自注册 session，
+ *   在 daemon 内调会造成循环依赖）
+ * - 只负责 spawn → 等 exit → 返回 exitCode；输出走 debug 日志
+ * - 复用 resolveExecutable + Windows .cmd/.bat 注入防护
+ *
+ * 用于 W-32 approve 续跑、未来 GUI 触发的 workflow run 等 daemon-driven 场景，让 codex / claude / opencode
+ * 这种 TTY-aware CLI 在 daemon 里也能正常跑。
+ */
+export async function runWithPtyHeadless(input: { command: string; args: string[] }): Promise<number> {
+  const shell = resolveExecutable(input.command);
+  let finalArgs: string[];
+  try {
+    finalArgs = isWindowsBatchShell(shell) ? input.args.map(escapeWindowsBatchArg) : input.args;
+  } catch (err) {
+    debug('runWithPtyHeadless escape failed', err);
+    return -1;
+  }
+  return new Promise((resolve) => {
+    let term: pty.IPty;
+    try {
+      term = pty.spawn(shell, finalArgs, {
+        name: 'xterm-256color',
+        cols: 120,
+        rows: 30,
+        env: process.env as Record<string, string>,
+      });
+    } catch (err) {
+      debug('runWithPtyHeadless spawn failed', err);
+      resolve(-1);
+      return;
+    }
+    term.onData((data) => debug('headless pty output', data.length, 'bytes'));
+    term.onExit(({ exitCode }) => resolve(exitCode ?? -1));
+  });
+}
+
 function replyTextForPromptOption(option: string): string {
   const numbered = option.trim().match(/^(\d+)[.)\]]?\s+/);
   if (numbered) return `${numbered[1]}\n`;

@@ -2,7 +2,7 @@
   "name": "codepanion-monorepo",
   "version": "0.1.0",
   "private": true,
-  "description": "Local-first multi-task console across software, windows, and projects",
+  "description": "Local-first personal AI workflow console",
   "workspaces": [
     "packages/daemon"
   ],

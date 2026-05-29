@@ -1600,3 +1600,757 @@ test('snoozed workflow task returns to the active queue and broadcasts a reminde
     }
   });
 });
+
+test('W-32 retry 后 gate 仍保留并附 lastDecision，approve/reject 才会清掉', async () => {
+  const {
+    WorkflowRunHistory,
+  } = await import('../dist/workflows/workflowDefinitionManager.js');
+  const dir = mkdtempSync(join(tmpdir(), 'codepanion-retry-gate-'));
+  const prev = {
+    workflowEnv: process.env.CODEPANION_WORKFLOW_PATH,
+    historyEnv: process.env.CODEPANION_WORKFLOW_HISTORY_PATH,
+    artifactEnv: process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH,
+  };
+  process.env.CODEPANION_WORKFLOW_PATH = join(dir, 'workflows.json');
+  process.env.CODEPANION_WORKFLOW_HISTORY_PATH = join(dir, 'runs.ndjson');
+  process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH = join(dir, 'artifacts.ndjson');
+  try {
+    const runId = 'run-retry-1';
+    new WorkflowRunHistory().append({
+      id: runId,
+      workflowName: 'retryable',
+      status: 'paused',
+      values: {},
+      startedAt: Date.now() - 1000,
+      endedAt: Date.now(),
+      steps: [{
+        id: 'plan',
+        tool: 'local',
+        role: 'planner',
+        artifacts: ['human-decision'],
+        status: 'checkpoint',
+        command: 'noop',
+        args: [],
+        message: 'manual',
+      }],
+    });
+
+    await withServer(async ({ port, token }) => {
+      const retried = await request(port, token, 'POST', `/workflow/gates/${runId}/plan/resolve`, {
+        decision: 'retry',
+        message: '再补一份风险评估',
+      });
+      assert.equal(retried.status, 200);
+      assert.equal(retried.body.resumed, undefined);
+
+      // retry 后 gate 必须仍在，并带 lastDecision = retry。
+      const afterRetry = await request(port, token, 'GET', '/workflow/gates');
+      const gate = afterRetry.body.gates.find((g) => g.runId === runId);
+      assert.ok(gate, 'retry 后 gate 必须仍可见');
+      assert.equal(gate.lastDecision?.decision, 'retry');
+      assert.match(gate.lastDecision.content, /再补一份风险评估/);
+
+      // 第二轮 approve 应清掉 gate（不能因为之前有 retry 就一直挂着）。
+      const approved = await request(port, token, 'POST', `/workflow/gates/${runId}/plan/resolve`, {
+        decision: 'approve',
+      });
+      assert.equal(approved.status, 200);
+      const afterApprove = await request(port, token, 'GET', '/workflow/gates');
+      assert.equal(afterApprove.body.gates.some((g) => g.runId === runId), false);
+    });
+  } finally {
+    if (prev.workflowEnv === undefined) delete process.env.CODEPANION_WORKFLOW_PATH;
+    else process.env.CODEPANION_WORKFLOW_PATH = prev.workflowEnv;
+    if (prev.historyEnv === undefined) delete process.env.CODEPANION_WORKFLOW_HISTORY_PATH;
+    else process.env.CODEPANION_WORKFLOW_HISTORY_PATH = prev.historyEnv;
+    if (prev.artifactEnv === undefined) delete process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH;
+    else process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH = prev.artifactEnv;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('W-32 reject 后 GET /workflow/gates 与 /workflow/board 都不再列出该 run', async () => {
+  const {
+    WorkflowRunHistory,
+  } = await import('../dist/workflows/workflowDefinitionManager.js');
+  const dir = mkdtempSync(join(tmpdir(), 'codepanion-reject-clean-'));
+  const prev = {
+    workflowEnv: process.env.CODEPANION_WORKFLOW_PATH,
+    historyEnv: process.env.CODEPANION_WORKFLOW_HISTORY_PATH,
+    artifactEnv: process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH,
+  };
+  process.env.CODEPANION_WORKFLOW_PATH = join(dir, 'workflows.json');
+  process.env.CODEPANION_WORKFLOW_HISTORY_PATH = join(dir, 'runs.ndjson');
+  process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH = join(dir, 'artifacts.ndjson');
+  try {
+    const runId = 'run-reject-1';
+    new WorkflowRunHistory().append({
+      id: runId,
+      workflowName: 'rejectable',
+      status: 'paused',
+      values: {},
+      startedAt: Date.now() - 1000,
+      endedAt: Date.now(),
+      steps: [{
+        id: 'review',
+        tool: 'local',
+        role: 'reviewer',
+        artifacts: ['human-decision'],
+        status: 'checkpoint',
+        command: 'noop',
+        args: [],
+        message: 'manual',
+      }],
+    });
+
+    await withServer(async ({ port, token }) => {
+      const before = await request(port, token, 'GET', '/workflow/gates');
+      assert.equal(before.body.gates.some((g) => g.runId === runId), true);
+
+      const rejected = await request(port, token, 'POST', `/workflow/gates/${runId}/review/resolve`, {
+        decision: 'reject',
+        message: '方向不对',
+      });
+      assert.equal(rejected.status, 200);
+      assert.equal(rejected.body.artifact.type, 'human-decision');
+      assert.equal(rejected.body.resumed, undefined);
+
+      const afterGates = await request(port, token, 'GET', '/workflow/gates');
+      assert.equal(afterGates.body.gates.some((g) => g.runId === runId), false);
+
+      const board = await request(port, token, 'GET', '/workflow/board');
+      assert.equal(board.body.gates.some((g) => g.runId === runId), false);
+    });
+  } finally {
+    if (prev.workflowEnv === undefined) delete process.env.CODEPANION_WORKFLOW_PATH;
+    else process.env.CODEPANION_WORKFLOW_PATH = prev.workflowEnv;
+    if (prev.historyEnv === undefined) delete process.env.CODEPANION_WORKFLOW_HISTORY_PATH;
+    else process.env.CODEPANION_WORKFLOW_HISTORY_PATH = prev.historyEnv;
+    if (prev.artifactEnv === undefined) delete process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH;
+    else process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH = prev.artifactEnv;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('workspace 隔离: 不同 workspace 的 board 互不可见，artifacts 各自落到 <workspace>/.codepanion/', async () => {
+  const {
+    WorkflowDefinitionManager,
+    parseWorkflowSteps,
+  } = await import('../dist/workflows/workflowDefinitionManager.js');
+  const { existsSync } = await import('node:fs');
+  // 全局 fallback 路径用一个隔离的 tmp，避免 workspace test 把数据落到真实 HOME_DIR。
+  const fallbackDir = mkdtempSync(join(tmpdir(), 'codepanion-fallback-'));
+  const wsA = mkdtempSync(join(tmpdir(), 'codepanion-ws-a-'));
+  const wsB = mkdtempSync(join(tmpdir(), 'codepanion-ws-b-'));
+  const prev = {
+    workflowEnv: process.env.CODEPANION_WORKFLOW_PATH,
+    historyEnv: process.env.CODEPANION_WORKFLOW_HISTORY_PATH,
+    artifactEnv: process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH,
+  };
+  process.env.CODEPANION_WORKFLOW_PATH = join(fallbackDir, 'workflows.json');
+  process.env.CODEPANION_WORKFLOW_HISTORY_PATH = join(fallbackDir, 'runs.ndjson');
+  process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH = join(fallbackDir, 'artifacts.ndjson');
+  try {
+    // 两个 workspace 各自的 .codepanion/workflows.json 里加同名 workflow，但 steps 不同。
+    const defsA = new WorkflowDefinitionManager(join(wsA, '.codepanion', 'workflows.json'));
+    defsA.save({ name: 'demo', steps: parseWorkflowSteps(['id=plan;tool=node;command=node;args=--version']) });
+    const defsB = new WorkflowDefinitionManager(join(wsB, '.codepanion', 'workflows.json'));
+    defsB.save({ name: 'demo', steps: parseWorkflowSteps(['id=plan;tool=node;command=node;args=--version']) });
+
+    await withServer(async ({ port, token }) => {
+      // 启动 A workspace 的 demo run。
+      const startedA = await request(port, token, 'POST', '/workflow/runs', {
+        workflow: 'demo',
+        workspace: wsA,
+      });
+      assert.equal(startedA.status, 200);
+      // 等 A 落历史。
+      const deadlineA = Date.now() + 5000;
+      let boardA;
+      while (Date.now() < deadlineA) {
+        boardA = await request(port, token, 'GET', `/workflow/board?workspace=${encodeURIComponent(wsA)}`);
+        if (boardA.body.runs.some((r) => r.status === 'success')) break;
+        await new Promise((r) => setTimeout(r, 60));
+      }
+      assert.ok(boardA.body.runs.some((r) => r.status === 'success'));
+
+      // B workspace 的 board 不该看到 A 的 run。
+      const boardB = await request(port, token, 'GET', `/workflow/board?workspace=${encodeURIComponent(wsB)}`);
+      assert.equal(boardB.body.runs.length, 0, 'B workspace 不该看到 A 的 run');
+      // B 的 definitions 应仍可见。
+      assert.equal(boardB.body.workflows.some((w) => w.name === 'demo'), true);
+
+      // fallback（不传 workspace）的 board 也不该看到 A / B 任何 run（因为各自走 workspace 路径）。
+      const boardFallback = await request(port, token, 'GET', '/workflow/board');
+      assert.equal(boardFallback.body.runs.length, 0);
+
+      // artifact 应落在 A workspace 下，不该落在 B 或 fallback。
+      assert.ok(existsSync(join(wsA, '.codepanion', 'workflow-artifacts.ndjson')));
+      assert.equal(existsSync(join(wsB, '.codepanion', 'workflow-artifacts.ndjson')), false);
+      assert.equal(existsSync(join(fallbackDir, 'artifacts.ndjson')), false);
+    });
+  } finally {
+    if (prev.workflowEnv === undefined) delete process.env.CODEPANION_WORKFLOW_PATH;
+    else process.env.CODEPANION_WORKFLOW_PATH = prev.workflowEnv;
+    if (prev.historyEnv === undefined) delete process.env.CODEPANION_WORKFLOW_HISTORY_PATH;
+    else process.env.CODEPANION_WORKFLOW_HISTORY_PATH = prev.historyEnv;
+    if (prev.artifactEnv === undefined) delete process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH;
+    else process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH = prev.artifactEnv;
+    rmSync(fallbackDir, { recursive: true, force: true });
+    rmSync(wsA, { recursive: true, force: true });
+    rmSync(wsB, { recursive: true, force: true });
+  }
+});
+
+test('cancel: POST /workflow/runs/:runId/cancel 中止正在跑的 step，WS 收到 run-finish=failed', async () => {
+  const {
+    WorkflowDefinitionManager,
+    WorkflowRunHistory,
+    parseWorkflowSteps,
+  } = await import('../dist/workflows/workflowDefinitionManager.js');
+  const { writeFileSync } = await import('node:fs');
+  const dir = mkdtempSync(join(tmpdir(), 'codepanion-cancel-'));
+  const prev = {
+    workflowEnv: process.env.CODEPANION_WORKFLOW_PATH,
+    historyEnv: process.env.CODEPANION_WORKFLOW_HISTORY_PATH,
+    artifactEnv: process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH,
+  };
+  process.env.CODEPANION_WORKFLOW_PATH = join(dir, 'workflows.json');
+  process.env.CODEPANION_WORKFLOW_HISTORY_PATH = join(dir, 'runs.ndjson');
+  process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH = join(dir, 'artifacts.ndjson');
+  try {
+    // 写一个跨平台 sleeper 脚本到 tmp dir：30s 死循环，给 cancel 充足窗口。
+    const sleeperPath = join(dir, 'sleeper.cjs');
+    writeFileSync(sleeperPath, 'setInterval(() => {}, 30000);', 'utf8');
+
+    new WorkflowDefinitionManager().save({
+      name: 'long-runner',
+      steps: parseWorkflowSteps([
+        // tool=node 让 splitList 看到单一 arg；sleeperPath 单一字符串无逗号。
+        `id=sleep;role=builder;tool=node;command=node;args=${sleeperPath}`,
+      ]),
+    });
+
+    await withServer(async ({ port, token }) => {
+      const { ws, wait } = await openWsBuffered(`ws://127.0.0.1:${port}/ws?role=observer`, {
+        protocols: tokenSubprotocol(token),
+      });
+      try {
+        const started = await request(port, token, 'POST', '/workflow/runs', {
+          workflow: 'long-runner',
+        });
+        assert.equal(started.status, 200);
+
+        const runStart = await wait(
+          (m) => m.type === 'workflow-run-event' && m.event?.action === 'run-start' && m.event?.workflowName === 'long-runner',
+          5000,
+        );
+        const runId = runStart.event.runId;
+
+        // 等 step-start 到达再 cancel，确保 child 已经 spawn。
+        await wait(
+          (m) => m.type === 'workflow-run-event' && m.event?.action === 'step-start' && m.event?.runId === runId,
+          5000,
+        );
+
+        const cancelled = await request(port, token, 'POST', `/workflow/runs/${runId}/cancel`, {});
+        assert.equal(cancelled.status, 200);
+        assert.equal(cancelled.body.cancelled, true);
+
+        const runFinish = await wait(
+          (m) => m.type === 'workflow-run-event' && m.event?.action === 'run-finish' && m.event?.runId === runId,
+          10000,
+        );
+        assert.equal(runFinish.event.status, 'failed');
+
+        // run-finish 触达 GUI 后 daemon 仍在跑 .then(append) → activeRuns.delete。
+        // 轮询 history 看到 failed run 已落盘，且 cancel 再点会 404。
+        const deadline = Date.now() + 5000;
+        let stored;
+        while (Date.now() < deadline) {
+          stored = new WorkflowRunHistory().get(runId);
+          if (stored && stored.status === 'failed') break;
+          await new Promise((r) => setTimeout(r, 60));
+        }
+        assert.ok(stored, 'cancelled run 必须落入历史');
+        assert.equal(stored.status, 'failed');
+        const cancelStep = stored.steps.find((step) => step.id === 'sleep');
+        assert.ok(cancelStep);
+        assert.match(cancelStep.message ?? '', /cancelled/);
+
+        const reCancel = await request(port, token, 'POST', `/workflow/runs/${runId}/cancel`, {});
+        assert.equal(reCancel.status, 404);
+      } finally {
+        await closeWs(ws);
+      }
+    });
+  } finally {
+    if (prev.workflowEnv === undefined) delete process.env.CODEPANION_WORKFLOW_PATH;
+    else process.env.CODEPANION_WORKFLOW_PATH = prev.workflowEnv;
+    if (prev.historyEnv === undefined) delete process.env.CODEPANION_WORKFLOW_HISTORY_PATH;
+    else process.env.CODEPANION_WORKFLOW_HISTORY_PATH = prev.historyEnv;
+    if (prev.artifactEnv === undefined) delete process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH;
+    else process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH = prev.artifactEnv;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('W-23: board 在 run 进行中暴露 running 状态，完成后切到 success 不重复', async () => {
+  const {
+    WorkflowDefinitionManager,
+    parseWorkflowSteps,
+  } = await import('../dist/workflows/workflowDefinitionManager.js');
+  const dir = mkdtempSync(join(tmpdir(), 'codepanion-board-running-'));
+  const prev = {
+    workflowEnv: process.env.CODEPANION_WORKFLOW_PATH,
+    historyEnv: process.env.CODEPANION_WORKFLOW_HISTORY_PATH,
+    artifactEnv: process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH,
+  };
+  process.env.CODEPANION_WORKFLOW_PATH = join(dir, 'workflows.json');
+  process.env.CODEPANION_WORKFLOW_HISTORY_PATH = join(dir, 'runs.ndjson');
+  process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH = join(dir, 'artifacts.ndjson');
+  try {
+    new WorkflowDefinitionManager().save({
+      name: 'board-running',
+      steps: parseWorkflowSteps([
+        'id=plan;role=planner;tool=node;command=node;args=--version',
+      ]),
+    });
+
+    await withServer(async ({ port, token }) => {
+      const { ws, wait } = await openWsBuffered(`ws://127.0.0.1:${port}/ws?role=observer`, {
+        protocols: tokenSubprotocol(token),
+      });
+      try {
+        const started = await request(port, token, 'POST', '/workflow/runs', {
+          workflow: 'board-running',
+        });
+        assert.equal(started.status, 200);
+
+        // 等 run-start 事件——此时 activeRuns 已入表但 history 还没写。
+        const runStart = await wait(
+          (m) => m.type === 'workflow-run-event' && m.event?.action === 'run-start' && m.event?.workflowName === 'board-running',
+          5000,
+        );
+        const runId = runStart.event.runId;
+
+        // 进行中：board 必须暴露 running 状态条目。
+        const boardRunning = await request(port, token, 'GET', '/workflow/board');
+        const runningEntry = boardRunning.body.runs.find((r) => r.id === runId);
+        assert.ok(runningEntry, 'board 应包含 running run 条目');
+        assert.equal(runningEntry.status, 'running');
+
+        // 等 run-finish，再轮询 board 直到 active 已清除、history 已含 success。
+        await wait(
+          (m) => m.type === 'workflow-run-event' && m.event?.action === 'run-finish' && m.event?.runId === runId,
+          5000,
+        );
+        const deadline = Date.now() + 5000;
+        let finalBoard;
+        while (Date.now() < deadline) {
+          finalBoard = await request(port, token, 'GET', '/workflow/board');
+          const entries = finalBoard.body.runs.filter((r) => r.id === runId);
+          if (entries.length === 1 && entries[0].status === 'success') break;
+          await new Promise((r) => setTimeout(r, 50));
+        }
+        const finalEntries = finalBoard.body.runs.filter((r) => r.id === runId);
+        assert.equal(finalEntries.length, 1, '同一 runId 不应在 board 里重复');
+        assert.equal(finalEntries[0].status, 'success');
+      } finally {
+        await closeWs(ws);
+      }
+    });
+  } finally {
+    if (prev.workflowEnv === undefined) delete process.env.CODEPANION_WORKFLOW_PATH;
+    else process.env.CODEPANION_WORKFLOW_PATH = prev.workflowEnv;
+    if (prev.historyEnv === undefined) delete process.env.CODEPANION_WORKFLOW_HISTORY_PATH;
+    else process.env.CODEPANION_WORKFLOW_HISTORY_PATH = prev.historyEnv;
+    if (prev.artifactEnv === undefined) delete process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH;
+    else process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH = prev.artifactEnv;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('W-22: POST /workflow/runs 启动 workflow，WS observer 收到 run-start/run-finish', async () => {
+  const {
+    WorkflowDefinitionManager,
+    parseWorkflowSteps,
+  } = await import('../dist/workflows/workflowDefinitionManager.js');
+  const dir = mkdtempSync(join(tmpdir(), 'codepanion-runs-start-'));
+  const prev = {
+    workflowEnv: process.env.CODEPANION_WORKFLOW_PATH,
+    historyEnv: process.env.CODEPANION_WORKFLOW_HISTORY_PATH,
+    artifactEnv: process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH,
+  };
+  process.env.CODEPANION_WORKFLOW_PATH = join(dir, 'workflows.json');
+  process.env.CODEPANION_WORKFLOW_HISTORY_PATH = join(dir, 'runs.ndjson');
+  process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH = join(dir, 'artifacts.ndjson');
+  try {
+    new WorkflowDefinitionManager().save({
+      name: 'start-from-zero',
+      steps: parseWorkflowSteps([
+        'id=plan;role=planner;tool=node;command=node;args=--version',
+      ]),
+    });
+
+    await withServer(async ({ port, token }) => {
+      const { ws, wait } = await openWsBuffered(`ws://127.0.0.1:${port}/ws?role=observer`, {
+        protocols: tokenSubprotocol(token),
+      });
+      try {
+        const started = await request(port, token, 'POST', '/workflow/runs', {
+          workflow: 'start-from-zero',
+        });
+        assert.equal(started.status, 200);
+        assert.equal(started.body.accepted, true);
+        assert.equal(started.body.workflowName, 'start-from-zero');
+
+        const runStart = await wait(
+          (m) => m.type === 'workflow-run-event' && m.event?.action === 'run-start' && m.event?.workflowName === 'start-from-zero',
+          5000,
+        );
+        const newRunId = runStart.event.runId;
+        const runFinish = await wait(
+          (m) => m.type === 'workflow-run-event' && m.event?.action === 'run-finish' && m.event?.runId === newRunId,
+          5000,
+        );
+        assert.equal(runFinish.event.status, 'success');
+
+        // 不存在的 workflow 应 404，非法 schema 应 400。
+        const missing = await request(port, token, 'POST', '/workflow/runs', { workflow: 'nope' });
+        assert.equal(missing.status, 404);
+        const bad = await request(port, token, 'POST', '/workflow/runs', { workflow: '' });
+        assert.equal(bad.status, 400);
+      } finally {
+        await closeWs(ws);
+      }
+    });
+  } finally {
+    if (prev.workflowEnv === undefined) delete process.env.CODEPANION_WORKFLOW_PATH;
+    else process.env.CODEPANION_WORKFLOW_PATH = prev.workflowEnv;
+    if (prev.historyEnv === undefined) delete process.env.CODEPANION_WORKFLOW_HISTORY_PATH;
+    else process.env.CODEPANION_WORKFLOW_HISTORY_PATH = prev.historyEnv;
+    if (prev.artifactEnv === undefined) delete process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH;
+    else process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH = prev.artifactEnv;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('W-32 approve 触发 daemon 续跑，观察者通过 WS 收到 workflow-run-event 流', async () => {
+  const {
+    WorkflowDefinitionManager,
+    WorkflowRunHistory,
+    parseWorkflowSteps,
+  } = await import('../dist/workflows/workflowDefinitionManager.js');
+  const dir = mkdtempSync(join(tmpdir(), 'codepanion-resume-ws-'));
+  const prev = {
+    workflowEnv: process.env.CODEPANION_WORKFLOW_PATH,
+    historyEnv: process.env.CODEPANION_WORKFLOW_HISTORY_PATH,
+    artifactEnv: process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH,
+  };
+  process.env.CODEPANION_WORKFLOW_PATH = join(dir, 'workflows.json');
+  process.env.CODEPANION_WORKFLOW_HISTORY_PATH = join(dir, 'runs.ndjson');
+  process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH = join(dir, 'artifacts.ndjson');
+  try {
+    new WorkflowDefinitionManager().save({
+      name: 'resume-ws',
+      steps: parseWorkflowSteps([
+        'id=review;role=reviewer;tool=node;command=node;args=--version;checkpoint=true',
+        'id=publish;role=builder;tool=node;command=node;args=--version;artifacts=delivery-note;after=review',
+      ]),
+    });
+    const runId = 'run-ws-1';
+    new WorkflowRunHistory().append({
+      id: runId,
+      workflowName: 'resume-ws',
+      status: 'paused',
+      values: {},
+      startedAt: Date.now() - 5000,
+      endedAt: Date.now(),
+      steps: [{
+        id: 'review',
+        tool: 'node',
+        role: 'reviewer',
+        artifacts: [],
+        status: 'checkpoint',
+        command: 'node',
+        args: ['--version'],
+        message: 'manual checkpoint required',
+      }],
+    });
+
+    await withServer(async ({ port, token }) => {
+      const { ws, wait } = await openWsBuffered(`ws://127.0.0.1:${port}/ws?role=observer`, {
+        protocols: tokenSubprotocol(token),
+      });
+      try {
+        const resolved = await request(port, token, 'POST', `/workflow/gates/${runId}/review/resolve`, {
+          decision: 'approve',
+        });
+        assert.equal(resolved.status, 200);
+        assert.equal(resolved.body.resumed, true);
+
+        // Codex P1 修复后续跑复用原 runId，不再创建新 run。run-start 事件带的就是原 runId。
+        const runStart = await wait(
+          (m) => m.type === 'workflow-run-event' && m.event?.action === 'run-start' && m.event?.workflowName === 'resume-ws',
+          5000,
+        );
+        assert.equal(runStart.event.runId, runId);
+
+        const stepFinish = await wait(
+          (m) => m.type === 'workflow-run-event' && m.event?.action === 'step-finish' && m.event?.runId === runId && m.event?.stepId === 'publish',
+          5000,
+        );
+        assert.equal(stepFinish.event.status, 'success');
+
+        const runFinish = await wait(
+          (m) => m.type === 'workflow-run-event' && m.event?.action === 'run-finish' && m.event?.runId === runId,
+          5000,
+        );
+        assert.equal(runFinish.event.status, 'success');
+        assert.equal(runFinish.event.stepCount >= 1, true);
+      } finally {
+        await closeWs(ws);
+      }
+    });
+  } finally {
+    if (prev.workflowEnv === undefined) delete process.env.CODEPANION_WORKFLOW_PATH;
+    else process.env.CODEPANION_WORKFLOW_PATH = prev.workflowEnv;
+    if (prev.historyEnv === undefined) delete process.env.CODEPANION_WORKFLOW_HISTORY_PATH;
+    else process.env.CODEPANION_WORKFLOW_HISTORY_PATH = prev.historyEnv;
+    if (prev.artifactEnv === undefined) delete process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH;
+    else process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH = prev.artifactEnv;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('W-32 approve 在原 runId 上从 checkpoint 续跑同 workflow，落 delivery-note', async () => {
+  const {
+    WorkflowDefinitionManager,
+    WorkflowRunHistory,
+    WorkflowArtifactStore,
+    parseWorkflowSteps,
+  } = await import('../dist/workflows/workflowDefinitionManager.js');
+  const dir = mkdtempSync(join(tmpdir(), 'codepanion-resume-'));
+  const prev = {
+    workflowEnv: process.env.CODEPANION_WORKFLOW_PATH,
+    historyEnv: process.env.CODEPANION_WORKFLOW_HISTORY_PATH,
+    artifactEnv: process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH,
+  };
+  process.env.CODEPANION_WORKFLOW_PATH = join(dir, 'workflows.json');
+  process.env.CODEPANION_WORKFLOW_HISTORY_PATH = join(dir, 'runs.ndjson');
+  process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH = join(dir, 'artifacts.ndjson');
+  try {
+    // 准备一份 workflow definition：续跑时 daemon 会用 yes:true 走 checkpoint 之后的步骤。
+    // 用 node --version 做真实 PTY 命令，跨平台稳定退出。
+    const definitions = new WorkflowDefinitionManager();
+    definitions.save({
+      name: 'resume-target',
+      steps: parseWorkflowSteps([
+        'id=review;role=reviewer;tool=node;command=node;args=--version;artifacts=human-decision;checkpoint=true',
+        'id=publish;role=builder;tool=node;command=node;args=--version;artifacts=delivery-note;after=review',
+      ]),
+    });
+    // 准备一条停在 review 的 paused 历史 run。
+    const runId = 'run-resume-1';
+    new WorkflowRunHistory().append({
+      id: runId,
+      workflowName: 'resume-target',
+      status: 'paused',
+      values: {},
+      startedAt: Date.now() - 5000,
+      endedAt: Date.now(),
+      steps: [
+        {
+          id: 'review',
+          tool: 'node',
+          role: 'reviewer',
+          artifacts: ['human-decision'],
+          status: 'checkpoint',
+          command: 'node',
+          args: ['--version'],
+          message: 'manual checkpoint required',
+        },
+      ],
+    });
+
+    await withServer(async ({ port, token }) => {
+      const resolved = await request(port, token, 'POST', `/workflow/gates/${runId}/review/resolve`, {
+        decision: 'approve',
+      });
+      assert.equal(resolved.status, 200);
+      assert.equal(resolved.body.resumed, true);
+      assert.equal(resolved.body.artifact.type, 'human-decision');
+
+      // 续跑复用原 runId（Codex P1 修复）：从 checkpoint 之后开始跑，前面的 success step 不重跑。
+      // history 写入时 WorkflowRunHistory.append 会用同 id 覆盖原 paused 条目。
+      const deadline = Date.now() + 5000;
+      let resumed;
+      while (Date.now() < deadline) {
+        const runs = new WorkflowRunHistory().list();
+        resumed = runs.find((entry) => entry.id === runId);
+        if (resumed && resumed.status !== 'paused') break;
+        await new Promise((r) => setTimeout(r, 80));
+      }
+      assert.ok(resumed, '续跑应当覆盖原 paused 历史条目');
+      assert.equal(resumed.status, 'success', `续跑应当成功，实际 status=${resumed?.status}`);
+      // delivery-note 由 runWorkflow 自动落到同一 runId 上。
+      const store = new WorkflowArtifactStore();
+      const allArtifacts = store.list(runId);
+      assert.ok(allArtifacts.some((entry) => entry.type === 'delivery-note'));
+    });
+  } finally {
+    if (prev.workflowEnv === undefined) delete process.env.CODEPANION_WORKFLOW_PATH;
+    else process.env.CODEPANION_WORKFLOW_PATH = prev.workflowEnv;
+    if (prev.historyEnv === undefined) delete process.env.CODEPANION_WORKFLOW_HISTORY_PATH;
+    else process.env.CODEPANION_WORKFLOW_HISTORY_PATH = prev.historyEnv;
+    if (prev.artifactEnv === undefined) delete process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH;
+    else process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH = prev.artifactEnv;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('W-20 board endpoint 聚合 workflow definitions、recent runs、pending gates', async () => {
+  const {
+    WorkflowDefinitionManager,
+    WorkflowRunHistory,
+    parseWorkflowSteps,
+  } = await import('../dist/workflows/workflowDefinitionManager.js');
+  const dir = mkdtempSync(join(tmpdir(), 'codepanion-board-'));
+  const prev = {
+    workflowEnv: process.env.CODEPANION_WORKFLOW_PATH,
+    historyEnv: process.env.CODEPANION_WORKFLOW_HISTORY_PATH,
+    artifactEnv: process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH,
+  };
+  process.env.CODEPANION_WORKFLOW_PATH = join(dir, 'workflows.json');
+  process.env.CODEPANION_WORKFLOW_HISTORY_PATH = join(dir, 'runs.ndjson');
+  process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH = join(dir, 'artifacts.ndjson');
+  try {
+    new WorkflowDefinitionManager().save({
+      name: 'feature',
+      description: 'demo',
+      steps: parseWorkflowSteps(['id=plan;command=noop']),
+    });
+    const history = new WorkflowRunHistory();
+    history.append({
+      id: 'run-board-pending',
+      workflowName: 'feature',
+      status: 'paused',
+      values: {},
+      startedAt: Date.now() - 1000,
+      endedAt: Date.now(),
+      steps: [{
+        id: 'plan',
+        tool: 'local',
+        role: 'planner',
+        artifacts: [],
+        status: 'checkpoint',
+        command: 'noop',
+        args: [],
+        message: 'manual',
+      }],
+    });
+    history.append({
+      id: 'run-board-done',
+      workflowName: 'feature',
+      status: 'success',
+      values: {},
+      startedAt: Date.now() - 500,
+      endedAt: Date.now(),
+      steps: [{ id: 'plan', tool: 'local', artifacts: [], status: 'success', command: 'noop', args: [] }],
+    });
+
+    await withServer(async ({ port, token }) => {
+      const board = await request(port, token, 'GET', '/workflow/board');
+      assert.equal(board.status, 200);
+      assert.equal(board.body.workflows.length, 1);
+      assert.equal(board.body.workflows[0].name, 'feature');
+      assert.equal(board.body.workflows[0].stepCount, 1);
+      assert.equal(board.body.runs.length, 2);
+      // recent runs 按 startedAt 降序：done 比 pending 晚开始，应排在前。
+      assert.equal(board.body.runs[0].id, 'run-board-done');
+      assert.equal(board.body.gates.length, 1);
+      assert.equal(board.body.gates[0].runId, 'run-board-pending');
+      assert.equal(board.body.gates[0].role, 'planner');
+    });
+  } finally {
+    if (prev.workflowEnv === undefined) delete process.env.CODEPANION_WORKFLOW_PATH;
+    else process.env.CODEPANION_WORKFLOW_PATH = prev.workflowEnv;
+    if (prev.historyEnv === undefined) delete process.env.CODEPANION_WORKFLOW_HISTORY_PATH;
+    else process.env.CODEPANION_WORKFLOW_HISTORY_PATH = prev.historyEnv;
+    if (prev.artifactEnv === undefined) delete process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH;
+    else process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH = prev.artifactEnv;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('W-32/W-33: gate resolve 落 human-decision artifact，artifact list 返回 run 全部产物', async () => {
+  const { WorkflowRunHistory, WorkflowArtifactStore } = await import('../dist/workflows/workflowDefinitionManager.js');
+  const dir = mkdtempSync(join(tmpdir(), 'codepanion-gate-resolve-'));
+  const prevHistoryEnv = process.env.CODEPANION_WORKFLOW_HISTORY_PATH;
+  const prevArtifactEnv = process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH;
+  process.env.CODEPANION_WORKFLOW_HISTORY_PATH = join(dir, 'runs.ndjson');
+  process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH = join(dir, 'artifacts.ndjson');
+  try {
+    // 直接写一条 paused run + checkpoint step 进历史。
+    const history = new WorkflowRunHistory();
+    const runId = 'run-gate-1';
+    history.append({
+      id: runId,
+      workflowName: 'release-gate',
+      status: 'paused',
+      values: {},
+      startedAt: Date.now() - 1000,
+      endedAt: Date.now(),
+      steps: [
+        {
+          id: 'review',
+          tool: 'codex',
+          role: 'reviewer',
+          model: undefined,
+          artifacts: ['human-decision'],
+          status: 'checkpoint',
+          command: 'codex',
+          args: ['review'],
+          message: 'manual checkpoint required',
+        },
+      ],
+    });
+
+    await withServer(async ({ port, token }) => {
+      const resolved = await request(port, token, 'POST', `/workflow/gates/${runId}/review/resolve`, {
+        decision: 'approve',
+        message: '看完计划，可以继续。',
+        constraints: ['只动 packages/daemon'],
+      });
+      assert.equal(resolved.status, 200);
+      assert.equal(resolved.body.artifact.type, 'human-decision');
+      assert.equal(resolved.body.artifact.runId, runId);
+      assert.match(resolved.body.artifact.content, /decision=approve/);
+      assert.match(resolved.body.artifact.content, /constraints=只动 packages\/daemon/);
+
+      const artifacts = await request(port, token, 'GET', `/workflow/runs/${runId}/artifacts`);
+      assert.equal(artifacts.status, 200);
+      assert.equal(artifacts.body.artifacts.length, 1);
+      assert.equal(artifacts.body.artifacts[0].role, 'reviewer');
+
+      // 不存在的 run 或非 paused run 应 404。
+      const missing = await request(port, token, 'POST', `/workflow/gates/run-not-exist/review/resolve`, { decision: 'reject' });
+      assert.equal(missing.status, 404);
+
+      // 非法 decision 应 400。
+      const bad = await request(port, token, 'POST', `/workflow/gates/${runId}/review/resolve`, { decision: 'maybe' });
+      assert.equal(bad.status, 400);
+    });
+
+    // server 用单例 WorkflowArtifactStore，验证 artifact 真实落盘。
+    const store = new WorkflowArtifactStore();
+    assert.equal(store.list(runId).length, 1);
+  } finally {
+    if (prevHistoryEnv === undefined) delete process.env.CODEPANION_WORKFLOW_HISTORY_PATH;
+    else process.env.CODEPANION_WORKFLOW_HISTORY_PATH = prevHistoryEnv;
+    if (prevArtifactEnv === undefined) delete process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH;
+    else process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH = prevArtifactEnv;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

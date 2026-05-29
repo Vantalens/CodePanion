@@ -28,14 +28,52 @@ function quarantineBrokenStore(path: string, err: unknown, kind: string): void {
 
 export const WORKFLOW_DEFINITIONS_PATH = `${HOME_DIR}/workflows.json`;
 export const WORKFLOW_RUN_HISTORY_PATH = `${HOME_DIR}/workflow-runs.json`;
+export const WORKFLOW_ARTIFACTS_PATH = `${HOME_DIR}/workflow-artifacts.ndjson`;
 
 const definitionsPath = () => process.env.CODEPANION_WORKFLOW_PATH || WORKFLOW_DEFINITIONS_PATH;
 const historyPath = () => process.env.CODEPANION_WORKFLOW_HISTORY_PATH || WORKFLOW_RUN_HISTORY_PATH;
+const artifactsPath = () => process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH || WORKFLOW_ARTIFACTS_PATH;
 const PARAM_NAME_RE = /^[A-Za-z_][A-Za-z0-9_-]*$/;
+
+const WorkflowPermissionSchema = z.enum(['read', 'write', 'command', 'network', 'delegate', 'approve']);
+
+// W-31：内置 provider，决定 step.command 怎么被实际拼成 CLI invocation。
+// - local: 完全保持 step.command/args 不变（向后兼容当前所有 workflow）
+// - codex / claude-code / opencode: step.command 当 prompt 文本，daemon 用对应 CLI 模板包装
+export const WORKFLOW_PROVIDERS = ['local', 'codex', 'claude-code', 'opencode'] as const;
+const WorkflowProviderSchema = z.enum(WORKFLOW_PROVIDERS);
+export type WorkflowProvider = z.infer<typeof WorkflowProviderSchema>;
+
+// step.artifacts 是该 step 完成后会产出的 artifact 类型列表，类型与 WorkflowArtifactSchema.type 共享 enum，
+// runWorkflow 完成 step 后会按这个清单往 artifactStore 落占位条目。
+export const WORKFLOW_ARTIFACT_TYPES = ['plan', 'patch-summary', 'test-result', 'review-report', 'human-decision', 'delivery-note'] as const;
+const WorkflowArtifactTypeSchema = z.enum(WORKFLOW_ARTIFACT_TYPES);
+export type WorkflowArtifactType = z.infer<typeof WorkflowArtifactTypeSchema>;
+
+// 拒绝 path traversal / 绝对路径 / 空段，避免 contextInclude=../../etc/passwd 落进 workflows.json。
+const ContextGlobSchema = z.string().min(1).max(200).refine((value) => {
+  if (value.includes('\0')) return false;
+  if (value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value)) return false;
+  const segments = value.split(/[\\/]+/);
+  return segments.every((segment) => segment !== '..');
+}, { message: 'context glob must be a relative path without .. segments' });
+
+const WorkflowContextPolicySchema = z.object({
+  maxTokens: z.number().int().positive().optional(),
+  include: z.array(ContextGlobSchema).default([]),
+  exclude: z.array(ContextGlobSchema).default([]),
+}).default({ include: [], exclude: [] });
 
 const WorkflowStepSchema = z.object({
   id: z.string().min(1).max(80).regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*$/),
   tool: z.string().min(1).max(80).default('local'),
+  role: z.string().min(1).max(80).regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*$/).optional(),
+  model: z.string().min(1).max(120).optional(),
+  provider: WorkflowProviderSchema.default('local'),
+  permissions: z.array(WorkflowPermissionSchema).default([]),
+  contextPolicy: WorkflowContextPolicySchema,
+  humanGate: z.string().min(1).max(80).regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*$/).optional(),
+  artifacts: z.array(WorkflowArtifactTypeSchema).default([]),
   template: z.string().min(1).max(120).optional(),
   command: z.string().min(1).optional(),
   args: z.array(z.string()).default([]),
@@ -61,6 +99,10 @@ const DefinitionStoreSchema = z.object({
 const WorkflowStepRunSchema = z.object({
   id: z.string(),
   tool: z.string(),
+  role: z.string().optional(),
+  model: z.string().optional(),
+  provider: WorkflowProviderSchema.optional(),
+  artifacts: z.array(z.string()).default([]),
   status: z.enum(['pending', 'running', 'success', 'failed', 'skipped', 'checkpoint']),
   command: z.string().optional(),
   args: z.array(z.string()).default([]),
@@ -85,10 +127,28 @@ const HistoryStoreSchema = z.object({
   runs: z.array(WorkflowRunSchema).default([]),
 });
 
+const WorkflowArtifactSchema = z.object({
+  id: z.string().min(1),
+  runId: z.string().min(1),
+  workflowName: z.string().min(1),
+  stepId: z.string().min(1).optional(),
+  role: z.string().min(1).optional(),
+  type: WorkflowArtifactTypeSchema,
+  title: z.string().min(1),
+  content: z.string().default(''),
+  files: z.array(z.string()).default([]),
+  createdAt: z.number().int().positive(),
+});
+
 export type WorkflowStep = z.infer<typeof WorkflowStepSchema>;
 export type WorkflowDefinition = z.infer<typeof WorkflowDefinitionSchema>;
 export type WorkflowStepRun = z.infer<typeof WorkflowStepRunSchema>;
 export type WorkflowRun = z.infer<typeof WorkflowRunSchema>;
+export type WorkflowArtifact = z.infer<typeof WorkflowArtifactSchema>;
+export type WorkflowArtifactInput = Omit<WorkflowArtifact, 'id' | 'createdAt'> & {
+  id?: string;
+  createdAt?: number;
+};
 type DefinitionStore = z.infer<typeof DefinitionStoreSchema>;
 type HistoryStore = z.infer<typeof HistoryStoreSchema>;
 
@@ -258,6 +318,79 @@ export class WorkflowRunHistory {
   }
 }
 
+export class WorkflowArtifactStore {
+  constructor(private readonly path = artifactsPath(), private readonly maxArtifacts = 1000) {}
+
+  append(input: WorkflowArtifactInput): WorkflowArtifact {
+    const now = Date.now();
+    // ?? 只在 null/undefined 时回退；空字符串 id 也视作未提供，避免持久化空 id。
+    const providedId = typeof input.id === 'string' && input.id.length > 0 ? input.id : undefined;
+    const artifact = WorkflowArtifactSchema.parse({
+      ...input,
+      id: providedId ?? `artifact-${now}-${Math.random().toString(16).slice(2, 10)}`,
+      createdAt: input.createdAt ?? now,
+    });
+    mkdirSync(dirname(this.path), { recursive: true });
+    appendFileSync(this.path, JSON.stringify(artifact) + '\n', 'utf8');
+    this.maybeCompact();
+    return artifact;
+  }
+
+  list(runId?: string): WorkflowArtifact[] {
+    // 与 WorkflowRunHistory.list 一致：按 createdAt 降序，最近的在前。
+    const artifacts = this.load().sort((a, b) => b.createdAt - a.createdAt);
+    return runId ? artifacts.filter((artifact) => artifact.runId === runId) : artifacts;
+  }
+
+  private load(): WorkflowArtifact[] {
+    if (!existsSync(this.path)) return [];
+    let raw = '';
+    try {
+      raw = readFileSync(this.path, 'utf8');
+    } catch (err) {
+      logger.warn({ err, path: this.path }, 'workflow-artifacts 读取失败，返回空列表');
+      return [];
+    }
+    const artifacts: WorkflowArtifact[] = [];
+    let badLineCount = 0;
+    for (const line of raw.split(/\r?\n/)) {
+      if (!line.trim()) continue;
+      try {
+        artifacts.push(WorkflowArtifactSchema.parse(JSON.parse(line)));
+      } catch {
+        badLineCount++;
+      }
+    }
+    if (badLineCount > 0) {
+      logger.warn({ path: this.path, badLineCount }, 'workflow-artifacts 跳过损坏行（其余产物保留）');
+    }
+    return artifacts;
+  }
+
+  private maybeCompact(): void {
+    // 与 WorkflowRunHistory 对齐：先字节扫描估算行数，超阈值才走全量解析 + compaction。
+    let lineCount = 0;
+    try {
+      const raw = readFileSync(this.path, 'utf8');
+      for (let i = 0; i < raw.length; i++) if (raw.charCodeAt(i) === 10) lineCount++;
+    } catch {
+      return;
+    }
+    if (lineCount <= this.maxArtifacts * HISTORY_COMPACTION_RATIO) return;
+    try {
+      const artifacts = this.load();
+      const recent = artifacts.sort((a, b) => b.createdAt - a.createdAt).slice(0, this.maxArtifacts).reverse();
+      mkdirSync(dirname(this.path), { recursive: true });
+      const body = recent.map((artifact) => JSON.stringify(artifact)).join('\n') + (recent.length ? '\n' : '');
+      const tmp = `${this.path}.tmp-${process.pid}-${Date.now()}`;
+      writeFileSync(tmp, body, 'utf8');
+      renameSync(tmp, this.path);
+    } catch (err) {
+      logger.warn({ err, path: this.path }, 'workflow-artifacts compaction 失败，下次 append 时重试');
+    }
+  }
+}
+
 function parseNdjsonRuns(raw: string, path: string): WorkflowRun[] {
   const seen = new Map<string, WorkflowRun>();
   let badLineCount = 0;
@@ -308,6 +441,13 @@ export function parseWorkflowStep(entry: string): WorkflowStep {
   return WorkflowStepSchema.parse({
     id: fields.id,
     tool: fields.tool ?? 'local',
+    role: fields.role || undefined,
+    model: fields.model || undefined,
+    provider: fields.provider || 'local',
+    permissions: fields.permissions ? splitList(fields.permissions) : [],
+    contextPolicy: parseContextPolicy(fields),
+    humanGate: fields.humanGate || undefined,
+    artifacts: fields.artifacts ? splitList(fields.artifacts) : [],
     template: fields.template || undefined,
     command: fields.command || undefined,
     args: fields.args ? splitList(fields.args) : [],
@@ -315,6 +455,22 @@ export function parseWorkflowStep(entry: string): WorkflowStep {
     dependsOn: fields.after ? splitList(fields.after) : [],
     checkpoint: fields.checkpoint === 'true' || fields.checkpoint === '1' || fields.checkpoint === 'yes',
   });
+}
+
+function parseContextPolicy(fields: Record<string, string>): z.infer<typeof WorkflowContextPolicySchema> {
+  let maxTokens: number | undefined;
+  if (fields.contextMaxTokens) {
+    const parsed = Number(fields.contextMaxTokens);
+    if (!Number.isInteger(parsed) || parsed <= 0) {
+      throw new Error(`invalid contextMaxTokens: ${fields.contextMaxTokens}`);
+    }
+    maxTokens = parsed;
+  }
+  return {
+    maxTokens,
+    include: fields.contextInclude ? splitList(fields.contextInclude) : [],
+    exclude: fields.contextExclude ? splitList(fields.contextExclude) : [],
+  };
 }
 
 export type WorkflowRunHooks = {
@@ -332,10 +488,23 @@ export async function runWorkflow(input: {
   executor?: (command: string, args: string[]) => Promise<number>;
   templateManager?: WorkflowTemplateManager;
   hooks?: WorkflowRunHooks;
+  /** 可选 artifact store：每个 step 成功或停在 checkpoint 时，按 step.artifacts 列表落一条占位 artifact。 */
+  artifactStore?: WorkflowArtifactStore;
+  /** 可选 AbortSignal：触发后当前 step 由 executor 自行中断，外层在 step 之间发现 abort 也会立刻收尾。 */
+  signal?: AbortSignal;
+  /** 续跑入口：从 paused checkpoint 恢复时，把前序 step 状态带进来，复用原 runId/startedAt，
+   *  从 stepId 开始重新执行该 checkpoint step，前面的 success step 不重跑。 */
+  resumeFrom?: {
+    runId: string;
+    stepId: string;
+    previousSteps: WorkflowStepRun[];
+    startedAt: number;
+  };
 }): Promise<WorkflowRun> {
-  const startedAt = Date.now();
+  const resumeFrom = input.resumeFrom;
+  const startedAt = resumeFrom?.startedAt ?? Date.now();
   const run: WorkflowRun = {
-    id: `run-${startedAt}-${Math.random().toString(16).slice(2, 10)}`,
+    id: resumeFrom?.runId ?? `run-${startedAt}-${Math.random().toString(16).slice(2, 10)}`,
     workflowName: input.workflow.name,
     status: input.dryRun ? 'dry-run' : 'success',
     values: { ...input.workflow.params, ...(input.values ?? {}) },
@@ -349,14 +518,45 @@ export async function runWorkflow(input: {
   const hooks = input.hooks ?? {};
   const successful = new Set<string>();
 
+  // 续跑时先把已成功 step 灌进 run.steps 和 successful set，让 dependsOn 不会误报缺失；
+  // 检查点步骤本身不带进来，由下面的循环重新执行。
+  if (resumeFrom) {
+    for (const prev of resumeFrom.previousSteps) {
+      if (prev.id === resumeFrom.stepId) break;
+      run.steps.push(prev);
+      if (prev.status === 'success') successful.add(prev.id);
+    }
+  }
+
   await invokeHook(hooks.onWorkflowStart, run);
+  let resumeReached = !resumeFrom;
   for (const step of input.workflow.steps) {
+    // 续跑模式下，到达 resumeFrom.stepId 之前的 step 全部跳过（已在 previousSteps 里灌好状态）。
+    if (!resumeReached) {
+      if (step.id === resumeFrom!.stepId) {
+        resumeReached = true;
+      } else {
+        continue;
+      }
+    }
+    // signal 在 step 之间检查：如果用户/上层取消，立刻收尾，留一条标记 cancelled 的 stepRun。
+    if (input.signal?.aborted) {
+      run.status = 'failed';
+      const cancelled: WorkflowStepRun = {
+        ...stepMetaFrom(step),
+        status: 'failed',
+        args: [],
+        message: 'workflow run cancelled before step started',
+      };
+      run.steps.push(cancelled);
+      await invokeHook(hooks.onStepFinish, cancelled, run);
+      break;
+    }
     const missing = step.dependsOn.filter((dep) => !successful.has(dep));
     if (missing.length > 0) {
       run.status = 'failed';
       const skipped: WorkflowStepRun = {
-        id: step.id,
-        tool: step.tool,
+        ...stepMetaFrom(step),
         status: 'skipped',
         args: [],
         message: `missing dependencies: ${missing.join(', ')}`,
@@ -370,8 +570,7 @@ export async function runWorkflow(input: {
     if (step.checkpoint && !input.yes) {
       run.status = 'paused';
       const checkpointStep: WorkflowStepRun = {
-        id: step.id,
-        tool: step.tool,
+        ...stepMetaFrom(step),
         status: 'checkpoint',
         command: resolved.command,
         args: resolved.args,
@@ -379,12 +578,13 @@ export async function runWorkflow(input: {
       };
       run.steps.push(checkpointStep);
       await invokeHook(hooks.onStepFinish, checkpointStep, run);
+      // checkpoint 停顿时也落一条 human-decision 占位（如果 step.artifacts 包含），方便 W-32 人工门挂条目。
+      recordStepArtifacts(input.artifactStore, run, step);
       break;
     }
 
     const stepRun: WorkflowStepRun = {
-      id: step.id,
-      tool: step.tool,
+      ...stepMetaFrom(step),
       status: input.dryRun ? 'success' : 'running',
       command: resolved.command,
       args: resolved.args,
@@ -396,6 +596,8 @@ export async function runWorkflow(input: {
       stepRun.endedAt = Date.now();
       successful.add(step.id);
       await invokeHook(hooks.onStepFinish, stepRun, run);
+      // dry-run 也落 artifact 占位条目，便于后续模板化校验；caller 可按 createdAt 区分。
+      recordStepArtifacts(input.artifactStore, run, step);
       continue;
     }
     // N-14：原来直接 await executor(...)，pty.spawn 抛错会把异常一路 reject 到 daemon，
@@ -416,17 +618,70 @@ export async function runWorkflow(input: {
     stepRun.exitCode = exitCode;
     stepRun.endedAt = Date.now();
     stepRun.status = exitCode === 0 ? 'success' : 'failed';
+    // 如果是因为 cancel 被打断（executor 内 child 被 SIGTERM），message 给出明确原因，
+    // 方便 delivery-note / GUI 区分「执行失败」与「用户主动取消」。
+    if (exitCode !== 0 && input.signal?.aborted) {
+      stepRun.message = 'workflow run cancelled mid-step';
+    }
     await invokeHook(hooks.onStepFinish, stepRun, run);
     if (exitCode !== 0) {
       run.status = 'failed';
       break;
     }
+    // 仅成功 step 落 artifact 占位；失败/跳过的步骤不产生产物，避免污染审查门。
+    recordStepArtifacts(input.artifactStore, run, step);
     successful.add(step.id);
   }
   run.endedAt = Date.now();
   const finalRun = WorkflowRunSchema.parse(run);
+  // W-33：workflow 结束（含 paused/failed）总结成一条 delivery-note artifact，便于复盘与外部续作。
+  recordDeliveryNote(input.artifactStore, finalRun);
   await invokeHook(hooks.onWorkflowFinish, finalRun);
   return finalRun;
+}
+
+function recordDeliveryNote(store: WorkflowArtifactStore | undefined, run: WorkflowRun): void {
+  if (!store) return;
+  // 已落条目：每个 step 在成功 / 检查点 / dry-run 时已经 recordStepArtifacts 写过 type=plan / patch-summary / ...，
+  // delivery-note 是 run 的最后一条，汇总「谁用什么 provider/model 做了什么 → 产出哪些 artifact」让人 1 条就能复盘。
+  const priorArtifacts = store.list(run.id);
+  const lines: string[] = [
+    `workflow=${run.workflowName}`,
+    `runId=${run.id}`,
+    `status=${run.status}`,
+    `steps=${run.steps.length}`,
+    '',
+    '## Steps',
+  ];
+  for (const step of run.steps) {
+    const facets = [step.tool];
+    if (step.provider && step.provider !== 'local') facets.push(`provider=${step.provider}`);
+    if (step.role) facets.push(`role=${step.role}`);
+    if (step.model) facets.push(`model=${step.model}`);
+    const detail = step.message ? ` :: ${step.message}` : '';
+    lines.push(`- ${step.id} [${facets.join(' ')}] ${step.status}${detail}`);
+  }
+  if (priorArtifacts.length > 0) {
+    lines.push('', '## Artifacts');
+    for (const artifact of priorArtifacts.slice().sort((a, b) => a.createdAt - b.createdAt)) {
+      const where = artifact.stepId ? `${artifact.stepId}` : 'run';
+      lines.push(`- ${artifact.type} @ ${where}${artifact.role ? ` (${artifact.role})` : ''}: ${artifact.title}`);
+    }
+  }
+  // 把所有 prior artifact 的 files 合并去重，让 delivery-note 自己也带完整文件清单。
+  const files = Array.from(new Set(priorArtifacts.flatMap((entry) => entry.files)));
+  try {
+    store.append({
+      runId: run.id,
+      workflowName: run.workflowName,
+      type: 'delivery-note',
+      title: `${run.workflowName} ${run.status}`,
+      content: lines.join('\n'),
+      files,
+    });
+  } catch (err) {
+    logger.warn({ err, runId: run.id }, 'delivery-note artifact 落条失败');
+  }
 }
 
 async function invokeHook<T extends unknown[]>(
@@ -447,19 +702,55 @@ export function resolveWorkflowStep(
   values: Record<string, string>,
   templateManager = new WorkflowTemplateManager(),
 ): { command: string; args: string[] } {
+  let base: { command: string; args: string[] };
   if (step.template) {
     const templateValues = renderValues(step.values, values);
     const resolved = templateManager.resolve(step.template, { ...values, ...templateValues });
-    return {
+    base = {
       command: render(resolved.command, values),
       args: resolved.args.map((arg) => render(arg, values)),
     };
+  } else {
+    if (!step.command) throw new Error(`workflow step ${step.id} requires command or template`);
+    base = {
+      command: render(step.command, values),
+      args: step.args.map((arg) => render(arg, values)),
+    };
   }
-  if (!step.command) throw new Error(`workflow step ${step.id} requires command or template`);
-  return {
-    command: render(step.command, values),
-    args: step.args.map((arg) => render(arg, values)),
-  };
+  return providerInvocation(step.provider ?? 'local', step.model, base);
+}
+
+/**
+ * W-31：按 provider 把 step 的 base invocation 包装成对应 CLI 调用。
+ *
+ * - local: base 原样返回（向后兼容所有不带 provider 字段的 workflow）
+ * - codex: `codex exec [--model M] [<base-args>...] <base-command-as-prompt>`
+ *   step.command 视为给 codex 的 prompt 文本；step.args 透传给 codex（用户可以塞 `--cwd` 等）
+ * - claude-code: `claude -p <prompt> [<base-args>...] [--model M]`
+ * - opencode: `opencode run [<base-args>...] [--model M] <prompt>`
+ *
+ * 这套模板是各 CLI 当前文档中的常见调用形态；用户后续若要换模板，可以走 step.template 走通用路径。
+ */
+function providerInvocation(
+  provider: WorkflowProvider,
+  model: string | undefined,
+  base: { command: string; args: string[] },
+): { command: string; args: string[] } {
+  if (provider === 'local') return base;
+  const prompt = base.command;
+  if (!prompt) {
+    // template 分支也可能落到这里，但 template.command 始终非空，仅 paranoia
+    throw new Error(`provider ${provider} requires a non-empty step command/prompt`);
+  }
+  const modelFlag = model ? ['--model', model] : [];
+  switch (provider) {
+    case 'codex':
+      return { command: 'codex', args: ['exec', ...modelFlag, ...base.args, prompt] };
+    case 'claude-code':
+      return { command: 'claude', args: ['-p', prompt, ...base.args, ...modelFlag] };
+    case 'opencode':
+      return { command: 'opencode', args: ['run', ...modelFlag, ...base.args, prompt] };
+  }
 }
 
 function validateWorkflow(workflow: WorkflowDefinition): void {
@@ -486,4 +777,43 @@ function render(value: string, values: Record<string, string>): string {
 
 function splitList(value: string): string[] {
   return value.split(',').map((item) => item.trim()).filter(Boolean);
+}
+
+function stepMetaFrom(step: WorkflowStep): Pick<WorkflowStepRun, 'id' | 'tool' | 'role' | 'model' | 'provider' | 'artifacts'> {
+  return {
+    id: step.id,
+    tool: step.tool,
+    role: step.role,
+    model: step.model,
+    provider: step.provider,
+    artifacts: step.artifacts,
+  };
+}
+
+/**
+ * 按 step.artifacts 清单为 step 完成事件落占位 artifact。caller 可以后续读 store.list(run.id)
+ * 拿到全部产物并补 content；store/落条失败不影响 workflow 主流程。
+ */
+function recordStepArtifacts(
+  store: WorkflowArtifactStore | undefined,
+  run: WorkflowRun,
+  step: WorkflowStep,
+): void {
+  if (!store || step.artifacts.length === 0) return;
+  for (const type of step.artifacts) {
+    try {
+      store.append({
+        runId: run.id,
+        workflowName: run.workflowName,
+        stepId: step.id,
+        role: step.role,
+        type,
+        title: `${run.workflowName}/${step.id}: ${type}`,
+        content: '',
+        files: [],
+      });
+    } catch (err) {
+      logger.warn({ err, runId: run.id, stepId: step.id, type }, 'workflow-artifacts 落条失败，跳过该 artifact');
+    }
+  }
 }

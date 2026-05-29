@@ -1,7 +1,7 @@
 {
   "name": "codepanion",
   "version": "0.1.0",
-  "description": "Daemon and CLI for the CodePanion local multi-task console",
+  "description": "Daemon and CLI for the CodePanion local AI workflow console",
   "bin": {
     "codepanion": "./dist/index.js"
   },

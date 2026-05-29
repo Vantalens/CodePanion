@@ -2,7 +2,7 @@
 
 daemon 在内存里维护三类历史：会话 (`SessionManager`)、来源事件 (`SourceManager`)、工作流 (`WorkflowManager`)。所有 cap 默认值集中在 [packages/daemon/src/config.ts](../packages/daemon/src/config.ts) 的 `RETENTION_DEFAULTS`，可在 `~/.codepanion/config.json` 的 `retention` 字段覆盖。
 
-修改本文档前请同步 `RETENTION_DEFAULTS`，并确保 [docs/IMPLEMENTATION_LOG.md](IMPLEMENTATION_LOG.md) 有对应记录。
+修改本文档前请同步 `RETENTION_DEFAULTS`，并在对应代码变更或任务记录中说明原因。
 
 ## cap 一览
 
@@ -27,7 +27,7 @@ daemon 在内存里维护三类历史：会话 (`SessionManager`)、来源事件
 
 ## 持久化交互
 
-- 仅 `WorkflowManager` 持久化到 `~/.codepanion/workflow-snapshot.json`，使用 200ms 去抖 + 临时文件 rename（详见 [IMPLEMENTATION_LOG.md P-1](IMPLEMENTATION_LOG.md#p-1-工作流快照去抖--原子写)）。
+- 仅 `WorkflowManager` 持久化到 `~/.codepanion/workflow-snapshot.json`，使用 200ms 去抖 + 临时文件 rename。
 - `SessionManager` / `SourceManager` 不写盘，daemon 进程结束即丢失。
 - 重启读快照时仍走 `itemsPerThread` 裁剪与 `prune`，保留策略变更立即对历史生效。
 
@@ -52,4 +52,4 @@ daemon 在内存里维护三类历史：会话 (`SessionManager`)、来源事件
   - [test/sessionManager.test.mjs](../packages/daemon/test/sessionManager.test.mjs) `SessionManager respects custom retention caps`
   - [test/sourceManager.test.mjs](../packages/daemon/test/sourceManager.test.mjs) `SourceManager respects custom retention caps`
   - [test/workflowManager.test.mjs](../packages/daemon/test/workflowManager.test.mjs) `WorkflowManager respects custom retention caps from constructor`
-- 长跑稳态：见 [scripts/stress-workflow.mjs](../scripts/stress-workflow.mjs)；8h 真机实测已降级为 Beta 前稳态验证，不阻塞 Windows Alpha 与阶段 2 第一批模板能力，结果后续写回 [IMPLEMENTATION_LOG.md](IMPLEMENTATION_LOG.md)。
+- 长跑稳态：见 [scripts/stress-workflow.mjs](../scripts/stress-workflow.mjs)；8h 真机实测已降级为 Beta 前稳态验证，不阻塞当前工作流主线。
