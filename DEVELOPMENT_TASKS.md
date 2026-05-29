@@ -61,14 +61,19 @@ CodePanion 后续专注：
 
 ## P2：GUI 从会话流转向 workflow board
 
-- [-] **W-20** 将主界面第一层重排为 workspace / workflow 列表，而不是外部会话列表。
-  - rail 增加 ◫ workflow 视图按钮；切到该视图后 main 区从 chat container 切换为 workflow board
-  - 新增 webview ↔ host 协议 `request-workflow-board` / `workflow-board`，host 端走 [DaemonClient.FetchWorkflowBoardJsonAsync](packages/gui/Services/DaemonClient.cs) 拉 daemon `/workflow/board`
-  - 三列布局：可执行 workflow / 近期 runs / 等待人工门，按 status 染色 left border
-  - 待办：在该视图里点 workflow 直接 POST `/workflow/runs`、点 gate 跳到决策抽屉、按 workspace 切换
-- [ ] **W-21** 中央区域展示 workflow 节点、当前角色、状态、阻塞点和人工审核门。
-- [ ] **W-22** 右侧抽屉展示角色、模型、权限、artifact 和原始执行记录。
-- [ ] **W-23** 保留 `等待我 / 失败 / 需审阅 / 运行中 / 完成`，但状态挂到 workflow 节点和 artifact。
+- [x] **W-20** 将主界面第一层重排为 workspace / workflow 列表，而不是外部会话列表。
+  - **GUI 整体重建为工作流控制台**：删除监听式 shell（VS Code 插件面板 / 来源分组任务队列 / 会话流 / 接力 PTY 面板 / 收件箱 / session 回复 omnibar），chat.html/js/css 全部重写。
+  - 顶栏 workspace 选择条（路径 + 最近列表 localStorage 持久化，空=全局）+ 连接状态。
+  - 三栏：左 workflow 定义/近期 runs/人工门，中 run 时间线，右 详情/人工门决策。
+  - webview ↔ host 协议收敛为工作流控制台：`request-workflow-board/run/launch/gate-resolve/run-cancel/delivery` + `set-workspace`；旧的 reply/event-reply/task-action/handoff-launch 移除。
+- [x] **W-21** 中央区域展示 workflow 节点、当前角色、状态、阻塞点和人工审核门。
+  - 中栏 run 时间线：steps 顺序 + 状态染色 + 当前步 + exitCode；接 daemon WS `workflow-run-event` 实时更新（run-start/step-start/step-output/step-finish/run-finish），step-output 实时滚动。
+- [-] **W-22** 右侧抽屉展示角色、模型、权限、artifact 和原始执行记录。
+  - 已做：右栏展示 artifacts、delivery（复制 markdown/handoff）、步骤 stdout/stderr 输出。
+  - 待办：role / model / permission / contextPolicy 绑定展示（需 daemon 暴露 workspace roleBindings 给 board）。
+- [-] **W-23** 保留 `等待我 / 失败 / 需审阅 / 运行中 / 完成`，但状态挂到 workflow 节点和 artifact。
+  - 已做：run 状态（running/paused/failed/success）挂到 run 卡片与时间线 chip；paused gate 单列展示。
+  - 待办：把这些状态做成可筛选的队列视图。
 
 ---
 
