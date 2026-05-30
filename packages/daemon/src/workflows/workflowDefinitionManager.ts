@@ -10,7 +10,7 @@ import { dirname } from 'node:path';
 import { z } from 'zod';
 import { HOME_DIR } from '../config.js';
 import { logger } from '../logger.js';
-import { runWithPty } from '../pty/runner.js';
+import { runLocalCommand } from './localExec.js';
 import { WorkflowTemplateManager, parseTemplateValues } from './templateManager.js';
 
 // N-9：daemon 启动时 load 这些文件，如果用户在外部编辑器写坏（trailing comma、半截写入、BOM）
@@ -569,7 +569,7 @@ export async function runWorkflow(input: {
   };
 
   const templateManager = input.templateManager ?? new WorkflowTemplateManager();
-  const executor = input.executor ?? ((command, args) => runWithPty({ command, args }));
+  const executor = input.executor ?? ((command, args) => runLocalCommand(command, args));
   const hooks = input.hooks ?? {};
   const successful = new Set<string>();
 

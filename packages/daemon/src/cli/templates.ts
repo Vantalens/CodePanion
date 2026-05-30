@@ -1,4 +1,4 @@
-import { runWithPty } from '../pty/runner.js';
+import { runLocalCommand } from '../workflows/localExec.js';
 import { WorkflowTemplateManager, parseTemplateParams, parseTemplateValues } from '../workflows/templateManager.js';
 
 export async function templateAddCommand(args: {
@@ -58,6 +58,6 @@ export async function templateRunCommand(args: { name: string; set?: string[]; d
     console.log([resolved.command, ...resolved.args].join(' '));
     return;
   }
-  const exitCode = await runWithPty({ command: resolved.command, args: resolved.args });
+  const exitCode = await runLocalCommand(resolved.command, resolved.args);
   process.exit(exitCode);
 }

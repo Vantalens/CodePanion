@@ -1,12 +1,5 @@
 import { loadConfig } from '../config.js';
-import type {
-  MonitorEvent,
-  MonitorSource,
-  NotifyRequest,
-  RegisterSessionRequest,
-  RegisterSourceRequest,
-  SessionInfo,
-} from './protocol.js';
+import type { NotifyRequest } from './protocol.js';
 
 function baseUrl() {
   const cfg = loadConfig();
@@ -122,81 +115,8 @@ export function notify(payload: NotifyRequest): Promise<unknown> {
   return request('POST', '/notify', payload);
 }
 
-export function registerSession(payload: RegisterSessionRequest): Promise<SessionInfo> {
-  return request<SessionInfo>('POST', '/sessions', payload);
-}
-
-export function registerSource(payload: RegisterSourceRequest): Promise<MonitorSource> {
-  return request<MonitorSource>('POST', '/sources/register', payload);
-}
-
-export function postMonitorEvent(payload: MonitorEvent): Promise<unknown> {
-  return request('POST', '/events', payload);
-}
-
-export function postMonitorEventReply(eventId: string, text: string): Promise<unknown> {
-  return request('POST', `/events/${encodeURIComponent(eventId)}/reply`, { text });
-}
-
-export function listMonitorEventReplies(eventId: string): Promise<{
-  eventId: string;
-  replies: Array<{ eventId: string; sourceId?: string; text: string; timestamp: number }>;
-}> {
-  return request('GET', `/events/${encodeURIComponent(eventId)}/replies`);
-}
-
-export function listSources(): Promise<MonitorSource[]> {
-  return request<MonitorSource[]>('GET', '/sources');
-}
-
-export function disconnectSource(id: string, reason?: string): Promise<unknown> {
-  return request('POST', `/sources/${encodeURIComponent(id)}/disconnect`, reason ? { reason } : {});
-}
-
-export function postOutput(id: string, chunk: string): Promise<unknown> {
-  return request('POST', `/sessions/${id}/output`, { chunk });
-}
-
-export function postPrompt(id: string, lastLines: string, options?: string[]): Promise<unknown> {
-  return request('POST', `/sessions/${id}/prompt`, { lastLines, options });
-}
-
-export function postExit(id: string, exitCode: number): Promise<unknown> {
-  return request('POST', `/sessions/${id}/exit`, { exitCode });
-}
-
-export function postReply(id: string, text: string, mode?: 'option' | 'freeform'): Promise<unknown> {
-  // mode 未传时不写字段，与旧 daemon 兼容；旧 daemon 会忽略并按 option 处理。
-  const payload: { text: string; mode?: 'option' | 'freeform' } = { text };
-  if (mode) payload.mode = mode;
-  return request('POST', `/sessions/${id}/reply`, payload);
-}
-
-export function listSessions(): Promise<SessionInfo[]> {
-  return request<SessionInfo[]>('GET', '/sessions');
-}
-
-export function getSessionOutput(id: string): Promise<{ fullOutput: string; chunks: any[] }> {
-  return request<{ fullOutput: string; chunks: any[] }>('GET', `/sessions/${id}/output`);
-}
-
-export type AuditSnapshot = {
-  schemaVersion: number;
-  generatedAt: number;
-  since: number | null;
-  daemonVersion: string;
-  sources: MonitorSource[];
-  events: Array<MonitorEvent & { id: string; timestamp: number }>;
-  eventReplies: Array<{ eventId: string; sourceId?: string; text: string; timestamp: number }>;
-  sessions: SessionInfo[];
-  workflowThreads: unknown[];
-  workflowItems: unknown[];
-};
-
-export function getAuditSnapshot(options: { since?: number } = {}): Promise<AuditSnapshot> {
-  const query = options.since !== undefined ? `?since=${encodeURIComponent(String(options.since))}` : '';
-  return request<AuditSnapshot>('GET', `/audit/snapshot${query}`);
-}
+// 监听路线已下线：session/source/event/audit 相关客户端方法随 daemon 端点一并移除。
+// 保留 checkHealth / notify / 工作流控制台方法 / wsUrl / wsProtocols。
 
 // ---- workflow daemon-driven endpoints（W-22/W-23/W-32/cancel）----
 // CLI 镜像供 `codepanion workflow start/board/cancel/gates` 使用。

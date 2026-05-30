@@ -4,7 +4,6 @@ import { startCommand } from './start.js';
 import { stopCommand } from './stop.js';
 import { statusCommand } from './status.js';
 import { notifyCommand } from './notify.js';
-import { replyCommand } from './reply.js';
 import { installCommand } from './install.js';
 import {
   templateAddCommand,
@@ -30,7 +29,6 @@ import {
   workflowStartCommand,
   workflowWatchCommand,
 } from './workflows.js';
-import { auditExportCommand } from './audit.js';
 import { workspaceInitCommand, workspaceStatusCommand } from './workspace.js';
 
 export async function runCli(argv: string[]): Promise<void> {
@@ -71,39 +69,6 @@ export async function runCli(argv: string[]): Promise<void> {
           source: a.source as string,
           level: a.level as string,
         });
-      },
-    )
-    .command(
-      'reply <sessionId> <text>',
-      '向某个会话注入回复（默认末尾追加换行）',
-      (y) =>
-        y
-          .positional('sessionId', { type: 'string', demandOption: true })
-          .positional('text', { type: 'string', demandOption: true })
-          .option('newline', { type: 'boolean', default: true, describe: '是否末尾补 \\n' })
-          .option('freeform', {
-            alias: 'f',
-            type: 'boolean',
-            default: false,
-            describe: '发送自由文本到 PTY，不要求匹配 prompt 选项',
-          }),
-      async (a) => {
-        await replyCommand({
-          sessionId: a.sessionId as string,
-          text: a.text as string,
-          newline: a.newline as boolean,
-          freeform: a.freeform as boolean,
-        });
-      },
-    )
-    .command(
-      'run',
-      'PTY 包装方式启动一个命令（用法：codepanion run -- <cmd> [args...]）。注意：实际由 src/index.ts 短路处理，这里只是为了帮助文本',
-      (y) => y,
-      async () => {
-        // No-op; handled in src/index.ts before yargs parsing.
-        console.error('usage: codepanion run -- <command> [args...]');
-        process.exit(2);
       },
     )
     .command(
@@ -302,27 +267,6 @@ export async function runCli(argv: string[]): Promise<void> {
         const root = a.root as string | undefined;
         if (action === 'init') return workspaceInitCommand({ root });
         return workspaceStatusCommand({ root });
-      },
-    )
-    .command(
-      'audit <action>',
-      '本地审计与归档（action=export）',
-      (y) =>
-        y
-          .positional('action', { type: 'string', choices: ['export'], demandOption: true })
-          .option('output', { type: 'string', alias: 'o', describe: '写入文件路径；省略或 - 输出到 stdout' })
-          .option('format', { type: 'string', choices: ['json', 'jsonl'], default: 'json' })
-          .option('since', { type: 'string', describe: 'ISO 8601 字符串或 epoch ms，只导出该时刻之后的数据' })
-          .option('redact', { type: 'boolean', default: false, describe: '对事件内容、回复、路径做最小脱敏' }),
-      async (a) => {
-        if (a.action === 'export') {
-          await auditExportCommand({
-            output: a.output as string | undefined,
-            format: a.format as 'json' | 'jsonl',
-            since: a.since as string | undefined,
-            redact: a.redact as boolean,
-          });
-        }
       },
     )
     .demandCommand(1)

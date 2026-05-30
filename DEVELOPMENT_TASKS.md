@@ -27,14 +27,15 @@ CodePanion 后续专注：
 4. **人工审核**：需求、计划、审查、交付等关键节点必须能由用户批准、拒绝或要求重试。
 5. **产出闭环**：记录计划、变更摘要、测试结果、审查报告、人工决策和交付摘要。
 
-明确不继续投入：
+明确不继续投入（监听路线 daemon 运行时已下线，仅 protocol schema 暂留待 GUI PR 一并清）：
 
-- 外部窗口监听
-- 进程识别路线
-- Codex Desktop 被动同步路线
-- VS Code 来源事件路线
-- 多源监控看板路线
-- 旧的 handoff / 接力作为产品主概念
+- 外部窗口监听（SourceManager / 适配器已删）
+- 进程识别路线（AiToolProcessAdapter 已删）
+- Codex Desktop 被动同步路线（CodexDesktopAdapter 已删）
+- VS Code 来源事件路线（/sources、/events 已删）
+- 多源监控看板路线（/workflow/snapshot、threads 已删）
+- 旧的 handoff / 接力作为产品主概念（handoff 端点 + pty/handoffRunner 已删）
+- 交互式 PTY 监控 CLI（codepanion run/reply、pty/ 已删）
 
 ---
 

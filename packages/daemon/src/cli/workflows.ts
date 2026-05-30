@@ -8,9 +8,7 @@ import {
   parseWorkflowSteps,
   runWorkflow,
   type WorkflowRun,
-  type WorkflowRunHooks,
   type WorkflowStep,
-  type WorkflowStepRun,
 } from '../workflows/workflowDefinitionManager.js';
 import { WORKSPACE_CONFIG_DIR } from '../workflows/workspaceManager.js';
 
@@ -66,21 +64,14 @@ import WebSocket from 'ws';
 import {
   cancelWorkflowRun,
   checkHealth,
-  disconnectSource,
   getWorkflowBoard,
   getWorkflowGates,
   listWorkflowArtifacts,
-  postMonitorEvent,
-  registerSource,
   resolveWorkflowGate,
   startWorkflowRun,
   wsProtocols,
   wsUrl,
 } from '../shared/client.js';
-import type { MonitorEvent, MonitorSource } from '../shared/protocol.js';
-
-type MonitorEventType = NonNullable<MonitorEvent['type']>;
-type MonitorEventLevel = NonNullable<MonitorEvent['level']>;
 
 export async function workflowAddCommand(args: {
   name: string;
@@ -148,23 +139,16 @@ export async function workflowRunCommand(args: { name: string; set?: string[]; d
     console.error(`[codepanion] workflow not found: ${args.name}`);
     process.exit(1);
   }
-  const hooks = args.dryRun ? undefined : await createDaemonHooks(workflow.name);
-  let run: WorkflowRun;
-  try {
-    run = await runWorkflow({
-      workflow,
-      values: parseWorkflowParams(args.set ?? []),
-      dryRun: args.dryRun,
-      yes: args.yes,
-      hooks: hooks?.handlers,
-      artifactStore: artifacts,
-    });
-  } catch (err) {
-    await hooks?.abort((err as Error).message ?? String(err));
-    throw err;
-  }
+  // 监听路线下线后，CLI 本地跑 workflow 不再向 daemon 上报进度（旧 createDaemonHooks 走 /sources+/events）。
+  // shell 步骤走默认 runLocalCommand；agent 步骤在 CLI 无模型后端注入 → 归一 failed（agent 走 daemon/GUI）。
+  const run: WorkflowRun = await runWorkflow({
+    workflow,
+    values: parseWorkflowParams(args.set ?? []),
+    dryRun: args.dryRun,
+    yes: args.yes,
+    artifactStore: artifacts,
+  });
   history.append(run);
-  await hooks?.finalize(run);
   printRun(run);
   if (run.status === 'failed') process.exit(1);
   if (run.status === 'paused') process.exit(3);
@@ -258,115 +242,19 @@ export async function workflowReplayCommand(args: { id: string; set?: string[]; 
     console.error(`[codepanion] workflow not found: ${previous.workflowName}`);
     process.exit(1);
   }
-  const hooks = args.dryRun ? undefined : await createDaemonHooks(workflow.name);
-  let run: WorkflowRun;
-  try {
-    run = await runWorkflow({
-      workflow,
-      values: { ...previous.values, ...parseWorkflowParams(args.set ?? []) },
-      dryRun: args.dryRun,
-      yes: args.yes,
-      hooks: hooks?.handlers,
-      artifactStore: artifacts,
-    });
-  } catch (err) {
-    await hooks?.abort((err as Error).message ?? String(err));
-    throw err;
-  }
+  // 同 workflowRunCommand：本地跑、不向 daemon 上报进度。
+  const run: WorkflowRun = await runWorkflow({
+    workflow,
+    values: { ...previous.values, ...parseWorkflowParams(args.set ?? []) },
+    dryRun: args.dryRun,
+    yes: args.yes,
+    artifactStore: artifacts,
+  });
   history.append(run);
-  await hooks?.finalize(run);
   printRun(run);
   if (run.status === 'failed') process.exit(1);
   if (run.status === 'paused') process.exit(3);
   process.exit(0);
-}
-
-type DaemonHookBundle = {
-  handlers: WorkflowRunHooks;
-  finalize: (run: WorkflowRun) => Promise<void>;
-  abort: (reason: string) => Promise<void>;
-};
-
-async function createDaemonHooks(workflowName: string): Promise<DaemonHookBundle | undefined> {
-  const health = await checkHealth();
-  if (!health.ok) return undefined;
-
-  let source: MonitorSource | undefined;
-  try {
-    source = await registerSource({
-      kind: 'cli',
-      name: `workflow:${workflowName}`,
-      capabilities: ['workflow-run', 'cli-detected'],
-      capabilityLevel: 'L2',
-      integrationKind: 'cli-pty',
-      privacyBoundary: 'explicit-session',
-    });
-  } catch (err) {
-    console.warn('[codepanion] workflow events disabled (registerSource failed):', (err as Error).message);
-    return undefined;
-  }
-  const sourceId = source.id;
-
-  const emit = async (type: MonitorEventType, level: MonitorEventLevel, title: string, content: string) => {
-    try {
-      await postMonitorEvent({ type, level, sourceId, source: 'cli', title, content });
-    } catch (err) {
-      console.warn('[codepanion] workflow event emit failed:', (err as Error).message);
-    }
-  };
-
-  const handlers: WorkflowRunHooks = {
-    async onWorkflowStart(run) {
-      await emit('activity', 'info', `工作流 ${run.workflowName} 开始`, `run=${run.id}`);
-    },
-    async onStepStart(step) {
-      await emit('activity', 'info', `步骤 ${step.id} [${step.tool}] 启动`, formatCommand(step));
-    },
-    async onStepFinish(step) {
-      const stateMap: Record<WorkflowStepRun['status'], { type: MonitorEventType; level: MonitorEventLevel; label: string }> = {
-        success: { type: 'done', level: 'done', label: '完成' },
-        failed: { type: 'error', level: 'error', label: '失败' },
-        skipped: { type: 'error', level: 'error', label: '跳过' },
-        checkpoint: { type: 'prompt', level: 'prompt', label: '等待检查点' },
-        running: { type: 'activity', level: 'info', label: '运行中' },
-        pending: { type: 'activity', level: 'info', label: '待执行' },
-      };
-      const map = stateMap[step.status] ?? stateMap.running;
-      const detail = step.message ? `${formatCommand(step)} :: ${step.message}` : formatCommand(step);
-      await emit(map.type, map.level, `步骤 ${step.id} ${map.label}`, detail);
-    },
-  };
-
-  const finalize = async (run: WorkflowRun) => {
-    const finalType: MonitorEventType = run.status === 'failed' ? 'error' : run.status === 'paused' ? 'prompt' : 'done';
-    const finalLevel: MonitorEventLevel = run.status === 'failed' ? 'error' : run.status === 'paused' ? 'prompt' : 'done';
-    await emit(finalType, finalLevel, `工作流 ${run.workflowName} ${run.status}`, `run=${run.id} steps=${run.steps.length}`);
-    try {
-      await disconnectSource(sourceId, `workflow-${run.status}`);
-    } catch (err) {
-      // 来源已被 daemon 自动回收时 disconnect 会失败，忽略即可
-      void err;
-    }
-  };
-
-  const abort = async (reason: string) => {
-    // runWorkflow 抛异常时（模板缺失 / executor 透传错误 / schema 校验失败）走这里，
-    // 保证 daemon 端注册过的 workflow source 不会一直停在 online 而被 GUI 误读为活任务。
-    await emit('error', 'error', `工作流 ${workflowName} 异常中止`, reason || 'unknown error');
-    try {
-      await disconnectSource(sourceId, 'workflow-aborted');
-    } catch (err) {
-      void err;
-    }
-  };
-
-  return { handlers, finalize, abort };
-}
-
-function formatCommand(step: WorkflowStepRun): string {
-  if (!step.command) return '';
-  const args = step.args && step.args.length > 0 ? ` ${step.args.join(' ')}` : '';
-  return `${step.command}${args}`;
 }
 
 function printRun(run: { id: string; status: string; steps: Array<{ id: string; tool: string; status: string; command?: string; args?: string[]; message?: string }> }) {
