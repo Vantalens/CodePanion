@@ -36,6 +36,7 @@ const artifactsPath = () => process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH || WO
 const PARAM_NAME_RE = /^[A-Za-z_][A-Za-z0-9_-]*$/;
 
 const WorkflowPermissionSchema = z.enum(['read', 'write', 'command', 'network', 'delegate', 'approve']);
+export type WorkflowPermission = z.infer<typeof WorkflowPermissionSchema>;
 
 // 历史字段 provider：保留用于解析旧 workflows.json，但执行模型已两轴化（见下 architecture）。
 // - local: 进程内不调模型，spawn 本地命令（shell 架构）
@@ -189,6 +190,8 @@ export type AgentStepRequest = {
   model?: string;
   prompt: string;
   values: Record<string, string>;
+  // tool-use 循环按 step 声明的权限门控工具（slice 2a：含 'read' 才给只读文件工具）。
+  permissions: WorkflowPermission[];
 };
 export type AgentExecutor = (req: AgentStepRequest) => Promise<ExecutorResult>;
 
@@ -689,6 +692,7 @@ export async function runWorkflow(input: {
             model: step.model,
             prompt: agentPrompt ?? '',
             values: run.values,
+            permissions: step.permissions,
           });
         }
       } else {

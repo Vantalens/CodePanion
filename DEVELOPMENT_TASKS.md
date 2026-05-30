@@ -85,7 +85,8 @@ CodePanion 后续专注：
   - slice 1 = single-call agent：组 prompt → 调一次 `/chat/completions` → 文本落 stepRun.output + WS step-output 实时推送 + delivery-note `## Step output preview`。
   - `daemonWorkflowExecutor` 返回结构化结果（exitCode + stdout + stderr + truncated），shell/agent 两路都落 `stepRun.output`，每流 cap 32KB。
   - config.json `models` / `defaultModel` + [modelClient.ts](packages/daemon/src/models/modelClient.ts)（内置 fetch）；daemon `agentExecutor` 解析 role/model→后端→调模型。
-  - 待办：tool-use 循环（agent 读写文件 / 跑命令 / 沙箱权限 / contextPolicy 强制）；GUI 选择 architecture/model + 编辑模型后端。
+  - slice 2a = tool-use 循环（只读）：`read_file` / `list_dir`，`permissions=read` + workspace 门控，`ensurePathInside` 钳沙箱，`config.agent.maxTurns` 封顶，每轮经 WS step-output 实时推。[agentRuntime.ts](packages/daemon/src/models/agentRuntime.ts) + [agentTools.ts](packages/daemon/src/workflows/agentTools.ts)。
+  - 待办：slice 2b 写工具（`write_file` / `run_command`，write/command 权限 + cwd 钳 workspace + batch-arg 防护）；contextPolicy 强制；GUI 选择 architecture/model + 编辑模型后端。
 - [x] **W-32** 支持人工在计划、审查、交付门中批准、拒绝、要求重试或追加约束。
   - approve：复用原 runId 从 checkpoint 之后续跑（PR #8）
   - reject：仅落 human-decision artifact，run 维持 paused

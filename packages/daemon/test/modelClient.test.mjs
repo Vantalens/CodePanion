@@ -54,6 +54,61 @@ test('chatCompletion 发到 /chat/completions，带 model/messages/Authorization
   });
 });
 
+test('tools 进请求体；解析 choices[0].message.tool_calls 与 finish_reason', async () => {
+  let seenBody = null;
+  await withStub((req, res, body) => {
+    seenBody = JSON.parse(body);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      choices: [{
+        finish_reason: 'tool_calls',
+        message: {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            { id: 'call_1', type: 'function', function: { name: 'read_file', arguments: '{"path":"a.txt"}' } },
+          ],
+        },
+      }],
+    }));
+  }, async (baseURL) => {
+    const tools = [{ type: 'function', function: { name: 'read_file', description: 'read', parameters: { type: 'object' } } }];
+    const result = await chatCompletion({
+      backend: { kind: 'openai-compatible', baseURL, apiKey: '', model: 'm' },
+      messages: [{ role: 'user', content: 'go' }],
+      tools,
+    });
+    // tools 进请求体。
+    assert.ok(Array.isArray(seenBody.tools));
+    assert.equal(seenBody.tools[0].function.name, 'read_file');
+    // tool_calls 与 finish_reason 被解析。
+    assert.equal(result.finishReason, 'tool_calls');
+    assert.equal(result.toolCalls.length, 1);
+    assert.equal(result.toolCalls[0].id, 'call_1');
+    assert.equal(result.toolCalls[0].function.name, 'read_file');
+    assert.equal(result.toolCalls[0].function.arguments, '{"path":"a.txt"}');
+    assert.equal(result.text, '');
+  });
+});
+
+test('无 tools 时请求体不带 tools 字段，普通文本回复无 toolCalls', async () => {
+  let seenBody = null;
+  await withStub((req, res, body) => {
+    seenBody = JSON.parse(body);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: 'done' } }] }));
+  }, async (baseURL) => {
+    const result = await chatCompletion({
+      backend: { kind: 'openai-compatible', baseURL, apiKey: '', model: 'm' },
+      messages: [{ role: 'user', content: 'x' }],
+    });
+    assert.equal('tools' in seenBody, false);
+    assert.equal(result.toolCalls, undefined);
+    assert.equal(result.text, 'done');
+    assert.equal(result.finishReason, 'stop');
+  });
+});
+
 test('baseURL 末尾斜杠被规整，不双斜杠', async () => {
   let url = null;
   await withStub((req, res) => {

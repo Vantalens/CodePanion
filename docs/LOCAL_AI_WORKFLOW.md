@@ -97,8 +97,12 @@ CodePanion 支持两种使用方式：
 
 - **architecture（harness，进程内）**：
   - `shell`：在本机 spawn `step.command/args`，用于跑测试、本地命令等非 AI 步骤。
-  - `agent`：CodePanion 进程内的 agent 运行时把 step 组成 prompt 交给模型 API 完成。**slice 1 = single-call**（组 prompt → 调一次 `/chat/completions` → 捕获返回文本为 output/artifact）；后续会长出 tool-use 循环（读写文件 / 跑命令 / 沙箱权限）。架构思路逆向自 Claude Code 等，但**在 CodePanion 进程内复刻**，不 shell 外部 CLI。
+  - `agent`：CodePanion 进程内的 agent 运行时把 step 组成 prompt 交给模型 API 完成。架构思路逆向自 Claude Code 等，但**在 CodePanion 进程内复刻**，不 shell 外部 CLI。
+    - **single-call**：组 prompt → 调一次 `/chat/completions` → 捕获返回文本（step 不声明工具权限时的退化形态）。
+    - **tool-use 循环（slice 2a，只读）**：step 声明 `permissions=read` 且选了 workspace 时，agent 可多轮调用 **只读工具** `read_file` / `list_dir`（模型发 tool_call → CodePanion 执行 → 回填结果 → 再调），直到给出结论或触顶 `config.agent.maxTurns`。文件访问用 `ensurePathInside` 钳在 workspace 根内，越界拒绝；无 workspace 则禁用文件工具。每轮 assistant 文本 / 工具调用 / 工具结果通过 WS `step-output` 实时推到 GUI 时间线。
+    - 待办（slice 2b）：`write_file` / `run_command`（`permissions=write` / `command` 门控，cwd 钳 workspace + Windows batch-arg 防护）。
 - **model（API 后端）**：`config.json` 的 `models[<id>]`（OpenAI 兼容，如 DeepSeek）。step 用哪个由 `step.model → role 绑定.model → defaultModel` 中第一个能命中的决定。key 存 config.json（0600 保护）。
+- **permissions**：step 的 `permissions`（`read/write/command/...`）首次有运行时意义——门控 agent 能用哪些工具。默认 `[]` → 无工具 → single-call。
 
 兼容：历史 `provider` 字段保留——`local→shell`，`codex/claude-code/opencode→agent`（旧语义是 shell 出去调该 CLI，现统一为进程内 agent，harness 风格差异靠 role/system-prompt 区分）。
 
