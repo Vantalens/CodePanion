@@ -117,7 +117,9 @@ import {
 } from '../workflows/workflowDefinitionManager.js';
 import { readFileSync } from 'node:fs';
 import { join as joinPath, resolve as resolvePath } from 'node:path';
-import { chatCompletion, ModelClientError, type ChatMessage } from '../models/modelClient.js';
+import { ModelClientError } from '../models/modelClient.js';
+import { runAgentLoop } from '../models/agentRuntime.js';
+import { buildReadonlyTools } from '../workflows/agentTools.js';
 import type { ModelBackend } from '../config.js';
 import { logger, maskString } from '../logger.js';
 import { VERSION } from '../shared/version.js';
@@ -783,23 +785,40 @@ export function createServer(
           stderr: `未找到模型后端：候选 model=[${candidates.join(', ') || '(无)'}]，请在 config.json 的 models / defaultModel 里配置`,
         };
       }
-      const messages: ChatMessage[] = [];
-      if (systemPrompt && systemPrompt.trim()) messages.push({ role: 'system', content: systemPrompt });
-      messages.push({ role: 'user', content: req.prompt });
+      // tool-use 循环（slice 2a）：step 声明 read 权限且选了 workspace 时，给只读文件工具；
+      // 否则 tools=[] → runAgentLoop 退化为 single-call（向后兼容，现有 step 默认 permissions:[]）。
+      const wantsReadTools = req.permissions.includes('read') && Boolean(opts.workspaceKey);
+      const { tools, runTool } = wantsReadTools
+        ? buildReadonlyTools(opts.workspaceKey)
+        : { tools: [], runTool: undefined };
+      const emit = (stream: 'stdout' | 'stderr', chunk: string) => workflows.emitRunEvent({
+        action: 'step-output',
+        runId: req.runId,
+        workflowName: opts.workflow.name,
+        stepId: req.stepId,
+        stream,
+        chunk,
+        truncated: false,
+      });
       try {
-        const result = await chatCompletion({ backend, messages, signal: controller.signal });
-        // 实时把模型返回推给 WS observer（非流式，一次性整段）。
-        workflows.emitRunEvent({
-          action: 'step-output',
-          runId: req.runId,
-          workflowName: opts.workflow.name,
-          stepId: req.stepId,
-          stream: 'stdout',
-          chunk: result.text,
-          truncated: false,
+        const loop = await runAgentLoop({
+          backend,
+          system: systemPrompt && systemPrompt.trim() ? systemPrompt : undefined,
+          userPrompt: req.prompt,
+          tools,
+          runTool,
+          maxTurns: cfg.agent.maxTurns,
+          signal: controller.signal,
+          // 把每轮 assistant 文本 / 工具调用 / 工具结果实时推到 GUI 时间线。
+          onEvent: (ev) => {
+            if (ev.kind === 'assistant') emit('stdout', ev.text);
+            else if (ev.kind === 'tool-call') emit('stdout', `→ 调用工具 ${ev.name} ${ev.args}`);
+            else if (ev.kind === 'tool-result') emit('stdout', `← ${ev.name} 结果：\n${ev.result.slice(0, STEP_OUTPUT_CHUNK_LIMIT)}`);
+            else if (ev.kind === 'max-turns') emit('stderr', `已达最大轮数 ${ev.turns}，提前收尾`);
+          },
         });
-        logger.info({ ...opts.logContext, runId: req.runId, stepId: req.stepId, model: chosenModel, usage: result.usage }, 'agent step 完成');
-        return { exitCode: 0, stdout: result.text, stderr: '', truncated: false };
+        logger.info({ ...opts.logContext, runId: req.runId, stepId: req.stepId, model: chosenModel, turns: loop.turns, tools: tools.length, hitMaxTurns: loop.hitMaxTurns }, 'agent step 完成');
+        return { exitCode: 0, stdout: loop.finalText, stderr: loop.hitMaxTurns ? `（达最大轮数 ${cfg.agent.maxTurns}）` : '', truncated: false };
       } catch (err) {
         const msg = err instanceof ModelClientError ? err.message : (err instanceof Error ? err.message : String(err));
         return { exitCode: 1, stdout: '', stderr: `模型调用失败：${msg}` };
