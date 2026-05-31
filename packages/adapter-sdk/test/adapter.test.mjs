@@ -52,7 +52,9 @@ test('readDaemonConfig 读取真实文件 + 文件不存在 fallback', () => {
   }
 });
 
-test('SDK 注册来源后能够上报 activity 事件并被 daemon 返回 ok', async () => {
+// 监听路线已下线（feat/retire-monitoring）：/sources/register、/events 端点从 daemon 移除，
+// Adapter SDK 暂作历史兼容、已移出主回归门（npm test）。待 SDK 迁到 workflow API 后重写本用例。
+test('SDK 注册来源后能够上报 activity 事件并被 daemon 返回 ok', { skip: '监听路线已下线：/sources/register、/events 端点已移除（feat/retire-monitoring）' }, async () => {
   await withDaemon(async ({ port, token }) => {
     const adapter = createAdapter({ hostname: '127.0.0.1', port, token, sourceKind: 'external', sourceName: 'sdk-test-adapter' });
     const source = await adapter.registerSource({
@@ -80,7 +82,8 @@ test('SDK 注册来源后能够上报 activity 事件并被 daemon 返回 ok', a
   });
 });
 
-test('SDK emit prompt 事件并通过 replyToEvent + listReplies 闭环', async () => {
+// 同上：监听路线下线后 registerSource/emitEvent/replyToEvent 走的端点均已移除，暂作历史兼容。
+test('SDK emit prompt 事件并通过 replyToEvent + listReplies 闭环', { skip: '监听路线已下线：/sources/register、/events、/events/:id/reply 端点已移除（feat/retire-monitoring）' }, async () => {
   await withDaemon(async ({ port, token }) => {
     const adapter = createAdapter({ hostname: '127.0.0.1', port, token, sourceName: 'sdk-prompt-test' });
     const source = await adapter.registerSource();

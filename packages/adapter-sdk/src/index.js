@@ -1,3 +1,7 @@
+// 历史兼容（feat/retire-monitoring）：本 SDK 的 registerSource/emitEvent/replyToEvent/listReplies
+// 调用的是已下线的「监听路线」端点（/sources/register、/events、/events/:id/reply）。daemon 已移除这些路由，
+// 这些方法对当前 daemon 不再可用，SDK 已移出主回归门（见根 package.json `test:adapter-sdk` 为可选脚本）。
+// 待迁移到 workflow API（/workflow/*）后再恢复进回归门。readDaemonConfig / 错误类型等无关监听的部分仍可用。
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';

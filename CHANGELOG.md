@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **下线监听路线（daemon 运行时）**：产品已转为「Agent IDE + 工作流控制台」，监听外部工具状态那套整体退役。
+  - 删除 HTTP 端点：`/sessions/*`、`/sources/*`、`/events/*`、`/audit/snapshot`、`/workflow/snapshot`、`/workflow/threads*`、`/workflow/threads/:id/handoff`、`task-state`。
+  - 删除子系统：`SessionManager`、`SourceManager`、`CodexDesktopAdapter`、`AiToolProcessAdapter`、整个 `pty/`（runner / promptDetector / handoffRunner）。
+  - 删除 CLI：`codepanion run`（PTY 包裹）、`reply`、`audit`；`workflow run/replay` 去掉向 daemon 上报进度的 `/sources`+`/events` hook（退化为本地跑）。
+  - `WorkflowManager` 砍成纯 run-event 事件总线（保留 `emitRunEvent`/`onEvent`），WS observer 仅推 `workflow-run-event` + `notification`。
+  - 保留：`/health`、`/notify`、`/workspace/*`、`/workflow/board|runs*|gates*`、工作流引擎与进程内 agent 执行、`codepanion notify/start/stop/status/install/template/workflow/workspace`。
+  - 注：`shared/protocol.ts` 的监听态 schema 暂留（保持生成 DTO 稳定 / GUI 编译不破）；protocol 收缩 + GUI 死订阅清理留作后续 GUI PR。
+
 ### Added
 
 - **agent tool-use 循环（slice 2a，只读工具）**：`architecture=agent` 的 step 从 single-call 升级为 tool-use 循环——模型可多轮调用工具逼近目标。
