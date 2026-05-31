@@ -26,11 +26,15 @@ function daemonWorkflowExecutor(
   args: string[],
   signal?: AbortSignal,
   onOutput?: (stream: 'stdout' | 'stderr', chunk: string, truncated: boolean) => void,
+  cwd?: string,
 ): Promise<{ exitCode: number; stdout: string; stderr: string; truncated: boolean }> {
   return new Promise((resolve) => {
+    // cwd = 所选 workspace 根目录；这样 GUI/daemon 跑 `npm test`、`npm run build` 这类项目命令时
+    // 落在用户选的项目目录，而不是 daemon 进程目录。空（fallback workspace）时 undefined，保持旧行为。
     const child = spawn(command, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
+      cwd: cwd || undefined,
     });
     const onAbort = () => {
       try { child.kill('SIGTERM'); } catch { /* 子进程可能已退出，忽略 */ }
@@ -87,6 +91,7 @@ import {
   StartWorkflowRunRequestSchema,
 } from '../shared/protocol.js';
 import { CodePanionWorkspaceManager, WORKSPACE_CONFIG_DIR } from '../workflows/workspaceManager.js';
+import { ensurePathInside } from '../workflows/pathSafety.js';
 import {
   WorkflowArtifactStore,
   WorkflowDefinitionManager,
@@ -395,8 +400,17 @@ export function createServer(
             roleModel = binding.model;
             if (binding.promptPath) {
               try {
-                systemPrompt = readFileSync(joinPath(opts.workspaceKey, binding.promptPath), 'utf8');
-              } catch { /* prompt 文件缺失 → 无 system prompt，不致命 */ }
+                // 防越界：promptPath 来自该 workspace 的 .codepanion/workflow.json，必须落在 workspaceKey 内。
+                // 否则恶意 config 可用 ../../ 把 system prompt 指到 workspace 外任意文件、再发给模型后端。
+                // schema 层（workspaceManager）已拒绝绝对路径/含 .. 的 promptPath，这里是读取前的纵深兜底
+                // （同时给 CodeQL 提供 path-injection 的 containment 数据流）。
+                const promptFullPath = ensurePathInside(
+                  joinPath(opts.workspaceKey, binding.promptPath),
+                  opts.workspaceKey,
+                  'role prompt path',
+                );
+                systemPrompt = readFileSync(promptFullPath, 'utf8');
+              } catch { /* prompt 文件缺失 / 路径越界 → 无 system prompt，不致命 */ }
             }
           }
         } catch { /* workspace config 读不到 → 退回无 role 信息 */ }
@@ -461,6 +475,8 @@ export function createServer(
             truncated,
           });
         },
+        // shell step 在所选 workspace 目录执行（空 = fallback workspace，沿用 daemon 进程目录）。
+        opts.workspaceKey || undefined,
       ),
       signal: controller.signal,
       hooks: {

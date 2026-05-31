@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { z } from 'zod';
 import { logger } from '../logger.js';
 import { ensurePathInside } from './pathSafety.js';
@@ -8,10 +8,21 @@ export const WORKSPACE_CONFIG_DIR = '.codepanion';
 
 const WorkflowRolePermissionSchema = z.enum(['read', 'write', 'command', 'network', 'delegate', 'approve']);
 
+// promptPath 必须是 workspace 内的相对路径：拒绝绝对路径与任何含 ".." 的路径段（兼容 / 与 \ 分隔），
+// 防止恶意 .codepanion/workflow.json 用 ../../ 把 role 的 system prompt 指到 workspace 外的任意文件。
+// daemon 读取前还会再过一遍 ensurePathInside 作纵深兜底（见 server.ts daemonAgentExecutor）。
+const RelativeWorkspacePathSchema = z
+  .string()
+  .min(1)
+  .refine(
+    (p) => !isAbsolute(p) && !p.split(/[\\/]+/).includes('..'),
+    { message: 'promptPath must be a workspace-relative path without ".." segments' },
+  );
+
 const WorkspaceRoleBindingSchema = z.object({
   model: z.string().min(1),
   provider: z.enum(['local', 'codex', 'claude-code', 'opencode']).default('local'),
-  promptPath: z.string().min(1),
+  promptPath: RelativeWorkspacePathSchema,
   permissions: z.array(WorkflowRolePermissionSchema).default([]),
   contextPolicy: z.object({
     maxTokens: z.number().int().positive(),

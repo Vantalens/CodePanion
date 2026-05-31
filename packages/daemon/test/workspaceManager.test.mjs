@@ -101,3 +101,71 @@ test('CodePanionWorkspaceManager.readConfig rejects a schema-invalid config (mis
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('CodePanionWorkspaceManager.readConfig rejects a roleBinding promptPath that escapes the workspace', () => {
+  // 安全回归：恶意 .codepanion/workflow.json 用 ../ 把 role 的 system prompt 指到 workspace 外，
+  // schema 必须拒绝（promptPath 只允许 workspace 内相对路径），readConfig 返回 undefined 并隔离损坏文件。
+  for (const evilPromptPath of ['../../etc/passwd', '/etc/passwd', '.codepanion/../../secret.md']) {
+    const dir = mkdtempSync(join(tmpdir(), 'codepanion-workspace-escape-'));
+    try {
+      const manager = new CodePanionWorkspaceManager(dir);
+      const layout = manager.layout();
+      mkdirSync(layout.configDir, { recursive: true });
+      const config = {
+        version: 1,
+        workspaceRoot: dir,
+        defaultWorkflow: ['intake'],
+        roles: ['planner'],
+        roleBindings: {
+          planner: {
+            model: 'high-reasoning',
+            provider: 'claude-code',
+            promptPath: evilPromptPath,
+            permissions: ['read'],
+            contextPolicy: { maxTokens: 1000, include: [], exclude: [] },
+          },
+        },
+      };
+      writeFileSync(layout.workflowPath, JSON.stringify(config), 'utf8');
+
+      const result = manager.readConfig();
+      assert.equal(result, undefined, `promptPath=${evilPromptPath} 应被 schema 拒绝`);
+      // 解析失败 → 与其它损坏 config 一样改名隔离，原路径不再存在。
+      assert.equal(existsSync(layout.workflowPath), false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+test('CodePanionWorkspaceManager.readConfig accepts a normal workspace-relative promptPath', () => {
+  // 正向：合法的相对 promptPath 不被误伤。
+  const dir = mkdtempSync(join(tmpdir(), 'codepanion-workspace-ok-path-'));
+  try {
+    const manager = new CodePanionWorkspaceManager(dir);
+    const layout = manager.layout();
+    mkdirSync(layout.configDir, { recursive: true });
+    const config = {
+      version: 1,
+      workspaceRoot: dir,
+      defaultWorkflow: ['intake'],
+      roles: ['planner'],
+      roleBindings: {
+        planner: {
+          model: 'high-reasoning',
+          provider: 'claude-code',
+          promptPath: '.codepanion/roles/planner.md',
+          permissions: ['read'],
+          contextPolicy: { maxTokens: 1000, include: [], exclude: [] },
+        },
+      },
+    };
+    writeFileSync(layout.workflowPath, JSON.stringify(config), 'utf8');
+
+    const result = manager.readConfig();
+    assert.ok(result, '合法相对 promptPath 应通过 schema');
+    assert.equal(result.roleBindings.planner.promptPath, '.codepanion/roles/planner.md');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

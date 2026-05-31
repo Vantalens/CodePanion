@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import WebSocket from 'ws';
 import { createServer } from '../dist/daemon/server.js';
 
@@ -1415,5 +1415,78 @@ test('W-32/W-33: gate resolve 落 human-decision artifact，artifact list 返回
     if (prevArtifactEnv === undefined) delete process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH;
     else process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH = prevArtifactEnv;
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('workspace shell step 在所选 workspace 目录执行（cwd = workspace root，而非 daemon 进程目录）', async () => {
+  const {
+    WorkflowDefinitionManager,
+    WorkflowRunHistory,
+  } = await import('../dist/workflows/workflowDefinitionManager.js');
+  // fallback 路径指到隔离 tmp，避免污染真实 HOME；workspace run 的 history 落在 <ws>/.codepanion/ 下。
+  const fallbackDir = mkdtempSync(join(tmpdir(), 'codepanion-cwd-fallback-'));
+  // realpath 归一：server 的 workspaceKey() 对 workspace 取 realpathSync.native，而 macOS 上
+  // mkdtemp 的 /var/... 会被解析成 /private/var/...。这里先归一，确保 definition 写入路径、启动用的
+  // workspace、以及读历史的路径都与 daemon 内部一致，否则 macOS 上会 404 / 读不到 history。
+  const ws = realpathSync.native(mkdtempSync(join(tmpdir(), 'codepanion-cwd-ws-')));
+  const prev = {
+    workflowEnv: process.env.CODEPANION_WORKFLOW_PATH,
+    historyEnv: process.env.CODEPANION_WORKFLOW_HISTORY_PATH,
+    artifactEnv: process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH,
+  };
+  process.env.CODEPANION_WORKFLOW_PATH = join(fallbackDir, 'workflows.json');
+  process.env.CODEPANION_WORKFLOW_HISTORY_PATH = join(fallbackDir, 'runs.ndjson');
+  process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH = join(fallbackDir, 'artifacts.ndjson');
+  try {
+    // 让 step 把自己的 cwd 打到 stdout。inline node JS 含 . ( ) 会撞 parseWorkflowSteps 的分隔符，直接构造 step。
+    new WorkflowDefinitionManager(join(ws, '.codepanion', 'workflows.json')).save({
+      name: 'cwd-probe',
+      steps: [{
+        id: 'probe',
+        role: 'builder',
+        tool: 'node',
+        provider: 'local',
+        permissions: [],
+        contextPolicy: {},
+        artifacts: [],
+        command: process.execPath,
+        args: ['-e', 'process.stdout.write(process.cwd())'],
+        values: {},
+        dependsOn: [],
+        checkpoint: false,
+      }],
+    });
+
+    await withServer(async ({ port, token }) => {
+      const started = await request(port, token, 'POST', '/workflow/runs', { workflow: 'cwd-probe', workspace: ws });
+      assert.equal(started.status, 200);
+
+      const history = new WorkflowRunHistory(join(ws, '.codepanion', 'workflow-runs.ndjson'));
+      const deadline = Date.now() + 5000;
+      let finished;
+      while (Date.now() < deadline) {
+        finished = history.list().find((entry) => entry.workflowName === 'cwd-probe' && entry.status !== 'paused');
+        if (finished && finished.status === 'success') break;
+        await new Promise((r) => setTimeout(r, 60));
+      }
+      assert.ok(finished, 'cwd-probe 应当跑完');
+      assert.equal(finished.status, 'success');
+      const probe = finished.steps.find((s) => s.id === 'probe');
+      assert.ok(probe?.output, 'probe step 应有 output');
+      const out = probe.output.stdout.trim().toLowerCase();
+      // 关键断言：step cwd 是 workspace 目录，不是 daemon 进程目录。用 basename（mkdtemp 唯一后缀）做大小写无关匹配，
+      // 规避 Windows/macOS realpath 在父路径上的大小写归一差异。
+      assert.notEqual(out, process.cwd().toLowerCase(), 'step 不应在 daemon 进程目录执行');
+      assert.ok(out.includes(basename(ws).toLowerCase()), `step 应在 workspace 目录执行，实际 cwd=${probe.output.stdout}`);
+    });
+  } finally {
+    if (prev.workflowEnv === undefined) delete process.env.CODEPANION_WORKFLOW_PATH;
+    else process.env.CODEPANION_WORKFLOW_PATH = prev.workflowEnv;
+    if (prev.historyEnv === undefined) delete process.env.CODEPANION_WORKFLOW_HISTORY_PATH;
+    else process.env.CODEPANION_WORKFLOW_HISTORY_PATH = prev.historyEnv;
+    if (prev.artifactEnv === undefined) delete process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH;
+    else process.env.CODEPANION_WORKFLOW_ARTIFACTS_PATH = prev.artifactEnv;
+    rmSync(fallbackDir, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true });
   }
 });
