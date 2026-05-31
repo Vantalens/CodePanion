@@ -149,6 +149,12 @@ const ConfigSchema = z.object({
   models: z.record(z.string().min(1), ModelBackendSchema).default({}),
   // 未在 step / role 指定 model 时回退的 model id。
   defaultModel: z.string().optional(),
+  // agent tool-use 循环参数。maxTurns 是单个 agent step 内「模型↔工具」的最大往返轮数上限。
+  agent: z
+    .object({
+      maxTurns: z.number().int().positive().max(100).default(12),
+    })
+    .default({ maxTurns: 12 }),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

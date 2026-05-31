@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **agent tool-use 循环（slice 2a，只读工具）**：`architecture=agent` 的 step 从 single-call 升级为 tool-use 循环——模型可多轮调用工具逼近目标。
+  - 只读工具 `read_file` / `list_dir`，由 step `permissions=read` + 选定 workspace 门控；文件访问用 `ensurePathInside` 钳在 workspace 根内，越界拒绝；无 workspace 禁用文件工具（退化 single-call）。
+  - 新增 [agentRuntime.ts](packages/daemon/src/models/agentRuntime.ts)（注入式循环：callModel / runTool 可 fake，纯单测）+ [agentTools.ts](packages/daemon/src/workflows/agentTools.ts)（只读工具 + 沙箱）。
+  - `modelClient` 支持 OpenAI 兼容 `tools` 请求体 + 解析 `tool_calls` / `finish_reason`；`ChatMessage` 扩出 `tool` 角色与 assistant `tool_calls`。
+  - config 新增 `agent.maxTurns`（默认 12）封顶单 step 模型↔工具往返；`AgentStepRequest` 加 `permissions`，`step.permissions` 首次有运行时意义。
+  - 每轮 assistant 文本 / 工具调用 / 工具结果经 WS `step-output` 实时推到 GUI 时间线。
+  - 待办（slice 2b）：`write_file` / `run_command`（write/command 权限 + cwd 钳 workspace + batch-arg 防护）。
 - **执行模型两轴化（architecture × model，slice 1 = single-call）**：workflow step 执行从「shell 出去调外部 CLI（codex exec / claude -p / opencode run）」改为「进程内 agent 架构 × 模型 API 后端」两条正交轴——一切在 CodePanion 内进行。
   - step 新增 `architecture: 'shell' | 'agent'`。`shell` 仍 spawn 本机命令（跑测试等）；`agent` 由 CodePanion 进程内 agent 运行时组 prompt → 调模型 API（slice 1 单次 `/chat/completions`）→ 捕获返回文本为 step output / artifact，并通过 WS `step-output` 实时推送。
   - 历史 `provider` 兼容派生：`local→shell`，`codex/claude-code/opencode→agent`（不再 shell 外部 CLI；旧 `providerInvocation` 的 CLI 拼装退役）。
