@@ -1,6 +1,6 @@
 # Rust 重构计划
 
-**日期**: 2026-06-01  
+**日期**: 2026-06-01
 **目标**: 用 Rust 重构 CodePanion，实现本地全自动、多 AI、多项目并行的轻量高性能 AI IDE
 
 ---
@@ -471,7 +471,7 @@ codepanion-rust/
 3. **实现最小 HTTP 服务器**
    ```rust
    use axum::{routing::get, Router};
-   
+
    #[tokio::main]
    async fn main() {
        let app = Router::new().route("/health", get(|| async { "OK" }));

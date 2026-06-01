@@ -10,4 +10,3 @@ codepanion-shared = { path = "../shared" }
 
 [lib]
 path = "src/lib.rs"
-

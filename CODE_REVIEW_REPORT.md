@@ -1,7 +1,7 @@
 # CodePanion 代码审核报告
 
-**审核日期**: 2026-06-01  
-**审核范围**: Node.js daemon、Rust 核心模块、测试覆盖、架构一致性  
+**审核日期**: 2026-06-01
+**审核范围**: Node.js daemon、Rust 核心模块、测试覆盖、架构一致性
 **审核人**: Claude Opus 4.8
 
 ---
@@ -65,7 +65,7 @@ pub struct ProviderDefinition {
 
 **问题**: Node daemon 已实现完整的 workflow 引擎、agent tool-use、WebSocket 事件推送，但 Rust daemon 只有基础 HTTP/WS 和 model client。
 
-**影响**: 
+**影响**:
 - 迁移路径不明确
 - 用户可能遇到功能回退
 - 测试无法验证 Rust 实现的正确性
@@ -108,8 +108,8 @@ export function ensurePathInside(input: string, anchor: string, label: string): 
 }
 ```
 
-✅ 刻意保持词法验证（不用 `realpath`），避免 Windows 短名/长名差异  
-✅ 所有文件工具（`read_file`、`list_dir`）都经过此函数验证  
+✅ 刻意保持词法验证（不用 `realpath`），避免 Windows 短名/长名差异
+✅ 所有文件工具（`read_file`、`list_dir`）都经过此函数验证
 ✅ workspace config 的 `promptPath` 也有防护（server.ts:411）
 
 #### 凭据保护
@@ -123,8 +123,8 @@ export function writeOwnerOnly(path: string, content: string) {
 }
 ```
 
-✅ `config.json` 中的 `apiKey` 受保护  
-✅ logger 对 `apiKey` 脱敏（logger.ts 的 `maskString`）  
+✅ `config.json` 中的 `apiKey` 受保护
+✅ logger 对 `apiKey` 脱敏（logger.ts 的 `maskString`）
 ✅ API provider 的请求日志也脱敏（providers/src/lib.rs:803）
 
 #### 权限控制
@@ -134,14 +134,14 @@ export function buildReadonlyTools(workspaceRoot: string) {
   if (!workspaceRoot) {
     return { tools: [], runTool: async () => '错误：当前没有选定 workspace' };
   }
-  const safeResolve = (rel: string) => 
+  const safeResolve = (rel: string) =>
     ensurePathInside(join(workspaceRoot, rel), workspaceRoot, 'agent tool path');
   // ...
 }
 ```
 
-✅ 无 workspace 时拒绝提供文件工具  
-✅ 所有路径都钳在 workspace 内  
+✅ 无 workspace 时拒绝提供文件工具
+✅ 所有路径都钳在 workspace 内
 ✅ 越界访问返回错误字符串（不崩溃 agent 循环）
 
 ### 2.2 问题
@@ -173,7 +173,7 @@ const WorkflowStepSchema = z.object({
 
 #### 2.2.2 WebSocket Origin 验证过于宽松
 
-**问题**: 
+**问题**:
 ```typescript
 // server.ts:914
 const ALLOWED_ORIGINS = new Set(['null', 'https://codepanion.local']);
@@ -181,7 +181,7 @@ const ALLOWED_ORIGINS = new Set(['null', 'https://codepanion.local']);
 
 允许 `'null'` origin 意味着任何本地 HTML 文件都能连接。
 
-**建议**: 
+**建议**:
 1. 移除 `'null'`，只允许 `https://codepanion.local`
 2. 或者要求 WebSocket 连接必须提供额外的 CSRF token
 
@@ -238,7 +238,7 @@ try {
 **建议**:
 ```typescript
 export type AgentToolRunner = (
-  name: string, 
+  name: string,
   argsJson: string,
   signal?: AbortSignal  // 新增
 ) => Promise<string>;
@@ -331,7 +331,7 @@ pub async fn execute_cli_provider_async(...) -> Result<CliExecutionResult> {
     let mut child = Command::new(command)
         .args(args)
         .spawn()?;
-    
+
     tokio::select! {
         status = child.wait() => { ... }
         _ = tokio::time::sleep(request.timeout) => { ... }
@@ -449,12 +449,12 @@ test('agent attempting to delete file triggers human gate', async () => {
 test('workflows in different workspaces do not interfere', async () => {
   const workspaceA = '/tmp/project-a';
   const workspaceB = '/tmp/project-b';
-  
+
   const [runA, runB] = await Promise.all([
     startWorkflowRun({ workspace: workspaceA, ... }),
     startWorkflowRun({ workspace: workspaceB, ... })
   ]);
-  
+
   // 验证 runA 的 artifacts 不出现在 workspaceB 的 store 中
 });
 ```
@@ -483,7 +483,7 @@ Rust daemon 空闲: 未测量（代码不完整）
 // workflowDefinitionManager.ts
 export class WorkflowRunHistory {
   private runs: WorkflowRun[] = [];
-  
+
   append(run: WorkflowRun): void {
     this.runs.push(run);  // 永不清理
   }
@@ -563,7 +563,7 @@ if (runningWorkflows.size >= MAX_CONCURRENT_WORKFLOWS) {
 // 实际: server.ts 中仍有 source 相关的 WebSocket 处理
 ```
 
-**建议**: 
+**建议**:
 1. 完全移除 `SourceManager` 代码
 2. 或在文档中说明 "保留作为兼容层"
 
@@ -585,29 +585,29 @@ npm install zod-to-openapi
 ### 7.1 高优先级（P0）
 
 #### 风险 1: Rust 迁移路径不明确
-**影响**: 可能导致功能回退或长期维护两套代码  
-**建议**: 
+**影响**: 可能导致功能回退或长期维护两套代码
+**建议**:
 1. 明确 Rust daemon 的 MVP 功能范围
 2. 设置 Node → Rust 切换的 feature flag
 3. 提供回滚方案
 
 #### 风险 2: 缺少高危行为检测测试
-**影响**: 用户可能遇到 AI 执行危险操作而无人工门  
-**建议**: 
+**影响**: 用户可能遇到 AI 执行危险操作而无人工门
+**建议**:
 1. 补充高危行为检测的集成测试
 2. 在 DEVELOPMENT_TASKS.md 的 A-05 中添加验收标准
 
 ### 7.2 中优先级（P1）
 
 #### 风险 3: 资源泄漏
-**影响**: 长时间运行后内存占用过高  
-**建议**: 
+**影响**: 长时间运行后内存占用过高
+**建议**:
 1. 为所有缓存添加 LRU 或 TTL
 2. 添加内存监控和告警
 
 #### 风险 4: 并发控制缺失
-**影响**: 用户可能启动过多 workflow 导致系统卡顿  
-**建议**: 
+**影响**: 用户可能启动过多 workflow 导致系统卡顿
+**建议**:
 1. 添加全局并发限制
 2. 实现 workflow 队列机制
 
@@ -712,5 +712,5 @@ codepanion-rust/crates/model-client/src/lib.rs: 6 tests
 
 ---
 
-**审核完成日期**: 2026-06-01  
+**审核完成日期**: 2026-06-01
 **下次审核建议**: Rust workflow engine 完成后（预计 P3 阶段结束）
