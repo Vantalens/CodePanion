@@ -205,8 +205,9 @@ Rust 目标指标：
 
 目标：迁移并强化现有 workflow 行为基线。
 
-- [ ] **W-01 Workflow definition**
+- [x] **W-01 Workflow definition**
   - 解析 workflow、step、role、model、provider、permissions、contextPolicy、artifacts、checkpoint。
+  - 验收：实现 `WorkflowDefinition`、`WorkflowStep`、`WorkflowContextPolicy`、`WorkflowPermission`、`WorkflowProvider`、`WorkflowArchitecture`、`WorkflowArtifactType`、`DefinitionStore` 结构；支持 JSON 序列化/反序列化；完整的验证逻辑（标识符、路径、依赖关系、唯一性）；11 个测试全部通过；通过 fmt 和 clippy 检查。
 
 - [ ] **W-02 Step executor**
   - 支持 shell / agent / provider 三类执行。

@@ -1,3 +1,12 @@
+// W-01: Workflow definition
+pub mod definition;
+
+pub use definition::{
+    DefinitionStore, WorkflowArchitecture, WorkflowArtifactType, WorkflowContextPolicy,
+    WorkflowDefinition, WorkflowPermission, WorkflowProvider, WorkflowStep,
+};
+
+// 旧的简化版本（保留用于向后兼容）
 use codepanion_providers::ProviderDefinition;
 use codepanion_shared::{CodePanionError, Result};
 
@@ -8,19 +17,19 @@ pub enum StepArchitecture {
 }
 
 #[derive(Debug, Clone)]
-pub struct WorkflowStep {
+pub struct WorkflowStepLegacy {
     pub id: String,
     pub architecture: StepArchitecture,
     pub provider: Option<ProviderDefinition>,
 }
 
 #[derive(Debug, Clone)]
-pub struct WorkflowDefinition {
+pub struct WorkflowDefinitionLegacy {
     pub name: String,
-    pub steps: Vec<WorkflowStep>,
+    pub steps: Vec<WorkflowStepLegacy>,
 }
 
-impl WorkflowDefinition {
+impl WorkflowDefinitionLegacy {
     pub fn validate(&self) -> Result<()> {
         if self.name.trim().is_empty() {
             return Err(CodePanionError::InvalidInput(
@@ -42,7 +51,7 @@ mod tests {
 
     #[test]
     fn workflow_requires_steps() {
-        let workflow = WorkflowDefinition {
+        let workflow = WorkflowDefinitionLegacy {
             name: "empty".to_string(),
             steps: vec![],
         };

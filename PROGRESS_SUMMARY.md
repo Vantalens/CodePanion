@@ -249,7 +249,13 @@ pub struct ChatToolFunction {
 
 ### 待开始阶段
 
-- ⏳ **P3: Rust Workflow Engine** (W-01 到 W-06)
+- 🔄 **P3: Rust Workflow Engine** (W-01 到 W-06) - 1/6 完成
+  - ✅ W-01: Workflow definition (完成)
+  - ⏳ W-02: Step executor
+  - ⏳ W-03: Run history
+  - ⏳ W-04: Artifact store
+  - ⏳ W-05: Human gate
+  - ⏳ W-06: HTTP/WS 契约兼容
 - ⏳ **P4: 多项目/多任务并行** (M-01 到 M-05)
 - ⏳ **P5: GUI 工作台** (G-01 到 G-06)
 - ⏳ **P6: 文档与发布质量** (D-01 到 D-04)
