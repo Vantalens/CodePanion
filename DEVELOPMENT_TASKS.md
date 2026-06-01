@@ -17,15 +17,15 @@
 
 ## 当前产品标准
 
-> **CodePanion 是一个新的 AI IDE**，专为个人开发者设计，用于管理多项目的 AI 驱动开发流程。
+> **CodePanion 是一个新的 AI IDE**，专为个人开发者设计，支持**全自动 AI 驱动开发**和**多项目同步管理**。
 
 CodePanion 核心定位（2026-06-01 更新）：
 
-1. **新的 AI IDE**：不是代码编辑器，而是管理多项目、编排 workflow、调用 AI 能力的 IDE
-2. **调用外部 agentic coding tool**：通过逆向接口或 API 调用 Codex、Claude Code、OpenCode 等
-3. **用户自行提供 API**：支持用户配置自己的模型 API（DeepSeek、OpenAI、Claude、本地模型等）
-4. **多项目同步开发管理**：在一个 IDE 内管理多个项目的 workflow
-5. **本地工作流控制台**：任务拆分、角色分工、人工审核、产出归档
+1. **全自动 AI 驱动开发**：AI 自行进行角色分工（Orchestrator、Planner、Builder、Tester、Reviewer）和任务执行，用户只需观察监控，必要时介入
+2. **用户可介入控制**：用户可以随时介入、修改任务方向、自行编辑代码、批准/拒绝/重试任务
+3. **调用外部 agentic coding tool**：通过逆向接口或 API 调用 Codex、Claude Code、OpenCode 等
+4. **用户自行提供 API**：支持用户配置自己的模型 API（DeepSeek、OpenAI、Claude、本地模型等）
+5. **多项目同步开发管理**：在一个 IDE 内管理多个项目的 workflow
 
 执行模型：**architecture（进程内 harness）× model（用户配置的 API）两轴**
 
