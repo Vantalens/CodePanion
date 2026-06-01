@@ -330,6 +330,61 @@ Rust 目标指标：
 
 ---
 
+## P7：Rust Daemon 重构
+
+**进度**: 0/4 完成（0%）
+
+目标：用 Rust 重写 daemon 核心，降低资源占用，提升性能。
+
+**预期收益**：
+- daemon 空闲内存：80-120MB → 30-40MB（-60~-67%）
+- daemon 冷启动：800-1200ms → 200-400ms（-67~-75%）
+- daemon 热启动：200-400ms → 50-100ms（-50~-75%）
+- workflow 性能：2-3x 提升
+
+**技术栈**：
+- HTTP/WS：axum + tokio-tungstenite
+- 异步运行时：tokio
+- 序列化：serde_json
+- 日志：tracing
+- CLI：clap
+
+- [ ] **D-01 HTTP/WS 服务器**
+  - 使用 axum 实现 HTTP 服务器。
+  - 使用 tokio-tungstenite 实现 WebSocket。
+  - 兼容现有 `/workflow/*` API 路由。
+  - 实现 WS `workflow-run-event` 实时推送。
+  - 支持 CORS 和错误处理中间件。
+  - 验收：实现 axum 服务器；支持 `/workflow/board`、`/workflow/runs`、`/workflow/runs/:id`、`/workflow/runs/:id/artifacts`、`/workflow/runs/:id/delivery`、`/workflow/gates`、`/workflow/gates/:runId/:stepId/resolve` 路由；WebSocket 支持 `workflow-run-event` 推送；测试覆盖所有路由和 WS 连接；与现有 GUI/CLI 协议兼容。
+
+- [ ] **D-02 Workflow 执行器**
+  - 集成 P3 workflow engine（W-01 到 W-06）。
+  - 集成 P2 agent runtime（A-01 到 A-07）。
+  - 实现 fire-and-forget 续跑逻辑。
+  - 支持 workflow 取消、暂停、恢复。
+  - 实时输出推送到 WebSocket。
+  - 验收：`WorkflowRunner` 集成 workflow engine 和 agent runtime；支持启动、取消、暂停、恢复 workflow；实时输出通过 WS 推送；测试覆盖完整 workflow 生命周期；与 TypeScript daemon 行为一致。
+
+- [ ] **D-03 CLI 命令**
+  - 使用 clap 实现 CLI 参数解析。
+  - `codepanion start` - 启动 daemon。
+  - `codepanion stop` - 停止 daemon。
+  - `codepanion status` - 查看 daemon 状态。
+  - `codepanion workflows` - 列出 workflows。
+  - `codepanion workspace` - 管理 workspace。
+  - PID 文件管理和进程检测。
+  - 验收：实现所有 CLI 命令；PID 文件管理；进程检测和清理；与 TypeScript CLI 行为一致；测试覆盖所有命令和边界情况。
+
+- [ ] **D-04 测试、迁移与性能基准**
+  - 端到端测试（daemon + GUI + CLI）。
+  - GUI/VSCode 扩展适配（如需要）。
+  - 性能基准测试（内存、启动时间、workflow 执行时间）。
+  - 迁移指南和文档更新。
+  - 移除 TypeScript daemon 依赖（Express、ws、pino）。
+  - 验收：端到端测试覆盖所有场景；性能基准达到目标（内存 < 50MB，冷启动 < 500ms，热启动 < 100ms）；GUI 和 VSCode 扩展正常工作；迁移文档完整；TypeScript daemon 依赖已移除。
+
+---
+
 ## 参考文档
 
 - [README.md](README.md) - 项目说明

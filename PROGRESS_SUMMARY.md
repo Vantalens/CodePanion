@@ -250,9 +250,10 @@ pub struct ChatToolFunction {
 ### 待开始阶段
 
 - ⏳ **P3: Rust Workflow Engine** (W-01 到 W-06)
-- ⏳ **P4: 多项目/多任务并行** (M-01 到 M-04)
+- ⏳ **P4: 多项目/多任务并行** (M-01 到 M-05)
 - ⏳ **P5: GUI 工作台** (G-01 到 G-06)
 - ⏳ **P6: 文档与发布质量** (D-01 到 D-04)
+- ⏳ **P7: Rust Daemon 重构** (D-01 到 D-04) - 新增
 
 ---
 
@@ -260,23 +261,119 @@ pub struct ChatToolFunction {
 
 ### 立即执行（本周）
 
-1. **A-05: 高危行为检测**
-   - 复用 A-04 的 `classify_command` 风险分级
-   - 实现文件删除/关键配置修改检测
-   - 高危动作进入 human gate
-   - 与 workflow engine 接线
-
-2. **A-06: 自动修复循环**
-   - 测试失败 → 诊断 → 修复 → 重跑测试
-   - 超过重试上限进入人工门
-
-2. **A-06: 自动修复循环**
-   - 测试失败 → 诊断 → 修复 → 重跑测试
-   - 超过重试上限进入人工门
-
-3. **开始 P3: Rust Workflow Engine**
+1. **P3: Rust Workflow Engine**
    - W-01: Workflow definition 解析
    - W-02: Step executor 实现
+   - W-03: Run history (NDJSON)
+   - W-04: Artifact store
+   - W-05: Human gate
+   - W-06: HTTP/WS 契约兼容
+
+### 短期计划（2-4 周）
+
+2. **P7: Rust Daemon 重构**（在 P3 完成后）
+   - D-01: HTTP/WS 服务器 (axum + tokio-tungstenite)
+   - D-02: Workflow 执行器（集成 P3 + P2）
+   - D-03: CLI 命令 (clap)
+   - D-04: 测试、迁移与性能基准
+
+### 中期计划（1-2 个月）
+
+3. **P4: 多项目/多任务并行**
+   - M-01: Project registry
+   - M-02: Project API
+   - M-03: 多 run scheduler
+   - M-04: 跨项目编排
+   - M-05: 全局视图 API
+
+4. **P5: GUI 工作台**
+   - G-01: 项目侧栏
+   - G-02: 全局任务视图
+   - G-03: 当前 run 时间线
+   - G-04: Artifact 与 delivery
+   - G-05: Human gate 决策面板
+   - G-06: 模型与 provider 配置
+
+### 长期计划（2-3 个月）
+
+5. **P6: 文档与发布质量**
+   - D-01: 清理 API 文档
+   - D-02: 更新开发文档
+   - D-03: 更新用户文档
+   - D-04: 发布门禁
+
+---
+
+## P7: Rust Daemon 重构 - 详细说明
+
+### 目标
+用 Rust 重写 daemon 核心，降低资源占用 60-67%，提升性能 2-3x，启动速度提升 3-4x。
+
+### 预期收益
+| 指标 | 当前 (TypeScript) | 目标 (Rust) | 改善 |
+|------|------------------|------------|------|
+| daemon 空闲内存 | 80-120MB | 30-40MB | **-60~-67%** |
+| daemon 冷启动 | 800-1200ms | 200-400ms | **-67~-75%** |
+| daemon 热启动 | 200-400ms | 50-100ms | **-50~-75%** |
+| workflow 性能 | 基准 | 2-3x | **+200~300%** |
+
+### 资源占用热点分析
+1. **Node.js 运行时** (60-80% 内存) - 最大热点
+   - V8 引擎 + 事件循环：30-50MB
+   - 依赖加载 (express + ws + pino)：30-50MB
+   - 启动时间：500-800ms
+
+2. **Express 框架** (15-25MB) - 中等热点
+   - 对于轻量级 daemon 过重
+
+3. **WebSocket (ws)** (10-20MB) - 中等热点
+   - JavaScript 层帧解析效率不高
+
+### 技术栈
+- **HTTP/WS**: axum + tokio-tungstenite (零拷贝，高性能)
+- **异步运行时**: tokio (生产级，内存高效)
+- **序列化**: serde_json (比 Node.js 快 2-3x)
+- **日志**: tracing (结构化日志，零开销)
+- **CLI**: clap (类型安全，性能好)
+
+### 实施路线
+1. **D-01 HTTP/WS 服务器** (1 周)
+   - 替换 Express + ws
+   - 兼容现有 API 协议
+
+2. **D-02 Workflow 执行器** (1 周)
+   - 集成 P3 workflow engine
+   - 集成 P2 agent runtime
+
+3. **D-03 CLI 命令** (1 周)
+   - 替换 yargs
+   - 保持命令行接口一致
+
+4. **D-04 测试与迁移** (1 周)
+   - 端到端测试
+   - 性能基准验证
+   - 文档更新
+
+### 依赖关系
+- **前置条件**: P2 (Agent Runtime) ✅ 已完成
+- **推荐顺序**: 先完成 P3 (Workflow Engine)，再开始 P7
+- **原因**: P7 需要集成 P3 的 workflow engine
+
+### 风险与缓解
+- **风险**: 协议兼容性问题
+- **缓解**: 保持 API 契约不变，逐步迁移
+
+- **风险**: GUI/VSCode 扩展适配
+- **缓解**: 先验证协议兼容性，再切换
+
+### ROI 分析
+- **开发投入**: 3-4 周
+- **性能提升**: 2-3x
+- **内存节省**: 60-67%
+- **用户体验**: 启动快 3-4x
+- **结论**: ROI 非常高 ✅
+
+详细分析见：[`docs/RUST_REFACTOR_ANALYSIS.md`](../docs/RUST_REFACTOR_ANALYSIS.md)
 
 ---
 
