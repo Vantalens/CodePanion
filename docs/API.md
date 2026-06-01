@@ -1,222 +1,130 @@
-# CodePanion API 文档
+# CodePanion HTTP API 文档
 
-CodePanion daemon 是个人本地 AI 工作流操作台的数据与事件中枢。它默认监听 `http://127.0.0.1:7777`，WebSocket 默认路径为 `ws://127.0.0.1:7777/ws`。
+> 本文档记录 CodePanion Rust daemon 的 HTTP API 规范。
 
-除 `GET /health` 外，所有 HTTP API 都需要 `Authorization: Bearer <token>`。token 位于 `~/.codepanion/config.json`。
+## 基本信息
 
-## 事件协议语义
+- **端口**: 8318
+- **API 版本**: `/api/v1`
+- **风格**: RESTful + OpenAI 兼容格式
 
-本轮路线大改暂时保留现有 API，不引入破坏性接口。新能力优先围绕 `session`、`workflow`、`event` 和后续 executor 建模；`source` 仅作为历史兼容语义保留：
-
-- `source`：历史兼容字段，用于旧来源 / 适配层。
-- `session`：由 CodePanion 可接管的 CLI/PTTY 会话。
-- `event`：来源上报的状态、提醒、完成、失败或等待输入。
-- `workflow`：面向 GUI 的统一线程和条目视图，后续承载任务拆分、角色执行、人工审核和 artifact loop。
-
-API 只描述本地工作流能力，不代表 CodePanion 会读取上游工具的私有状态。后续新执行能力应由用户显式调用 executor，不走外部窗口监听或被动状态采集路线。
-
-## HTTP API
-
-### `GET /health`
-
-健康检查，不需要认证。
+## 错误响应格式
 
 ```json
 {
-  "ok": true,
-  "pid": 12345,
-  "version": "0.1.0"
+  "error": {
+    "message": "Project not found",
+    "type": "not_found_error",
+    "code": "project_not_found",
+    "param": "id"
+  }
 }
 ```
 
-### `POST /notify`
+## Project API
 
-发送系统通知并推送 GUI 通知。
+### POST /api/v1/projects
+创建新项目。
 
-```json
-{
-  "title": "测试通知",
-  "message": "中文消息不会乱码",
-  "source": "manual",
-  "level": "info",
-  "sourceId": "optional",
-  "sessionId": "optional",
-  "windowTitle": "optional",
-  "workspace": "optional"
-}
-```
+### GET /api/v1/projects
+列出所有项目。支持 `?tag=rust&sort=lastActiveAt` 查询参数。
 
-`level` 可选：`info`、`prompt`、`done`、`error`。
+### GET /api/v1/projects/:id
+获取单个项目详情。
 
-### `POST /sessions`
+### PUT /api/v1/projects/:id
+更新项目信息。
 
-注册一个 CLI/PTTY 会话。
+### DELETE /api/v1/projects/:id
+删除项目。
 
-```json
-{
-  "command": "claude",
-  "args": ["code"],
-  "cwd": "D:\\project",
-  "cliPid": 12345,
-  "source": "cli",
-  "sourceId": "optional",
-  "windowTitle": "optional",
-  "workspace": "optional"
-}
-```
+### POST /api/v1/projects/:id/activate
+激活项目（更新 lastActiveAt）。
 
-### `GET /sessions`
+### GET /api/v1/projects/:id/status
+获取项目健康状态和统计信息。
 
-返回当前活动会话。
+## Provider API
 
-### `GET /sessions/:id/output`
+### POST /api/v1/providers
+添加 provider 配置。
 
-返回会话完整输出和结构化输出块。
+### GET /api/v1/providers
+列出所有 providers。
 
-### `POST /sessions/:id/output`
+### GET /api/v1/providers/:id
+获取单个 provider。
 
-追加会话输出。
+### PUT /api/v1/providers/:id
+更新 provider 配置。
 
-```json
-{
-  "chunk": "output text"
-}
-```
+### DELETE /api/v1/providers/:id
+删除 provider。
 
-### `POST /sessions/:id/prompt`
+### POST /api/v1/providers/:id/test
+测试 provider 连接。
 
-标记会话正在等待输入。
+### GET /api/v1/providers/:id/models
+列出 provider 支持的模型。
 
-```json
-{
-  "lastLines": "是否继续？",
-  "options": ["继续", "取消"]
-}
-```
+### POST /api/v1/providers/:id/activate
+激活 provider（设置为当前活跃）。
 
-### `POST /sessions/:id/reply`
+### GET /api/v1/providers/active
+获取当前活跃的 provider。
 
-向会话写入回复。
-
-```json
-{
-  "text": "继续\n"
-}
-```
-
-### `POST /sessions/:id/exit`
-
-标记会话结束。
-
-```json
-{
-  "exitCode": 0
-}
-```
-
-## 旧来源 API
-
-`/sources/*` 与 `/events` 属于旧监听 / 来源接入路线的兼容接口。它们仍可能被现有代码调用，但不再作为新产品能力扩展对象。后续新能力应围绕 workflow executor、角色权限、人工审核门和 artifact loop 建模。
-
-## WebSocket API
-
-WebSocket 鉴权通过 `Sec-WebSocket-Protocol` 子协议传递，不再把 token 放进 URL query，避免被日志、浏览器历史或代理记录暴露。客户端需要同时声明角色协议和 token 协议。
-
-observer 连接：
-
-```text
-URL: ws://127.0.0.1:7777/ws?role=observer
-Sec-WebSocket-Protocol: codepanion.observer, codepanion.token.<token>
-```
-
-CLI 会话连接：
-
-```text
-URL: ws://127.0.0.1:7777/ws?role=cli&sessionId=<session-id>
-Sec-WebSocket-Protocol: codepanion.cli, codepanion.token.<token>
-```
-
-observer 事件：
-
-- `hello`
-- `session-registered`
-- `session-output`
-- `session-prompt`
-- `session-exited`
-- `notification`
-- `source-registered`
-- `source-disconnected`
-- `monitor-event`
-- `workflow-snapshot`
-- `workflow-event`
-
-CLI WebSocket 关闭码：
-
-- `4400 missing sessionId`：`role=cli` 但 URL 未提供 `sessionId`。
-- `4404 no such session`：提供的 `sessionId` 不存在或已经不可接管。
+### GET /v1/models
+列出所有 provider 的所有模型（OpenAI 兼容格式）。
 
 ## Workflow API
 
-### `GET /workflow/snapshot`
+### GET /workflow/board
+列出所有 workflow 定义。
 
-返回当前所有 workflow 线程和已同步条目。
+### GET /workflow/runs
+列出所有 workflow runs。
 
-### `GET /workflow/threads`
+### GET /workflow/runs/:id
+获取单个 run 详情。
 
-返回 workflow 线程列表。
+### GET /workflow/runs/:id/artifacts
+获取 run 的 artifacts。
 
-### `GET /workflow/threads/:id`
+### GET /workflow/runs/:id/delivery
+获取 delivery note。
 
-返回单个 workflow 线程及其条目。
+### GET /workflow/gates
+列出等待决策的 gates。
 
-Workflow 条目统一为 `message`、`tool_call`、`command`、`file_change`、`artifact`、`prompt`、`status`。状态统一为 `running`、`waiting`、`done`、`error`、`paused`。
+### POST /workflow/gates/:runId/:stepId/resolve
+解决 gate。
 
-CLI 会话事件：
+## 全局视图 API
 
-- `inject-input`
+### GET /api/v1/global/runs
+获取所有 runs（跨项目）。
 
-## 旧审计 API
+### GET /api/v1/global/runs/queued
+获取所有队列中的 runs。
 
-### `GET /audit/snapshot`
+### GET /api/v1/global/runs/running
+获取所有运行中的 runs。
 
-返回当前 daemon 内存中（按 `retention` 滚动窗口保留的）事件、回复、会话、工作流线程与条目的合并快照。该接口是旧路线保留的本地诊断能力，后续是否保留为 artifact 导出，需要在工作流模型实现时重新评估。
+### GET /api/v1/global/runs/completed
+获取所有已完成的 runs。
 
-**Query 参数**：
+### GET /api/v1/global/stats
+获取全局统计信息。
 
-- `since`：可选，epoch 毫秒数字字符串。仅返回时间戳 ≥ `since` 的事件、回复、会话和工作流条目。非法值返回 `400`。
+## WebSocket API
 
-**响应**（`schemaVersion=1`）：
+### WS /ws
+WebSocket 连接端点，用于实时推送 workflow 事件。
 
-```jsonc
-{
-  "schemaVersion": 1,
-  "generatedAt": 1779410536204,
-  "since": null,
-  "daemonVersion": "0.x.y",
-  "sources": [ /* MonitorSource[] */ ],
-  "events": [ /* MonitorEvent + { id, timestamp }[] */ ],
-  "eventReplies": [ /* { eventId, sourceId?, text, timestamp }[] */ ],
-  "sessions": [ /* SessionInfo[] */ ],
-  "workflowThreads": [ /* WorkflowThread[] */ ],
-  "workflowItems": [ /* WorkflowItem[] */ ]
-}
-```
-
-## 后续扩展方向
-
-以下方向会围绕本地 AI 工作流推进：
-
-- **Workflow executor**：把 Codex、Claude Code、OpenCode、CLI/PTTY 等显式执行能力纳入统一节点模型。
-- **Role policy**：为不同角色定义模型、权限、上下文预算和输出契约。
-- **Artifact loop**：沉淀计划、变更摘要、测试结果、审查报告、人工决策和交付摘要。
-
-## 数据边界
-
-- 不读取账号、token、cookie、浏览器登录态或供应商认证文件。
-- 不读取 VS Code、JetBrains 或第三方插件的私有数据库和缓存。
-- 不默认启用系统级 OCR、全局屏幕读取或剪贴板扫描。
-- 不调用未公开、未授权或易漂移的上游私有 API。
-
-## 编码要求
-
-所有 HTTP 请求体、响应体、WebSocket 消息和日志均按 UTF-8 处理。调用方应发送 `Content-Type: application/json; charset=utf-8`，并避免手动对中文做二次转义。
+**事件类型**:
+- `queued`: workflow 进入队列
+- `running`: workflow 开始执行
+- `completed`: workflow 执行完成
+- `failed`: workflow 执行失败
+- `cancelled`: workflow 被取消
+- `paused`: workflow 被暂停
