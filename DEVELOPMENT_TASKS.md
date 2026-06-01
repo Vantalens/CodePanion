@@ -223,10 +223,11 @@ Rust 目标指标：
   - plan、patch-summary、test-result、review-report、human-decision、delivery-note。
   - 验收：实现 `WorkflowArtifactStore`；支持 6 种 artifact 类型（plan、patch-summary、test-result、review-report、human-decision、delivery-note）；支持 NDJSON append-only 存储；支持 append、list、get_by_type 操作；支持坏行跳过（parse 失败不影响其他记录）；支持自动 compaction（超过阈值时保留最近的 max_artifacts 条）；支持自定义 artifact ID；7 个测试全部通过（append、list、filter by run_id、filter by type、custom id、compaction、坏行跳过）；通过 fmt 和 clippy 检查。
 
-- [ ] **W-05 Human gate**
+- [x] **W-05 Human gate**
   - approve / reject / retry。
   - constraints 注入后续 step。
   - 决策记录为 artifact。
+  - 验收：实现 `HumanGateManager`；支持 3 种决策类型（approve、reject、retry）；支持 list_paused_gates() 列出等待决策的 gates；支持 resolve_gate() 解决 gate 并创建 human-decision artifact；支持 constraints 注入到 workflow values；retry 决策自动找到上一个成功的 step 作为恢复点；approve/reject 决策后 gate 从列表中移除；retry 决策后 gate 保留并显示 last_decision；7 个测试全部通过（list gates、approve、reject、retry、constraints、filter approved、keep retry）；通过 fmt 和 clippy 检查。
 
 - [ ] **W-06 HTTP/WS 契约兼容**
   - `/workflow/board`

@@ -10,6 +10,9 @@ pub mod history;
 // W-04: Artifact store
 pub mod artifacts;
 
+// W-05: Human gate
+pub mod human_gate;
+
 pub use definition::{
     DefinitionStore, WorkflowArchitecture, WorkflowArtifactType, WorkflowContextPolicy,
     WorkflowDefinition, WorkflowPermission, WorkflowProvider, WorkflowStep,
@@ -23,6 +26,10 @@ pub use executor::{
 pub use history::WorkflowRunHistory;
 
 pub use artifacts::{ArtifactInput, ArtifactType, WorkflowArtifact, WorkflowArtifactStore};
+
+pub use human_gate::{
+    GateDecision, GateResolution, GateResolutionResult, HumanGateManager, PausedGate,
+};
 
 // 旧的简化版本（保留用于向后兼容）
 use codepanion_providers::ProviderDefinition;

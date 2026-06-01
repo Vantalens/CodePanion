@@ -477,7 +477,10 @@ mod tests {
         // Then we add artifacts 8 and 9, so we end up with 7 total
         // This is expected behavior: compaction keeps file size bounded
         let artifacts = store.list(None).unwrap();
-        assert!(artifacts.len() <= 10, "Should have at most 10 artifacts before any compaction");
+        assert!(
+            artifacts.len() <= 10,
+            "Should have at most 10 artifacts before any compaction"
+        );
 
         // Verify most recent artifacts are present
         assert_eq!(artifacts[0].run_id, "run-9");
