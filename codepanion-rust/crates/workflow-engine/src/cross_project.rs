@@ -184,11 +184,7 @@ impl CrossProjectOrchestrator {
     }
 
     /// Get direct dependencies of a workflow
-    pub fn get_dependencies(
-        &self,
-        project_id: &str,
-        workflow_id: &str,
-    ) -> Vec<WorkflowDependency> {
+    pub fn get_dependencies(&self, project_id: &str, workflow_id: &str) -> Vec<WorkflowDependency> {
         let key = (project_id.to_string(), workflow_id.to_string());
         self.workflows
             .get(&key)
@@ -356,10 +352,12 @@ mod tests {
 
         let result = orchestrator.resolve_dependencies("project-1", "workflow-a");
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Circular dependency"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Circular dependency")
+        );
     }
 
     #[test]
@@ -420,7 +418,10 @@ mod tests {
         let graph = orchestrator.resolve_dependencies("p1", "d").unwrap();
 
         // A should be first, D should be last
-        assert_eq!(graph.execution_order[0], ("p1".to_string(), "a".to_string()));
+        assert_eq!(
+            graph.execution_order[0],
+            ("p1".to_string(), "a".to_string())
+        );
         assert_eq!(
             graph.execution_order[graph.execution_order.len() - 1],
             ("p1".to_string(), "d".to_string())

@@ -1,4 +1,4 @@
-use axum::{extract::State, Json};
+use axum::{Json, extract::State};
 use codepanion_workflow_engine::{ScheduledRun, SchedulerStats};
 use serde::Serialize;
 
@@ -52,9 +52,7 @@ pub async fn get_global_running_runs(State(state): State<AppState>) -> Json<Glob
 }
 
 /// GET /api/v1/global/runs/completed - Get all completed runs across all projects
-pub async fn get_global_completed_runs(
-    State(state): State<AppState>,
-) -> Json<GlobalRunsResponse> {
+pub async fn get_global_completed_runs(State(state): State<AppState>) -> Json<GlobalRunsResponse> {
     let runs = state.scheduler.list_completed();
     let total = runs.len();
 

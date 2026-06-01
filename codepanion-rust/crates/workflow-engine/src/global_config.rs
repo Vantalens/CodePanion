@@ -154,7 +154,9 @@ impl GlobalConfigManager {
     /// Add or update model alias
     pub fn set_model_alias(&self, alias: &str, model_id: &str) -> Result<()> {
         let mut config = self.load()?;
-        config.model_aliases.insert(alias.to_string(), model_id.to_string());
+        config
+            .model_aliases
+            .insert(alias.to_string(), model_id.to_string());
         self.save(&config)
     }
 
@@ -320,7 +322,10 @@ mod tests {
         assert_eq!(config.version, 1);
         assert!(config.active_provider_id.is_none());
         assert_eq!(config.default_model, Some("opus".to_string()));
-        assert_eq!(config.model_aliases.get("opus"), Some(&"claude-opus-4-20250514".to_string()));
+        assert_eq!(
+            config.model_aliases.get("opus"),
+            Some(&"claude-opus-4-20250514".to_string())
+        );
     }
 
     #[test]
@@ -429,8 +434,14 @@ mod tests {
         }
 
         let resolved = manager.load_resolved().unwrap();
-        assert_eq!(resolved.model_aliases.get("opus"), Some(&"claude-opus-5".to_string()));
-        assert_eq!(resolved.model_aliases.get("sonnet"), Some(&"claude-sonnet-5".to_string()));
+        assert_eq!(
+            resolved.model_aliases.get("opus"),
+            Some(&"claude-opus-5".to_string())
+        );
+        assert_eq!(
+            resolved.model_aliases.get("sonnet"),
+            Some(&"claude-sonnet-5".to_string())
+        );
 
         // Clean up
         unsafe {
@@ -459,10 +470,15 @@ mod tests {
     fn test_set_env_override() {
         let (_dir, manager) = temp_config();
 
-        manager.set_env_override("ANTHROPIC_BASE_URL", "https://custom.api.com").unwrap();
+        manager
+            .set_env_override("ANTHROPIC_BASE_URL", "https://custom.api.com")
+            .unwrap();
 
         let config = manager.load().unwrap();
-        assert_eq!(config.env.get("ANTHROPIC_BASE_URL"), Some(&"https://custom.api.com".to_string()));
+        assert_eq!(
+            config.env.get("ANTHROPIC_BASE_URL"),
+            Some(&"https://custom.api.com".to_string())
+        );
     }
 
     #[test]
@@ -481,7 +497,9 @@ mod tests {
     fn test_set_available_models() {
         let (_dir, manager) = temp_config();
 
-        manager.set_available_models(vec!["opus".to_string(), "sonnet".to_string()]).unwrap();
+        manager
+            .set_available_models(vec!["opus".to_string(), "sonnet".to_string()])
+            .unwrap();
 
         let config = manager.load().unwrap();
         assert_eq!(config.available_models, vec!["opus", "sonnet"]);
@@ -507,8 +525,14 @@ mod tests {
         }
 
         let overrides = manager.get_provider_env_overrides().unwrap();
-        assert_eq!(overrides.get("ANTHROPIC_BASE_URL"), Some(&"https://test.api.com".to_string()));
-        assert_eq!(overrides.get("ANTHROPIC_AUTH_TOKEN"), Some(&"sk-test-123".to_string()));
+        assert_eq!(
+            overrides.get("ANTHROPIC_BASE_URL"),
+            Some(&"https://test.api.com".to_string())
+        );
+        assert_eq!(
+            overrides.get("ANTHROPIC_AUTH_TOKEN"),
+            Some(&"sk-test-123".to_string())
+        );
 
         unsafe {
             std::env::remove_var("ANTHROPIC_BASE_URL");

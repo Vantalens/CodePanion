@@ -198,7 +198,10 @@ async fn handle_provider_command(
             if response.is_empty() {
                 println!("No providers configured.");
             } else {
-                println!("{:<20} {:<30} {:<15} {:<10}", "ID", "NAME", "TYPE", "STATUS");
+                println!(
+                    "{:<20} {:<30} {:<15} {:<10}",
+                    "ID", "NAME", "TYPE", "STATUS"
+                );
                 println!("{}", "-".repeat(75));
                 for provider in response {
                     println!(

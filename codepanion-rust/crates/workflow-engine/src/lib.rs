@@ -58,10 +58,11 @@ pub use model_provider::{
 
 pub use global_config::{GlobalConfig, GlobalConfigManager, ResolvedConfig};
 
-pub use config_import::{auto_import, import_ccm_config, import_claude_settings, ImportResult};
+pub use config_import::{ImportResult, auto_import, import_ccm_config, import_claude_settings};
 
 pub use scheduler::{
-    RunPriority, RunScheduler, RunStatus, ScheduledRun, SchedulerConfig, SchedulerStats,
+    EventCallback, RunPriority, RunScheduler, RunStatus, ScheduledRun, SchedulerConfig,
+    SchedulerStats, WorkflowRunEvent,
 };
 
 pub use cross_project::{

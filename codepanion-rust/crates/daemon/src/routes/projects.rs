@@ -177,7 +177,8 @@ pub async fn create_project(
         metadata: req.metadata,
     };
 
-    state.project_registry
+    state
+        .project_registry
         .upsert(project.clone())
         .map_err(|e| ErrorResponse::internal_error(format!("Failed to create project: {}", e)))?;
 
@@ -189,7 +190,8 @@ pub async fn list_projects(
     State(state): State<AppState>,
     Query(query): Query<ListProjectsQuery>,
 ) -> Result<Json<ListProjectsResponse>, ErrorResponse> {
-    let mut projects = state.project_registry
+    let mut projects = state
+        .project_registry
         .list()
         .map_err(|e| ErrorResponse::internal_error(format!("Failed to list projects: {}", e)))?;
 
@@ -216,7 +218,8 @@ pub async fn get_project(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<Project>, ErrorResponse> {
-    let project = state.project_registry
+    let project = state
+        .project_registry
         .get(&id)
         .map_err(|e| ErrorResponse::internal_error(format!("Failed to get project: {}", e)))?
         .ok_or_else(|| {
@@ -232,7 +235,8 @@ pub async fn update_project(
     Path(id): Path<String>,
     Json(req): Json<UpdateProjectRequest>,
 ) -> Result<Json<Project>, ErrorResponse> {
-    let mut project = state.project_registry
+    let mut project = state
+        .project_registry
         .get(&id)
         .map_err(|e| ErrorResponse::internal_error(format!("Failed to get project: {}", e)))?
         .ok_or_else(|| {
@@ -260,7 +264,8 @@ pub async fn update_project(
         project.metadata = metadata;
     }
 
-    state.project_registry
+    state
+        .project_registry
         .upsert(project.clone())
         .map_err(|e| ErrorResponse::internal_error(format!("Failed to update project: {}", e)))?;
 
@@ -272,7 +277,8 @@ pub async fn delete_project(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<DeleteResponse>, ErrorResponse> {
-    let success = state.project_registry
+    let success = state
+        .project_registry
         .remove(&id)
         .map_err(|e| ErrorResponse::internal_error(format!("Failed to delete project: {}", e)))?;
 
@@ -284,11 +290,13 @@ pub async fn activate_project(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<ActivateProjectResponse>, ErrorResponse> {
-    state.project_registry
+    state
+        .project_registry
         .touch(&id)
         .map_err(|e| ErrorResponse::internal_error(format!("Failed to activate project: {}", e)))?;
 
-    let project = state.project_registry
+    let project = state
+        .project_registry
         .get(&id)
         .map_err(|e| ErrorResponse::internal_error(format!("Failed to get project: {}", e)))?
         .ok_or_else(|| {
@@ -308,7 +316,8 @@ pub async fn get_project_status(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<ProjectStatusResponse>, ErrorResponse> {
-    let project = state.project_registry
+    let project = state
+        .project_registry
         .get(&id)
         .map_err(|e| ErrorResponse::internal_error(format!("Failed to get project: {}", e)))?
         .ok_or_else(|| {

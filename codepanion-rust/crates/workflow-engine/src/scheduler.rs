@@ -5,6 +5,24 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{CodePanionError, Result};
 
+/// Callback for workflow run events
+///
+/// This callback is invoked whenever a run's status changes.
+/// It's used to broadcast events to WebSocket clients.
+pub type EventCallback = Arc<dyn Fn(WorkflowRunEvent) + Send + Sync>;
+
+/// Workflow run event
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowRunEvent {
+    pub event_type: String,
+    pub run_id: String,
+    pub project_id: String,
+    pub workflow_id: String,
+    pub status: String,
+    pub timestamp: u64,
+}
+
 /// Run priority level
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -71,6 +89,7 @@ pub struct RunScheduler {
     queue: Arc<Mutex<VecDeque<ScheduledRun>>>,
     running: Arc<Mutex<HashMap<String, ScheduledRun>>>,
     completed: Arc<Mutex<Vec<ScheduledRun>>>,
+    event_callback: Option<EventCallback>,
 }
 
 impl RunScheduler {
@@ -81,6 +100,33 @@ impl RunScheduler {
             queue: Arc::new(Mutex::new(VecDeque::new())),
             running: Arc::new(Mutex::new(HashMap::new())),
             completed: Arc::new(Mutex::new(Vec::new())),
+            event_callback: None,
+        }
+    }
+
+    /// Set the event callback for broadcasting run events
+    pub fn set_event_callback(&mut self, callback: EventCallback) {
+        self.event_callback = Some(callback);
+    }
+
+    /// Emit an event (fire-and-forget)
+    fn emit_event(&self, run: &ScheduledRun, status: &str) {
+        if let Some(callback) = &self.event_callback {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64;
+
+            let event = WorkflowRunEvent {
+                event_type: "workflow-run-event".to_string(),
+                run_id: run.run_id.clone(),
+                project_id: run.project_id.clone(),
+                workflow_id: run.workflow_id.clone(),
+                status: status.to_string(),
+                timestamp: now,
+            };
+
+            callback(event);
         }
     }
 
@@ -118,6 +164,9 @@ impl RunScheduler {
             completed_at: None,
             error: None,
         };
+
+        // Emit queued event
+        self.emit_event(&run, "queued");
 
         // Insert based on priority
         if self.config.enable_priority {
@@ -164,6 +213,10 @@ impl RunScheduler {
 
             run.status = RunStatus::Running;
             run.started_at = Some(now);
+
+            // Emit running event
+            self.emit_event(run, "running");
+
             Ok(())
         } else {
             Err(CodePanionError::NotFound(format!(
@@ -192,6 +245,14 @@ impl RunScheduler {
             };
             run.error = error;
 
+            // Emit completed or failed event
+            let status = if run.status == RunStatus::Failed {
+                "failed"
+            } else {
+                "completed"
+            };
+            self.emit_event(&run, status);
+
             completed.push(run);
             Ok(())
         } else {
@@ -211,6 +272,9 @@ impl RunScheduler {
                 let mut run = queue.remove(pos).unwrap();
                 run.status = RunStatus::Cancelled;
 
+                // Emit cancelled event
+                self.emit_event(&run, "cancelled");
+
                 let mut completed = self.completed.lock().unwrap();
                 completed.push(run);
                 return Ok(());
@@ -228,6 +292,9 @@ impl RunScheduler {
 
                 run.status = RunStatus::Cancelled;
                 run.completed_at = Some(now);
+
+                // Emit cancelled event
+                self.emit_event(&run, "cancelled");
 
                 let mut completed = self.completed.lock().unwrap();
                 completed.push(run);
@@ -254,6 +321,10 @@ impl RunScheduler {
             }
 
             run.status = RunStatus::Paused;
+
+            // Emit paused event
+            self.emit_event(run, "paused");
+
             Ok(())
         } else {
             Err(CodePanionError::NotFound(format!(
@@ -276,6 +347,10 @@ impl RunScheduler {
             }
 
             run.status = RunStatus::Running;
+
+            // Emit running event (resumed)
+            self.emit_event(run, "running");
+
             Ok(())
         } else {
             Err(CodePanionError::NotFound(format!(
@@ -517,7 +592,11 @@ mod tests {
             .unwrap();
 
         let run = scheduler.dequeue().unwrap();
-        scheduler.running.lock().unwrap().insert(run.run_id.clone(), run);
+        scheduler
+            .running
+            .lock()
+            .unwrap()
+            .insert(run.run_id.clone(), run);
 
         scheduler.start_run("run-1").unwrap();
         scheduler.pause_run("run-1").unwrap();

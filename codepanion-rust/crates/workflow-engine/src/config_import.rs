@@ -239,7 +239,10 @@ mod tests {
         assert_eq!(providers.len(), 1);
         assert_eq!(providers[0].base_url, "https://api.deepseek.com");
         assert_eq!(providers[0].api_key, "sk-test-123");
-        assert_eq!(global_config.active_provider_id, Some("deepseek".to_string()));
+        assert_eq!(
+            global_config.active_provider_id,
+            Some("deepseek".to_string())
+        );
         assert_eq!(
             global_config.model_aliases.get("chat"),
             Some(&"deepseek-chat".to_string())
@@ -269,7 +272,10 @@ mod tests {
         let global_config = import_claude_settings(&path).unwrap();
 
         assert_eq!(global_config.default_model, Some("opus".to_string()));
-        assert_eq!(global_config.available_models, vec!["opus", "sonnet", "haiku"]);
+        assert_eq!(
+            global_config.available_models,
+            vec!["opus", "sonnet", "haiku"]
+        );
         assert_eq!(
             global_config.model_aliases.get("opus"),
             Some(&"claude-opus-4-20250514".to_string())

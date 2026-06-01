@@ -1,8 +1,8 @@
 use axum::{
+    Json,
     extract::{Path, State},
     http::StatusCode,
     response::IntoResponse,
-    Json,
 };
 use codepanion_workflow_engine::{WorkflowDependency, WorkflowWithDeps};
 use serde::{Deserialize, Serialize};
@@ -156,14 +156,13 @@ pub async fn resolve_dependencies(
         .edges
         .into_iter()
         .flat_map(|((from_project, from_workflow), deps)| {
-            deps.into_iter().map(move |(to_project, to_workflow)| {
-                DependencyEdge {
+            deps.into_iter()
+                .map(move |(to_project, to_workflow)| DependencyEdge {
                     from_project_id: from_project.clone(),
                     from_workflow_id: from_workflow.clone(),
                     to_project_id: to_project,
                     to_workflow_id: to_workflow,
-                }
-            })
+                })
         })
         .collect();
 

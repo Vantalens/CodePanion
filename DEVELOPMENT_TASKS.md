@@ -967,13 +967,32 @@ Rust 目标指标：
 - 日志：tracing
 - CLI：clap
 
-- [ ] **D-01 HTTP/WS 服务器**
+- [x] **D-01 HTTP/WS 服务器** ✅
   - 使用 axum 实现 HTTP 服务器。
-  - 使用 tokio-tungstenite 实现 WebSocket。
+  - 使用 axum WebSocket 实现 WebSocket。
   - 兼容现有 `/workflow/*` API 路由。
   - 实现 WS `workflow-run-event` 实时推送。
   - 支持 CORS 和错误处理中间件。
   - 验收：实现 axum 服务器；支持 `/workflow/board`、`/workflow/runs`、`/workflow/runs/:id`、`/workflow/runs/:id/artifacts`、`/workflow/runs/:id/delivery`、`/workflow/gates`、`/workflow/gates/:runId/:stepId/resolve` 路由；WebSocket 支持 `workflow-run-event` 推送；测试覆盖所有路由和 WS 连接；与现有 GUI/CLI 协议兼容。
+  
+  **实现细节**:
+  - EventBroadcaster：管理 WebSocket 连接和事件广播
+  - WebSocket handler：处理连接升级、事件转发、断线清理
+  - RunScheduler 集成：在状态变更时触发事件（queued、running、completed、failed、cancelled、paused）
+  - `/ws` 端点：WebSocket 连接入口
+  - 7 个 broadcaster 测试 + 1 个 handler 测试
+  - 依赖：axum (ws feature)、futures、tokio
+  
+  **验收标准**:
+  - [x] EventBroadcaster 实现（subscribe、unsubscribe、broadcast）
+  - [x] WebSocket handler 实现（连接升级、事件转发）
+  - [x] RunScheduler 事件回调集成
+  - [x] `/ws` 路由注册
+  - [x] WorkflowRunEvent 结构（eventType、runId、projectId、workflowId、status、timestamp）
+  - [x] 8 个单元测试通过
+  - [x] cargo test --workspace 通过（214 tests）
+  - [x] cargo clippy 通过（0 warnings）
+  - [x] cargo fmt 通过
 
 - [ ] **D-02 Workflow 执行器**
   - 集成 P3 workflow engine（W-01 到 W-06）。

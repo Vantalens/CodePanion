@@ -1,9 +1,10 @@
 pub mod routes;
+pub mod websocket;
 
 use axum::{
-    http::{header, Method},
-    routing::{delete, get, post, put},
     Router,
+    http::{Method, header},
+    routing::{delete, get, post, put},
 };
 use codepanion_workflow_engine::{
     CrossProjectOrchestrator, GlobalConfigManager, ProjectRegistry, ProviderRegistry, RunScheduler,
@@ -13,6 +14,8 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tower_http::cors::CorsLayer;
+
+use websocket::EventBroadcaster;
 
 pub struct DaemonConfig {
     pub bind: String,
@@ -45,16 +48,28 @@ pub struct AppState {
     pub global_config: Arc<GlobalConfigManager>,
     pub scheduler: Arc<RunScheduler>,
     pub orchestrator: Arc<std::sync::Mutex<CrossProjectOrchestrator>>,
+    pub event_broadcaster: Arc<EventBroadcaster>,
 }
 
 pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::Error>> {
+    // Initialize event broadcaster
+    let event_broadcaster = Arc::new(EventBroadcaster::new());
+
+    // Initialize scheduler with event callback
+    let mut scheduler = RunScheduler::new(SchedulerConfig::default());
+    let broadcaster_clone = event_broadcaster.clone();
+    scheduler.set_event_callback(Arc::new(move |event| {
+        broadcaster_clone.broadcast(event);
+    }));
+
     // Initialize registries
     let state = AppState {
         project_registry: Arc::new(ProjectRegistry::new(config.projects_path)),
         provider_registry: Arc::new(ProviderRegistry::new(config.providers_path)),
         global_config: Arc::new(GlobalConfigManager::new(config.global_config_path)),
-        scheduler: Arc::new(RunScheduler::new(SchedulerConfig::default())),
+        scheduler: Arc::new(scheduler),
         orchestrator: Arc::new(std::sync::Mutex::new(CrossProjectOrchestrator::new())),
+        event_broadcaster,
     };
 
     // Configure CORS
@@ -83,15 +98,9 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::
         // Health check (legacy endpoint)
         .route("/health", get(health_handler))
         // Project API endpoints
-        .route(
-            "/api/v1/projects",
-            post(routes::projects::create_project),
-        )
+        .route("/api/v1/projects", post(routes::projects::create_project))
         .route("/api/v1/projects", get(routes::projects::list_projects))
-        .route(
-            "/api/v1/projects/:id",
-            get(routes::projects::get_project),
-        )
+        .route("/api/v1/projects/:id", get(routes::projects::get_project))
         .route(
             "/api/v1/projects/:id",
             put(routes::projects::update_project),
@@ -113,10 +122,7 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::
             "/api/v1/providers",
             post(routes::providers::create_provider),
         )
-        .route(
-            "/api/v1/providers",
-            get(routes::providers::list_providers),
-        )
+        .route("/api/v1/providers", get(routes::providers::list_providers))
         .route(
             "/api/v1/providers/:id",
             get(routes::providers::get_provider),
@@ -191,10 +197,7 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::
             "/api/v1/scheduler/runs/:run_id/resume",
             post(routes::scheduler::resume_run),
         )
-        .route(
-            "/api/v1/scheduler/stats",
-            get(routes::scheduler::get_stats),
-        )
+        .route("/api/v1/scheduler/stats", get(routes::scheduler::get_stats))
         .route(
             "/api/v1/scheduler/completed",
             delete(routes::scheduler::clear_completed),
@@ -266,6 +269,8 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::
             "/workflow/gates/:run_id/:step_id/resolve",
             post(routes::workflow::resolve_gate),
         )
+        // WebSocket endpoint
+        .route("/ws", get(websocket::websocket_handler))
         // OpenAI-compatible endpoints
         .route("/v1/models", get(routes::providers::list_all_models))
         .layer(cors)

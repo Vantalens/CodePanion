@@ -132,7 +132,6 @@ impl ErrorResponse {
         }
     }
 
-
     fn internal_error(message: String) -> Self {
         Self {
             error: ErrorDetail {
@@ -175,7 +174,8 @@ pub async fn create_provider(
         created_at: current_timestamp(),
     };
 
-    state.provider_registry
+    state
+        .provider_registry
         .upsert(provider.clone())
         .map_err(|e| ErrorResponse::internal_error(format!("Failed to create provider: {}", e)))?;
 
@@ -187,7 +187,8 @@ pub async fn list_providers(
     State(state): State<AppState>,
     Query(query): Query<ListProvidersQuery>,
 ) -> Result<Json<ListProvidersResponse>, ErrorResponse> {
-    let mut providers = state.provider_registry
+    let mut providers = state
+        .provider_registry
         .list()
         .map_err(|e| ErrorResponse::internal_error(format!("Failed to list providers: {}", e)))?;
 
@@ -212,7 +213,8 @@ pub async fn get_provider(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<ModelProvider>, ErrorResponse> {
-    let provider = state.provider_registry
+    let provider = state
+        .provider_registry
         .get(&id)
         .map_err(|e| ErrorResponse::internal_error(format!("Failed to get provider: {}", e)))?
         .ok_or_else(|| {
@@ -228,7 +230,8 @@ pub async fn update_provider(
     Path(id): Path<String>,
     Json(req): Json<UpdateProviderRequest>,
 ) -> Result<Json<ModelProvider>, ErrorResponse> {
-    let mut provider = state.provider_registry
+    let mut provider = state
+        .provider_registry
         .get(&id)
         .map_err(|e| ErrorResponse::internal_error(format!("Failed to get provider: {}", e)))?
         .ok_or_else(|| {
@@ -252,7 +255,8 @@ pub async fn update_provider(
         provider.status = status;
     }
 
-    state.provider_registry
+    state
+        .provider_registry
         .upsert(provider.clone())
         .map_err(|e| ErrorResponse::internal_error(format!("Failed to update provider: {}", e)))?;
 
@@ -264,7 +268,8 @@ pub async fn delete_provider(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<DeleteResponse>, ErrorResponse> {
-    let success = state.provider_registry
+    let success = state
+        .provider_registry
         .remove(&id)
         .map_err(|e| ErrorResponse::internal_error(format!("Failed to delete provider: {}", e)))?;
 
@@ -276,7 +281,8 @@ pub async fn test_provider(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<TestConnectionResponse>, ErrorResponse> {
-    let provider = state.provider_registry
+    let provider = state
+        .provider_registry
         .get(&id)
         .map_err(|e| ErrorResponse::internal_error(format!("Failed to get provider: {}", e)))?
         .ok_or_else(|| {
@@ -293,7 +299,8 @@ pub async fn test_provider(
     let latency = start.elapsed().as_millis() as u64;
 
     // Update last_tested timestamp
-    state.provider_registry
+    state
+        .provider_registry
         .touch(&id)
         .map_err(|e| ErrorResponse::internal_error(format!("Failed to update provider: {}", e)))?;
 
@@ -313,7 +320,8 @@ pub async fn list_provider_models(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<Vec<ModelInfo>>, ErrorResponse> {
-    let provider = state.provider_registry
+    let provider = state
+        .provider_registry
         .get(&id)
         .map_err(|e| ErrorResponse::internal_error(format!("Failed to get provider: {}", e)))?
         .ok_or_else(|| {
@@ -334,19 +342,13 @@ pub async fn activate_provider(
         .get(&id)
         .map_err(|e| ErrorResponse::internal_error(format!("Failed to get provider: {}", e)))?
         .ok_or_else(|| {
-            ErrorResponse::not_found(
-                format!("Provider {} not found", id),
-                Some("id".to_string()),
-            )
+            ErrorResponse::not_found(format!("Provider {} not found", id), Some("id".to_string()))
         })?;
 
     // Set as active provider
-    state
-        .global_config
-        .set_active_provider(&id)
-        .map_err(|e| {
-            ErrorResponse::internal_error(format!("Failed to activate provider: {}", e))
-        })?;
+    state.global_config.set_active_provider(&id).map_err(|e| {
+        ErrorResponse::internal_error(format!("Failed to activate provider: {}", e))
+    })?;
 
     Ok(Json(provider))
 }
@@ -358,7 +360,9 @@ pub async fn get_active_provider(
     let active_id = state
         .global_config
         .get_active_provider()
-        .map_err(|e| ErrorResponse::internal_error(format!("Failed to get active provider: {}", e)))?
+        .map_err(|e| {
+            ErrorResponse::internal_error(format!("Failed to get active provider: {}", e))
+        })?
         .ok_or_else(|| {
             ErrorResponse::not_found(
                 "No active provider set".to_string(),
@@ -445,13 +449,18 @@ pub async fn import_config(
             } else {
                 dirs::home_dir()
                     .ok_or_else(|| {
-                        ErrorResponse::internal_error("Failed to determine home directory".to_string())
+                        ErrorResponse::internal_error(
+                            "Failed to determine home directory".to_string(),
+                        )
                     })?
                     .join(".ccm_config")
             };
 
             let (providers, global_config) = import_ccm_config(&path).map_err(|e| {
-                ErrorResponse::invalid_request(format!("Failed to import CC Switch config: {}", e), None)
+                ErrorResponse::invalid_request(
+                    format!("Failed to import CC Switch config: {}", e),
+                    None,
+                )
             })?;
 
             // Save global config
@@ -473,14 +482,19 @@ pub async fn import_config(
             } else {
                 dirs::home_dir()
                     .ok_or_else(|| {
-                        ErrorResponse::internal_error("Failed to determine home directory".to_string())
+                        ErrorResponse::internal_error(
+                            "Failed to determine home directory".to_string(),
+                        )
                     })?
                     .join(".claude")
                     .join("settings.json")
             };
 
             let global_config = import_claude_settings(&path).map_err(|e| {
-                ErrorResponse::invalid_request(format!("Failed to import Claude Code settings: {}", e), None)
+                ErrorResponse::invalid_request(
+                    format!("Failed to import Claude Code settings: {}", e),
+                    None,
+                )
             })?;
 
             let aliases_count = global_config.model_aliases.len();
@@ -514,11 +528,8 @@ pub async fn import_config(
                 active_provider: None,
             }
         }
-        "auto" => {
-            codepanion_workflow_engine::auto_import().map_err(|e| {
-                ErrorResponse::internal_error(format!("Failed to auto-import: {}", e))
-            })?
-        }
+        "auto" => codepanion_workflow_engine::auto_import()
+            .map_err(|e| ErrorResponse::internal_error(format!("Failed to auto-import: {}", e)))?,
         _ => {
             return Err(ErrorResponse::invalid_request(
                 format!(
@@ -532,5 +543,3 @@ pub async fn import_config(
 
     Ok(Json(result))
 }
-
-
