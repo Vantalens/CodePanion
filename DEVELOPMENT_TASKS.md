@@ -459,6 +459,54 @@ Rust 目标指标：
   - [ ] 模型列表缓存（避免频繁请求）- 后续优化
   - [ ] 集成测试（真实 API 调用 mock）- 后续优化
 
+- [x] **M-02.2 Provider 切换与模型别名** ✅
+  - **描述**: 实现快速切换 API provider 和模型别名解析（CC Switch 兼容核心）
+  - **端口**: 复用 8318
+  - **API 版本**: `/api/v1`
+  
+  **核心功能**:
+  - 全局配置管理（`~/.codepanion/config.json`）
+  - 模型别名解析（`opus` → `claude-opus-4-20250514`）
+  - 活跃 provider 管理（快速切换当前使用的 provider）
+  - OpenAI 兼容的 `/v1/models` 端点
+  
+  **新增端点**:
+  - `POST /api/v1/providers/:id/activate` - 激活 provider（设置为当前活跃）
+  - `GET /api/v1/providers/active` - 获取当前活跃的 provider
+  - `GET /v1/models` - 列出所有 provider 的所有模型（OpenAI 兼容格式）
+  
+  **全局配置结构**:
+  ```json
+  {
+    "version": 1,
+    "activeProviderId": "my-deepseek",
+    "defaultModel": "opus",
+    "modelAliases": {
+      "opus": "claude-opus-4-20250514",
+      "sonnet": "claude-sonnet-4-20250514",
+      "haiku": "claude-haiku-4-20250301"
+    }
+  }
+  ```
+  
+  **模型别名解析示例**:
+  - 用户请求 `opus` → 解析为 `claude-opus-4-20250514`
+  - 用户请求 `gpt-4` → 直接使用（非别名）
+  - 支持自定义别名：`gpt4` → `gpt-4-turbo`
+  
+  **验收标准**:
+  - [x] GlobalConfig 和 GlobalConfigManager 实现
+  - [x] 模型别名解析系统（resolve_model_alias）
+  - [x] 活跃 provider 管理（set_active_provider, get_active_provider）
+  - [x] POST /api/v1/providers/:id/activate 端点
+  - [x] GET /api/v1/providers/active 端点
+  - [x] GET /v1/models 端点（OpenAI 兼容格式）
+  - [x] 全局配置持久化（~/.codepanion/config.json）
+  - [x] 默认 Claude 别名（opus/sonnet/haiku）
+  - [x] 7 个单元测试覆盖所有功能
+  - [x] cargo fmt + clippy + test 全部通过（66/66 tests）
+  - [x] 文档更新
+
 - [ ] **M-03 多 run scheduler**
   - 多 workflow 并行。
   - 全局队列。

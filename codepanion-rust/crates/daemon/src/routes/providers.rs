@@ -322,3 +322,103 @@ pub async fn list_provider_models(
 
     Ok(Json(provider.models))
 }
+
+/// POST /api/v1/providers/:id/activate - Activate a provider
+pub async fn activate_provider(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<ModelProvider>, ErrorResponse> {
+    // Verify provider exists
+    let provider = state
+        .provider_registry
+        .get(&id)
+        .map_err(|e| ErrorResponse::internal_error(format!("Failed to get provider: {}", e)))?
+        .ok_or_else(|| {
+            ErrorResponse::not_found(
+                format!("Provider {} not found", id),
+                Some("id".to_string()),
+            )
+        })?;
+
+    // Set as active provider
+    state
+        .global_config
+        .set_active_provider(&id)
+        .map_err(|e| {
+            ErrorResponse::internal_error(format!("Failed to activate provider: {}", e))
+        })?;
+
+    Ok(Json(provider))
+}
+
+/// GET /api/v1/providers/active - Get active provider
+pub async fn get_active_provider(
+    State(state): State<AppState>,
+) -> Result<Json<ModelProvider>, ErrorResponse> {
+    let active_id = state
+        .global_config
+        .get_active_provider()
+        .map_err(|e| ErrorResponse::internal_error(format!("Failed to get active provider: {}", e)))?
+        .ok_or_else(|| {
+            ErrorResponse::not_found(
+                "No active provider set".to_string(),
+                Some("activeProviderId".to_string()),
+            )
+        })?;
+
+    let provider = state
+        .provider_registry
+        .get(&active_id)
+        .map_err(|e| ErrorResponse::internal_error(format!("Failed to get provider: {}", e)))?
+        .ok_or_else(|| {
+            ErrorResponse::not_found(
+                format!("Active provider {} not found", active_id),
+                Some("id".to_string()),
+            )
+        })?;
+
+    Ok(Json(provider))
+}
+
+/// GET /v1/models - List all models from all providers (OpenAI compatible)
+#[derive(Debug, Serialize)]
+pub struct ModelListResponse {
+    pub object: String,
+    pub data: Vec<ModelObject>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ModelObject {
+    pub id: String,
+    pub object: String,
+    pub created: u64,
+    pub owned_by: String,
+}
+
+pub async fn list_all_models(
+    State(state): State<AppState>,
+) -> Result<Json<ModelListResponse>, ErrorResponse> {
+    let providers = state
+        .provider_registry
+        .list()
+        .map_err(|e| ErrorResponse::internal_error(format!("Failed to list providers: {}", e)))?;
+
+    let mut models = Vec::new();
+
+    for provider in providers {
+        for model in provider.models {
+            models.push(ModelObject {
+                id: model.id,
+                object: "model".to_string(),
+                created: provider.created_at / 1000, // Convert to seconds
+                owned_by: provider.name.clone(),
+            });
+        }
+    }
+
+    Ok(Json(ModelListResponse {
+        object: "list".to_string(),
+        data: models,
+    }))
+}
+

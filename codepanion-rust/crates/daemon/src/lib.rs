@@ -5,7 +5,7 @@ use axum::{
     routing::{delete, get, post, put},
     Router,
 };
-use codepanion_workflow_engine::{ProjectRegistry, ProviderRegistry};
+use codepanion_workflow_engine::{GlobalConfigManager, ProjectRegistry, ProviderRegistry};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -16,6 +16,7 @@ pub struct DaemonConfig {
     pub port: u16,
     pub projects_path: PathBuf,
     pub providers_path: PathBuf,
+    pub global_config_path: PathBuf,
 }
 
 impl Default for DaemonConfig {
@@ -29,6 +30,7 @@ impl Default for DaemonConfig {
             port: 8318,
             projects_path: codepanion_dir.join("projects.json"),
             providers_path: codepanion_dir.join("providers.json"),
+            global_config_path: codepanion_dir.join("config.json"),
         }
     }
 }
@@ -37,6 +39,7 @@ impl Default for DaemonConfig {
 pub struct AppState {
     pub project_registry: Arc<ProjectRegistry>,
     pub provider_registry: Arc<ProviderRegistry>,
+    pub global_config: Arc<GlobalConfigManager>,
 }
 
 pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::Error>> {
@@ -44,6 +47,7 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::
     let state = AppState {
         project_registry: Arc::new(ProjectRegistry::new(config.projects_path)),
         provider_registry: Arc::new(ProviderRegistry::new(config.providers_path)),
+        global_config: Arc::new(GlobalConfigManager::new(config.global_config_path)),
     };
 
     // Configure CORS
@@ -126,6 +130,16 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::
             "/api/v1/providers/:id/models",
             get(routes::providers::list_provider_models),
         )
+        .route(
+            "/api/v1/providers/:id/activate",
+            post(routes::providers::activate_provider),
+        )
+        .route(
+            "/api/v1/providers/active",
+            get(routes::providers::get_active_provider),
+        )
+        // OpenAI-compatible endpoints
+        .route("/v1/models", get(routes::providers::list_all_models))
         .layer(cors)
         .with_state(state);
 
@@ -142,6 +156,7 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::
     println!("  - Health: http://{}/health", addr);
     println!("  - Projects API: http://{}/api/v1/projects", addr);
     println!("  - Providers API: http://{}/api/v1/providers", addr);
+    println!("  - Models API: http://{}/v1/models", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
