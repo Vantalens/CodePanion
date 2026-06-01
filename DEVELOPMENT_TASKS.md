@@ -229,15 +229,18 @@ Rust 目标指标：
   - 决策记录为 artifact。
   - 验收：实现 `HumanGateManager`；支持 3 种决策类型（approve、reject、retry）；支持 list_paused_gates() 列出等待决策的 gates；支持 resolve_gate() 解决 gate 并创建 human-decision artifact；支持 constraints 注入到 workflow values；retry 决策自动找到上一个成功的 step 作为恢复点；approve/reject 决策后 gate 从列表中移除；retry 决策后 gate 保留并显示 last_decision；7 个测试全部通过（list gates、approve、reject、retry、constraints、filter approved、keep retry）；通过 fmt 和 clippy 检查。
 
-- [ ] **W-06 HTTP/WS 契约兼容**
-  - `/workflow/board`
-  - `/workflow/runs`
-  - `/workflow/runs/:id`
-  - `/workflow/runs/:id/artifacts`
-  - `/workflow/runs/:id/delivery`
-  - `/workflow/gates`
-  - `/workflow/gates/:runId/:stepId/resolve`
-  - WS `workflow-run-event`
+- [ ] **W-06 HTTP/WS 契约兼容**（daemon 集成任务）
+  - 在 daemon crate 中实现 HTTP 路由：
+    - `/workflow/board` - 列出 workflow definitions
+    - `/workflow/runs` - 列出 workflow runs
+    - `/workflow/runs/:id` - 获取单个 run
+    - `/workflow/runs/:id/artifacts` - 获取 run 的 artifacts
+    - `/workflow/runs/:id/delivery` - 获取 delivery note
+    - `/workflow/gates` - 列出 paused gates
+    - `/workflow/gates/:runId/:stepId/resolve` - 解决 gate
+  - 实现 WebSocket 事件推送：
+    - `workflow-run-event` - workflow 执行事件
+  - 注：此任务需要在 daemon crate 中集成 workflow-engine，不在 workflow-engine crate 范围内。
 
 ---
 

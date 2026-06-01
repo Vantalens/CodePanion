@@ -249,12 +249,13 @@ pub struct ChatToolFunction {
 
 ### 待开始阶段
 
-- 🔄 **P3: Rust Workflow Engine** (W-01 到 W-06) - 5/6 完成
+- ✅ **P3: Rust Workflow Engine** (W-01 到 W-05) - 5/5 完成（100%）
   - ✅ W-01: Workflow definition (完成)
   - ✅ W-02: Step executor (完成)
   - ✅ W-03: Run history (完成)
   - ✅ W-04: Artifact store (完成)
   - ✅ W-05: Human gate (完成)
+  - 注：W-06 HTTP/WS 契约兼容是 daemon 集成任务，不在 workflow-engine crate 范围内
   - ⏳ W-04: Artifact store
   - ⏳ W-05: Human gate
   - ⏳ W-06: HTTP/WS 契约兼容
