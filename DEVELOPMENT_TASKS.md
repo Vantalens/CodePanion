@@ -641,11 +641,72 @@ Rust 目标指标：
   - [x] cargo clippy 通过
   - [x] CLI 文档（docs/CLI.md）
 
-- [ ] **M-03 多 run scheduler**
-  - 多 workflow 并行。
-  - 全局队列。
-  - 取消、暂停、恢复。
-  - 按项目隔离 cwd、history、artifacts。
+- [x] **M-03 多 run scheduler** ✅
+  - **描述**: 实现全局 run 调度器，支持多 workflow 并行执行、优先级队列、cancel/pause/resume
+  
+  **核心功能**:
+  - 全局 run 队列（优先级调度）
+  - 并发控制（max_concurrent_runs）
+  - 队列大小限制（max_queue_size）
+  - Run 状态管理（Queued、Running、Paused、Completed、Failed、Cancelled）
+  - Cancel/Pause/Resume 操作
+  - 按项目隔离查询
+  - 统计信息（queued/running/completed 计数）
+  
+  **数据结构**:
+  ```rust
+  pub enum RunPriority { Low, Normal, High, Urgent }
+  pub enum RunStatus { Queued, Running, Paused, Completed, Failed, Cancelled }
+  
+  pub struct ScheduledRun {
+      run_id, project_id, workflow_id,
+      priority, status,
+      queued_at, started_at, completed_at,
+      error
+  }
+  
+  pub struct RunScheduler {
+      queue: VecDeque<ScheduledRun>,      // 优先级队列
+      running: HashMap<String, ScheduledRun>,  // 运行中的 run
+      completed: Vec<ScheduledRun>,       // 已完成的 run
+  }
+  ```
+  
+  **API 端点**:
+  ```
+  POST   /api/v1/scheduler/enqueue              # 入队新 run
+  GET    /api/v1/scheduler/runs                 # 列出所有 run
+  GET    /api/v1/scheduler/runs/queued          # 列出队列中的 run
+  GET    /api/v1/scheduler/runs/running         # 列出运行中的 run
+  GET    /api/v1/scheduler/runs/completed       # 列出已完成的 run
+  GET    /api/v1/scheduler/runs/:run_id         # 获取特定 run
+  GET    /api/v1/scheduler/projects/:project_id/runs  # 按项目查询
+  POST   /api/v1/scheduler/runs/:run_id/cancel  # 取消 run
+  POST   /api/v1/scheduler/runs/:run_id/pause   # 暂停 run
+  POST   /api/v1/scheduler/runs/:run_id/resume  # 恢复 run
+  GET    /api/v1/scheduler/stats                # 获取统计信息
+  DELETE /api/v1/scheduler/completed            # 清空已完成的 run
+  ```
+  
+  **调度逻辑**:
+  - 优先级调度：Urgent > High > Normal > Low
+  - 并发控制：running.len() < max_concurrent_runs 时才 dequeue
+  - Cancel 逻辑：从 queue 或 running 中移除，标记为 Cancelled
+  - Pause/Resume：只能操作 running 状态的 run
+  - 队列满时拒绝新 run（可配置 max_queue_size）
+  
+  **验收标准**:
+  - [x] RunScheduler 核心实现（enqueue、dequeue、状态管理）
+  - [x] 优先级调度（高优先级先执行）
+  - [x] 并发控制（max_concurrent_runs）
+  - [x] Cancel/Pause/Resume 操作
+  - [x] 按项目查询（list_by_project）
+  - [x] 统计信息（get_stats）
+  - [x] 7 个单元测试（优先级、并发、取消、暂停恢复、队列限制）
+  - [x] API 路由集成（11 个端点）
+  - [x] daemon 启动信息更新
+  - [x] 84/84 测试通过
+  - [x] cargo clippy 通过
 
 - [ ] **M-04 跨项目编排**
   - workflow 声明跨项目依赖。

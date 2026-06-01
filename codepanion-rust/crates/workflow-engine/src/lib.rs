@@ -25,6 +25,9 @@ pub mod global_config;
 // M-02.3: Configuration import (CC Switch compatibility)
 pub mod config_import;
 
+// M-03: Multi-run scheduler
+pub mod scheduler;
+
 pub use definition::{
     DefinitionStore, WorkflowArchitecture, WorkflowArtifactType, WorkflowContextPolicy,
     WorkflowDefinition, WorkflowPermission, WorkflowProvider, WorkflowStep,
@@ -53,6 +56,10 @@ pub use model_provider::{
 pub use global_config::{GlobalConfig, GlobalConfigManager, ResolvedConfig};
 
 pub use config_import::{auto_import, import_ccm_config, import_claude_settings, ImportResult};
+
+pub use scheduler::{
+    RunPriority, RunScheduler, RunStatus, ScheduledRun, SchedulerConfig, SchedulerStats,
+};
 
 // 旧的简化版本（保留用于向后兼容）
 use codepanion_providers::ProviderDefinition;

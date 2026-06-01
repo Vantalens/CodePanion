@@ -5,7 +5,9 @@ use axum::{
     routing::{delete, get, post, put},
     Router,
 };
-use codepanion_workflow_engine::{GlobalConfigManager, ProjectRegistry, ProviderRegistry};
+use codepanion_workflow_engine::{
+    GlobalConfigManager, ProjectRegistry, ProviderRegistry, RunScheduler, SchedulerConfig,
+};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -40,6 +42,7 @@ pub struct AppState {
     pub project_registry: Arc<ProjectRegistry>,
     pub provider_registry: Arc<ProviderRegistry>,
     pub global_config: Arc<GlobalConfigManager>,
+    pub scheduler: Arc<RunScheduler>,
 }
 
 pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::Error>> {
@@ -48,6 +51,7 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::
         project_registry: Arc::new(ProjectRegistry::new(config.projects_path)),
         provider_registry: Arc::new(ProviderRegistry::new(config.providers_path)),
         global_config: Arc::new(GlobalConfigManager::new(config.global_config_path)),
+        scheduler: Arc::new(RunScheduler::new(SchedulerConfig::default())),
     };
 
     // Configure CORS
@@ -143,6 +147,55 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::
             "/api/v1/config/import",
             post(routes::providers::import_config),
         )
+        // Scheduler API endpoints
+        .route(
+            "/api/v1/scheduler/enqueue",
+            post(routes::scheduler::enqueue_run),
+        )
+        .route(
+            "/api/v1/scheduler/runs",
+            get(routes::scheduler::list_all_runs),
+        )
+        .route(
+            "/api/v1/scheduler/runs/queued",
+            get(routes::scheduler::list_queued_runs),
+        )
+        .route(
+            "/api/v1/scheduler/runs/running",
+            get(routes::scheduler::list_running_runs),
+        )
+        .route(
+            "/api/v1/scheduler/runs/completed",
+            get(routes::scheduler::list_completed_runs),
+        )
+        .route(
+            "/api/v1/scheduler/runs/:run_id",
+            get(routes::scheduler::get_run),
+        )
+        .route(
+            "/api/v1/scheduler/projects/:project_id/runs",
+            get(routes::scheduler::list_project_runs),
+        )
+        .route(
+            "/api/v1/scheduler/runs/:run_id/cancel",
+            post(routes::scheduler::cancel_run),
+        )
+        .route(
+            "/api/v1/scheduler/runs/:run_id/pause",
+            post(routes::scheduler::pause_run),
+        )
+        .route(
+            "/api/v1/scheduler/runs/:run_id/resume",
+            post(routes::scheduler::resume_run),
+        )
+        .route(
+            "/api/v1/scheduler/stats",
+            get(routes::scheduler::get_stats),
+        )
+        .route(
+            "/api/v1/scheduler/completed",
+            delete(routes::scheduler::clear_completed),
+        )
         // OpenAI-compatible endpoints
         .route("/v1/models", get(routes::providers::list_all_models))
         .layer(cors)
@@ -161,6 +214,7 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::
     println!("  - Health: http://{}/health", addr);
     println!("  - Projects API: http://{}/api/v1/projects", addr);
     println!("  - Providers API: http://{}/api/v1/providers", addr);
+    println!("  - Scheduler API: http://{}/api/v1/scheduler", addr);
     println!("  - Config Import: http://{}/api/v1/config/import", addr);
     println!("  - Models API: http://{}/v1/models", addr);
 
