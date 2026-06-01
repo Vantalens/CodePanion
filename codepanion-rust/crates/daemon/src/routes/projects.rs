@@ -1,13 +1,15 @@
+use crate::AppState;
 use axum::{
     Json,
     extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use codepanion_workflow_engine::{
+    Project, ProjectHealth, ProjectMetadata, ProjectRegistry, ProjectStats,
+};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::sync::Arc;
-use codepanion_workflow_engine::{Project, ProjectHealth, ProjectMetadata, ProjectRegistry, ProjectStats};
 
 /// Current timestamp in milliseconds
 fn current_timestamp() -> u64 {
@@ -154,7 +156,7 @@ impl ErrorResponse {
 
 /// POST /api/v1/projects - Create a new project
 pub async fn create_project(
-    State(registry): State<Arc<ProjectRegistry>>,
+    State(state): State<AppState>,
     Json(req): Json<CreateProjectRequest>,
 ) -> Result<Json<Project>, ErrorResponse> {
     // Validate path
@@ -175,7 +177,7 @@ pub async fn create_project(
         metadata: req.metadata,
     };
 
-    registry
+    state.project_registry
         .upsert(project.clone())
         .map_err(|e| ErrorResponse::internal_error(format!("Failed to create project: {}", e)))?;
 
@@ -184,10 +186,10 @@ pub async fn create_project(
 
 /// GET /api/v1/projects - List all projects
 pub async fn list_projects(
-    State(registry): State<Arc<ProjectRegistry>>,
+    State(state): State<AppState>,
     Query(query): Query<ListProjectsQuery>,
 ) -> Result<Json<ListProjectsResponse>, ErrorResponse> {
-    let mut projects = registry
+    let mut projects = state.project_registry
         .list()
         .map_err(|e| ErrorResponse::internal_error(format!("Failed to list projects: {}", e)))?;
 
@@ -211,10 +213,10 @@ pub async fn list_projects(
 
 /// GET /api/v1/projects/:id - Get a single project
 pub async fn get_project(
-    State(registry): State<Arc<ProjectRegistry>>,
+    State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<Project>, ErrorResponse> {
-    let project = registry
+    let project = state.project_registry
         .get(&id)
         .map_err(|e| ErrorResponse::internal_error(format!("Failed to get project: {}", e)))?
         .ok_or_else(|| {
@@ -226,11 +228,11 @@ pub async fn get_project(
 
 /// PUT /api/v1/projects/:id - Update a project
 pub async fn update_project(
-    State(registry): State<Arc<ProjectRegistry>>,
+    State(state): State<AppState>,
     Path(id): Path<String>,
     Json(req): Json<UpdateProjectRequest>,
 ) -> Result<Json<Project>, ErrorResponse> {
-    let mut project = registry
+    let mut project = state.project_registry
         .get(&id)
         .map_err(|e| ErrorResponse::internal_error(format!("Failed to get project: {}", e)))?
         .ok_or_else(|| {
@@ -258,7 +260,7 @@ pub async fn update_project(
         project.metadata = metadata;
     }
 
-    registry
+    state.project_registry
         .upsert(project.clone())
         .map_err(|e| ErrorResponse::internal_error(format!("Failed to update project: {}", e)))?;
 
@@ -267,10 +269,10 @@ pub async fn update_project(
 
 /// DELETE /api/v1/projects/:id - Delete a project
 pub async fn delete_project(
-    State(registry): State<Arc<ProjectRegistry>>,
+    State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<DeleteResponse>, ErrorResponse> {
-    let success = registry
+    let success = state.project_registry
         .remove(&id)
         .map_err(|e| ErrorResponse::internal_error(format!("Failed to delete project: {}", e)))?;
 
@@ -279,14 +281,14 @@ pub async fn delete_project(
 
 /// POST /api/v1/projects/:id/activate - Activate a project (update lastActiveAt)
 pub async fn activate_project(
-    State(registry): State<Arc<ProjectRegistry>>,
+    State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<ActivateProjectResponse>, ErrorResponse> {
-    registry
+    state.project_registry
         .touch(&id)
         .map_err(|e| ErrorResponse::internal_error(format!("Failed to activate project: {}", e)))?;
 
-    let project = registry
+    let project = state.project_registry
         .get(&id)
         .map_err(|e| ErrorResponse::internal_error(format!("Failed to get project: {}", e)))?
         .ok_or_else(|| {
@@ -303,10 +305,10 @@ pub async fn activate_project(
 
 /// GET /api/v1/projects/:id/status - Get project health status and statistics
 pub async fn get_project_status(
-    State(registry): State<Arc<ProjectRegistry>>,
+    State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<ProjectStatusResponse>, ErrorResponse> {
-    let project = registry
+    let project = state.project_registry
         .get(&id)
         .map_err(|e| ErrorResponse::internal_error(format!("Failed to get project: {}", e)))?
         .ok_or_else(|| {

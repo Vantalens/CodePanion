@@ -16,6 +16,9 @@ pub mod human_gate;
 // M-01: Project registry
 pub mod project;
 
+// M-02.1: Model provider registry
+pub mod model_provider;
+
 pub use definition::{
     DefinitionStore, WorkflowArchitecture, WorkflowArtifactType, WorkflowContextPolicy,
     WorkflowDefinition, WorkflowPermission, WorkflowProvider, WorkflowStep,
@@ -35,6 +38,11 @@ pub use human_gate::{
 };
 
 pub use project::{Project, ProjectHealth, ProjectMetadata, ProjectRegistry, ProjectStats};
+
+pub use model_provider::{
+    ModelInfo, ModelPricing, ModelProvider, ProviderCapability, ProviderConfig, ProviderRegistry,
+    ProviderStatus, ProviderType,
+};
 
 // 旧的简化版本（保留用于向后兼容）
 use codepanion_providers::ProviderDefinition;
