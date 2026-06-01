@@ -1,6 +1,7 @@
 pub mod routes;
 pub mod websocket;
 pub mod workflow_runner;
+pub mod daemon_manager;
 
 use axum::{
     Router,

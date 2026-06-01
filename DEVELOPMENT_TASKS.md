@@ -1019,7 +1019,7 @@ Rust 目标指标：
     - AgentLoopRequest + run_agent_loop（agent 执行）
     - WorkflowExecutor（workflow engine 集成）
 
-- [ ] **D-03 CLI 命令**
+- [x] **D-03 CLI 命令**
   - 使用 clap 实现 CLI 参数解析。
   - `codepanion start` - 启动 daemon。
   - `codepanion stop` - 停止 daemon。
@@ -1028,6 +1028,24 @@ Rust 目标指标：
   - `codepanion workspace` - 管理 workspace。
   - PID 文件管理和进程检测。
   - 验收：实现所有 CLI 命令；PID 文件管理；进程检测和清理；与 TypeScript CLI 行为一致；测试覆盖所有命令和边界情况。
+  - **实现细节**：
+    - [x] 创建 `daemon_manager.rs` 模块（PID 文件管理、进程检测）
+    - [x] 实现 `DaemonManager`（start/stop/status）
+    - [x] 实现 `codepanion start` 命令（前台/后台运行）
+    - [x] 实现 `codepanion stop` 命令（SIGTERM/taskkill）
+    - [x] 实现 `codepanion status` 命令（进程检测 + API 健康检查）
+    - [x] 实现 `codepanion workflows` 命令（列出所有/活跃 workflows）
+    - [x] 实现 `codepanion workspace` 命令（list/add/remove）
+    - [x] 更新 CLI 参数解析（添加新命令）
+    - [x] 4 个单元测试（daemon_manager）
+    - [x] cargo test 通过（220 tests）
+    - [x] cargo clippy 通过（3 warnings - 非关键）
+  - **技术栈**：
+    - clap（CLI 参数解析）
+    - PID 文件（~/.codepanion/daemon.pid）
+    - 进程检测（Unix: kill -0, Windows: tasklist）
+    - 后台运行（Unix: nohup, Windows: CREATE_NO_WINDOW）
+    - reqwest（API 客户端）
 
 - [ ] **D-04 测试、迁移与性能基准**
   - 端到端测试（daemon + GUI + CLI）。

@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(name = "codepanion")]
@@ -15,6 +16,30 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Start the daemon
+    Start {
+        /// Port to bind to
+        #[arg(short, long, default_value = "8318")]
+        port: u16,
+        /// Run in foreground (don't daemonize)
+        #[arg(short, long)]
+        foreground: bool,
+    },
+    /// Stop the daemon
+    Stop,
+    /// Show daemon status
+    Status,
+    /// List workflows
+    Workflows {
+        /// Show only active workflows
+        #[arg(short, long)]
+        active: bool,
+    },
+    /// Workspace management
+    Workspace {
+        #[command(subcommand)]
+        command: WorkspaceCommands,
+    },
     /// Provider management commands
     Provider {
         #[command(subcommand)]
@@ -29,6 +54,22 @@ enum Commands {
     Config {
         #[command(subcommand)]
         command: ConfigCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum WorkspaceCommands {
+    /// List all workspaces
+    List,
+    /// Add a workspace
+    Add {
+        /// Workspace path
+        path: PathBuf,
+    },
+    /// Remove a workspace
+    Remove {
+        /// Workspace path
+        path: PathBuf,
     },
 }
 
@@ -123,6 +164,44 @@ struct Provider {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Project {
+    id: String,
+    path: PathBuf,
+    name: String,
+    is_active: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateProjectRequest {
+    path: PathBuf,
+    name: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ActiveRunsResponse {
+    runs: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkflowRunsResponse {
+    runs: Vec<WorkflowRunSummary>,
+    total: usize,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkflowRunSummary {
+    run_id: String,
+    workflow_id: String,
+    project_id: String,
+    status: String,
+}
+
+#[derive(Debug, Deserialize)]
 struct ModelListResponse {
     data: Vec<ModelObject>,
 }
@@ -173,6 +252,11 @@ async fn main() {
     let cli = Cli::parse();
 
     let result = match cli.command {
+        Commands::Start { port, foreground } => handle_start_command(port, foreground),
+        Commands::Stop => handle_stop_command(),
+        Commands::Status => handle_status_command(&cli.api_url).await,
+        Commands::Workflows { active } => handle_workflows_command(&cli.api_url, active).await,
+        Commands::Workspace { command } => handle_workspace_command(command, &cli.api_url).await,
         Commands::Provider { command } => handle_provider_command(command, &cli.api_url).await,
         Commands::Model { command } => handle_model_command(command, &cli.api_url).await,
         Commands::Config { command } => handle_config_command(command, &cli.api_url).await,
@@ -182,6 +266,145 @@ async fn main() {
         eprintln!("Error: {}", e);
         std::process::exit(1);
     }
+}
+
+fn handle_start_command(port: u16, foreground: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let manager = codepanion_daemon::daemon_manager::DaemonManager::new();
+    manager.start(port, foreground)?;
+    Ok(())
+}
+
+fn handle_stop_command() -> Result<(), Box<dyn std::error::Error>> {
+    let manager = codepanion_daemon::daemon_manager::DaemonManager::new();
+    manager.stop()?;
+    Ok(())
+}
+
+async fn handle_status_command(api_url: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let manager = codepanion_daemon::daemon_manager::DaemonManager::new();
+    let status = manager.status()?;
+
+    println!("Daemon status: {}", status);
+
+    // 如果 daemon 正在运行，尝试连接 API
+    if matches!(status, codepanion_daemon::daemon_manager::DaemonStatus::Running { .. }) {
+        let client = reqwest::Client::new();
+        let url = format!("{}/health", api_url);
+
+        match client.get(&url).send().await {
+            Ok(response) if response.status().is_success() => {
+                println!("API server: reachable at {}", api_url);
+            }
+            Ok(response) => {
+                println!("API server: unreachable (status: {})", response.status());
+            }
+            Err(e) => {
+                println!("API server: unreachable ({})", e);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_workflows_command(
+    api_url: &str,
+    active: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let client = reqwest::Client::new();
+
+    if active {
+        // 列出活跃的 workflow runs
+        let url = format!("{}/api/v1/workflows/active", api_url);
+        let response: ActiveRunsResponse = client.get(&url).send().await?.json().await?;
+
+        if response.runs.is_empty() {
+            println!("No active workflows.");
+        } else {
+            println!("Active workflows:");
+            for run_id in response.runs {
+                println!("  - {}", run_id);
+            }
+        }
+    } else {
+        // 列出所有 workflow runs
+        let url = format!("{}/workflow/runs", api_url);
+        let response: WorkflowRunsResponse = client.get(&url).send().await?.json().await?;
+
+        if response.runs.is_empty() {
+            println!("No workflows found.");
+        } else {
+            println!("{:<40} {:<30} {:<20} {:<15}", "RUN ID", "WORKFLOW ID", "PROJECT ID", "STATUS");
+            println!("{}", "-".repeat(105));
+            for run in response.runs {
+                println!(
+                    "{:<40} {:<30} {:<20} {:<15}",
+                    run.run_id, run.workflow_id, run.project_id, run.status
+                );
+            }
+            println!("\nTotal: {} workflows", response.total);
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_workspace_command(
+    command: WorkspaceCommands,
+    api_url: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let client = reqwest::Client::new();
+
+    match command {
+        WorkspaceCommands::List => {
+            let url = format!("{}/api/v1/projects", api_url);
+            let response: Vec<Project> = client.get(&url).send().await?.json().await?;
+
+            if response.is_empty() {
+                println!("No workspaces configured.");
+            } else {
+                println!("{:<40} {:<50} {:<15}", "ID", "PATH", "STATUS");
+                println!("{}", "-".repeat(105));
+                for project in response {
+                    println!(
+                        "{:<40} {:<50} {:<15}",
+                        project.id,
+                        project.path.display(),
+                        if project.is_active { "active" } else { "inactive" }
+                    );
+                }
+            }
+        }
+        WorkspaceCommands::Add { path } => {
+            let url = format!("{}/api/v1/projects", api_url);
+            let req = CreateProjectRequest {
+                path: path.clone(),
+                name: path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("workspace")
+                    .to_string(),
+            };
+            let _response: Project = client.post(&url).json(&req).send().await?.json().await?;
+            println!("✓ Added workspace: {}", path.display());
+        }
+        WorkspaceCommands::Remove { path } => {
+            // 先查找项目 ID
+            let url = format!("{}/api/v1/projects", api_url);
+            let projects: Vec<Project> = client.get(&url).send().await?.json().await?;
+
+            let project = projects
+                .iter()
+                .find(|p| p.path == path)
+                .ok_or_else(|| format!("Workspace not found: {}", path.display()))?;
+
+            let url = format!("{}/api/v1/projects/{}", api_url, project.id);
+            client.delete(&url).send().await?;
+            println!("✓ Removed workspace: {}", path.display());
+        }
+    }
+
+    Ok(())
 }
 
 async fn handle_provider_command(
