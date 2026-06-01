@@ -1,5 +1,6 @@
 pub mod routes;
 pub mod websocket;
+pub mod workflow_runner;
 
 use axum::{
     Router,
@@ -49,6 +50,7 @@ pub struct AppState {
     pub scheduler: Arc<RunScheduler>,
     pub orchestrator: Arc<std::sync::Mutex<CrossProjectOrchestrator>>,
     pub event_broadcaster: Arc<EventBroadcaster>,
+    pub workflow_runner: Arc<tokio::sync::Mutex<workflow_runner::WorkflowRunner>>,
 }
 
 pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::Error>> {
@@ -62,6 +64,16 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::
         broadcaster_clone.broadcast(event);
     }));
 
+    // Initialize workflow runner with default backend
+    let default_backend = codepanion_config::ModelBackendConfig {
+        id: "deepseek".to_string(),
+        base_url: "https://api.deepseek.com".to_string(),
+        model: "deepseek-chat".to_string(),
+    };
+    let workflow_runner = Arc::new(tokio::sync::Mutex::new(
+        workflow_runner::WorkflowRunner::new(default_backend),
+    ));
+
     // Initialize registries
     let state = AppState {
         project_registry: Arc::new(ProjectRegistry::new(config.projects_path)),
@@ -70,6 +82,7 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::
         scheduler: Arc::new(scheduler),
         orchestrator: Arc::new(std::sync::Mutex::new(CrossProjectOrchestrator::new())),
         event_broadcaster,
+        workflow_runner,
     };
 
     // Configure CORS
@@ -268,6 +281,27 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::
         .route(
             "/workflow/gates/:run_id/:step_id/resolve",
             post(routes::workflow::resolve_gate),
+        )
+        // Workflow execution API endpoints (D-02)
+        .route(
+            "/api/v1/workflows/execute",
+            post(routes::workflow_execution::execute_workflow),
+        )
+        .route(
+            "/api/v1/workflows/:run_id/cancel",
+            post(routes::workflow_execution::cancel_workflow),
+        )
+        .route(
+            "/api/v1/workflows/:run_id/pause",
+            post(routes::workflow_execution::pause_workflow),
+        )
+        .route(
+            "/api/v1/workflows/:run_id/resume",
+            post(routes::workflow_execution::resume_workflow),
+        )
+        .route(
+            "/api/v1/workflows/active",
+            get(routes::workflow_execution::list_active_workflows),
         )
         // WebSocket endpoint
         .route("/ws", get(websocket::websocket_handler))

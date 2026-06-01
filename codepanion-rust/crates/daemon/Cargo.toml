@@ -8,6 +8,8 @@ repository.workspace = true
 [dependencies]
 codepanion-shared = { path = "../shared" }
 codepanion-workflow-engine = { path = "../workflow-engine" }
+codepanion-agent-runtime = { path = "../agent-runtime" }
+codepanion-config = { path = "../config" }
 axum = { version = "0.7", features = ["ws"] }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }

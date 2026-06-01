@@ -994,13 +994,30 @@ Rust 目标指标：
   - [x] cargo clippy 通过（0 warnings）
   - [x] cargo fmt 通过
 
-- [ ] **D-02 Workflow 执行器**
+- [x] **D-02 Workflow 执行器**
   - 集成 P3 workflow engine（W-01 到 W-06）。
   - 集成 P2 agent runtime（A-01 到 A-07）。
   - 实现 fire-and-forget 续跑逻辑。
   - 支持 workflow 取消、暂停、恢复。
   - 实时输出推送到 WebSocket。
   - 验收：`WorkflowRunner` 集成 workflow engine 和 agent runtime；支持启动、取消、暂停、恢复 workflow；实时输出通过 WS 推送；测试覆盖完整 workflow 生命周期；与 TypeScript daemon 行为一致。
+  - **实现细节**：
+    - [x] 创建 `workflow_runner.rs` 模块
+    - [x] 实现 `AgentStepExecutor`（集成 agent runtime）
+    - [x] 实现 `WorkflowRunner`（管理后台执行）
+    - [x] 实现 `WorkflowRunnerEvent`（实时事件推送）
+    - [x] 添加 workflow execution HTTP 端点（`/api/v1/workflows/execute`, `/cancel`, `/pause`, `/resume`, `/active`）
+    - [x] 集成到 daemon AppState
+    - [x] 连接 WorkflowRunnerEvent 到 WebSocket broadcaster
+    - [x] 2 个单元测试（lifecycle, cancel）
+    - [x] cargo test 通过（216 tests）
+    - [x] cargo clippy 通过（0 warnings）
+  - **技术栈**：
+    - tokio spawn（fire-and-forget 后台执行）
+    - Arc<AtomicBool>（取消信号）
+    - tokio::sync::mpsc::unbounded_channel（事件流）
+    - AgentLoopRequest + run_agent_loop（agent 执行）
+    - WorkflowExecutor（workflow engine 集成）
 
 - [ ] **D-03 CLI 命令**
   - 使用 clap 实现 CLI 参数解析。

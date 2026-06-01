@@ -4,3 +4,4 @@ pub mod projects;
 pub mod providers;
 pub mod scheduler;
 pub mod workflow;
+pub mod workflow_execution;
