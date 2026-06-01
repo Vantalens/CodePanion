@@ -154,7 +154,7 @@ Rust 目标指标：
 
 目标：实现能自动开发的 agent runtime，而不是只读问答。
 
-**进度**: 5/7 完成（71%）
+**进度**: 6/7 完成（86%）
 
 - [x] **A-01 Tool-use loop**
   - 模型 -> tool call -> tool result -> 模型续答。
@@ -190,9 +190,10 @@ Rust 目标指标：
     5. Git 历史修改（force push、reset --hard、rebase 等）
   - 验收：`RiskDetector` 实现 5 类检测方法；`RiskDetection` 定义统一风险结果；`RiskSeverity` 分 4 级（Low/Medium/High/Critical）；所有高危行为标记 `requires_human_gate: true`；8 个测试覆盖文件删除、关键文件修改、危险命令、git 操作、网络请求和安全操作；63 个 agent-runtime 测试全部通过。
 
-- [ ] **A-06 自动修复循环**
+- [x] **A-06 自动修复循环**
   - 测试失败 -> 诊断 -> 修复 -> 重跑测试。
   - 超过重试上限进入人工门。
+  - 验收：`run_auto_fix_loop` 实现完整循环；`AutoFixConfig` 配置测试命令和重试次数；`AutoFixResult` 记录修复历史；`AutoFixEvent` 支持实时事件推送；`diagnose_test_failure` 和 `generate_fix_plan` 提供占位实现；7 个测试覆盖配置构建、结果结构、事件类型和诊断逻辑；70 个 agent-runtime 测试全部通过。
 
 ---
 

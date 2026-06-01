@@ -10,9 +10,11 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
+pub mod auto_fix;
 pub mod command;
 pub mod risk_detector;
 pub mod tools;
+pub use auto_fix::{AutoFixConfig, AutoFixEvent, AutoFixResult, FixAttempt, run_auto_fix_loop};
 pub use command::{CommandRequest, CommandResult, CommandRisk, CommandTools, classify_command};
 pub use risk_detector::{RiskDetection, RiskDetector, RiskSeverity, RiskType};
 pub use tools::{ReadonlyTools, WriteTools, ensure_path_inside};

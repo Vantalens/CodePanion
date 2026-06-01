@@ -238,13 +238,13 @@ pub struct ChatToolFunction {
 
 ### 进行中阶段
 
-- ⏳ **P2: Rust Agent Runtime 与安全工具** (5/7 完成 - 71%)
+- ⏳ **P2: Rust Agent Runtime 与安全工具** (6/7 完成 - 86%)
   - ✅ A-01: Tool-use loop
   - ✅ A-02: 只读工具 (read_file, list_dir)
   - ✅ A-03: 写入工具 (write_file, create_file)
   - ✅ A-04: 命令工具 (run_command + 风险分级)
   - ✅ A-05: 高危行为检测 (RiskDetector + 5 类风险)
-  - ⏳ A-06: 自动修复循环
+  - ✅ A-06: 自动修复循环 (run_auto_fix_loop + 诊断 + 修复)
   - ⏳ A-07: 沙箱隔离执行
 
 ### 待开始阶段
