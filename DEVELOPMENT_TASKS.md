@@ -86,7 +86,108 @@ CodePanion 核心定位（2026-06-01 更新）：
 
 ---
 
-### 阶段 3：多项目管理（规划中 📋）
+### 阶段 3：Rust 重构（规划中 🦀）
+
+**目标**：用 Rust 重构 CodePanion，实现轻量高性能的新 AI IDE
+
+**为什么要用 Rust 重构**：
+
+1. **性能目标**：Node.js daemon 难以达到 < 100MB 内存占用，Rust 可以实现更低的内存占用和更快的启动速度
+2. **轻量目标**：Node.js 运行时本身占用 ~50MB，Rust 编译为原生二进制，无运行时开销
+3. **核心功能纠正**：当前架构偏离了"轻量高性能"的目标，需要重新设计
+
+**Rust 性能目标**：
+
+- **内存占用**：daemon < 50MB（空闲）、运行 workflow < 300MB
+- **硬盘占用**：daemon 二进制 < 20MB、安装包 < 30MB、安装后 < 100MB
+- **启动时间**：daemon 冷启动 < 500ms、热启动 < 100ms
+- **执行延迟**：workflow 启动 < 50ms、step 执行 < 20ms、实时输出 < 5ms
+
+#### 3.0 技术验证（1-2 天）
+
+- [ ] **V-01** 创建 Rust 项目结构
+  - 使用 `cargo new codepanion-rust --bin`
+  - 设置 workspace（daemon、gui-bridge、shared）
+  - 配置 `Cargo.toml`（依赖、优化选项）
+
+- [ ] **V-02** 实现最小 HTTP 服务器
+  - 使用 `axum` 或 `actix-web`
+  - 实现 `/health` 端点
+  - 测试启动时间和内存占用
+
+- [ ] **V-03** 实现最小 WebSocket 服务器
+  - 实时推送测试
+  - 测试延迟和吞吐量
+
+- [ ] **V-04** 实现最小模型客户端
+  - 调用 OpenAI 兼容 API
+  - 流式响应处理
+  - 测试性能
+
+- [ ] **V-05** 性能基准测试
+  - 内存占用：目标 < 50MB（空闲）
+  - 启动时间：目标 < 500ms
+  - 二进制大小：目标 < 20MB
+
+#### 3.1 核心模块重构（3-5 天）
+
+- [ ] **M-01** 实现模型客户端（1 天）
+  - OpenAI 兼容 API 客户端
+  - 流式响应处理
+  - tool-use 支持
+
+- [ ] **A-01** 实现 Agent 运行时（2 天）
+  - tool-use 循环
+  - Agent 工具（read_file、list_dir、write_file、run_command）
+  - 高危行为检测
+
+- [ ] **W-01** 实现 Workflow 引擎（2 天）
+  - workflow 定义解析
+  - step 执行（shell / agent）
+  - 状态管理
+
+#### 3.2 HTTP/WebSocket 服务器（2-3 天）
+
+- [ ] **H-01** 实现 HTTP 路由（1 天）
+  - `/health`、`/workspace/*`、`/workflow/*`
+
+- [ ] **WS-01** 实现 WebSocket 服务器（1 天）
+  - 实时推送（workflow-run-event）
+
+- [ ] **C-01** 实现配置管理（0.5 天）
+  - 读取 `config.json`
+  - 解析模型配置
+
+#### 3.3 GUI 桥接（1-2 天）
+
+- [ ] **P-01** 实现 daemon 启动/停止（1 天）
+  - GUI 启动时自动启动 daemon
+  - GUI 关闭时停止 daemon
+
+- [ ] **C-02** 实现通信协议（1 天）
+  - C# HTTP 客户端
+  - C# WebSocket 客户端
+
+#### 3.4 数据迁移（1 天）
+
+- [ ] **D-01** 迁移 workspace 配置
+- [ ] **D-02** 迁移 workflow runs
+- [ ] **D-03** 迁移 artifacts
+
+#### 3.5 测试和优化（2-3 天）
+
+- [ ] **T-01** 单元测试（1 天）
+- [ ] **I-01** 集成测试（1 天）
+- [ ] **O-01** 性能优化（1 天）
+  - 内存优化、启动时间优化、二进制大小优化
+
+**预计总工作量**：76h（10-16 天）
+
+**详细计划**：[docs/RUST_REWRITE_PLAN.md](docs/RUST_REWRITE_PLAN.md)
+
+---
+
+### 阶段 4：多项目管理（规划中 📋）
 
 **目标**：实现在一个 IDE 内管理多个项目
 
