@@ -807,10 +807,52 @@ Rust 目标指标：
   - [x] 92/92 测试通过
   - [x] cargo clippy 通过
 
-- [ ] **M-05 全局视图 API**
-  - 全局 runs。
-  - 全局 gates。
-  - 全局任务队列。
+- [x] **M-05 全局视图 API** ✅
+  - **描述**: 实现全局视图 API，聚合所有项目的 runs、统计信息
+  
+  **核心功能**:
+  - 全局 runs 查询（跨所有项目）
+  - 按状态过滤（queued、running、completed）
+  - 全局统计信息（scheduler、projects、workflows）
+  - 聚合现有功能（scheduler + project_registry + orchestrator）
+  
+  **API 端点**:
+  ```
+  GET /api/v1/global/runs              # 所有 runs（跨项目）
+  GET /api/v1/global/runs/queued       # 所有队列中的 runs
+  GET /api/v1/global/runs/running      # 所有运行中的 runs
+  GET /api/v1/global/runs/completed    # 所有已完成的 runs
+  GET /api/v1/global/stats             # 全局统计信息
+  ```
+  
+  **响应格式**:
+  ```json
+  // GET /api/v1/global/runs
+  {
+    "runs": [...],
+    "total": 10
+  }
+  
+  // GET /api/v1/global/stats
+  {
+    "scheduler": {
+      "queuedCount": 5,
+      "runningCount": 3,
+      "completedCount": 10,
+      "maxConcurrentRuns": 3,
+      "maxQueueSize": 100
+    },
+    "totalProjects": 5,
+    "totalWorkflows": 12
+  }
+  ```
+  
+  **验收标准**:
+  - [x] 全局 runs API（5 个端点）
+  - [x] 聚合 scheduler、project_registry、orchestrator 数据
+  - [x] daemon 启动信息更新
+  - [x] 92/92 测试通过
+  - [x] cargo clippy 通过
 
 ---
 

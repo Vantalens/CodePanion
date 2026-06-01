@@ -228,6 +228,24 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::
             "/api/v1/orchestrator/workflows/:project_id/:workflow_id/has-dependencies",
             get(routes::orchestrator::has_dependencies),
         )
+        // Global view API endpoints
+        .route("/api/v1/global/runs", get(routes::global::get_global_runs))
+        .route(
+            "/api/v1/global/runs/queued",
+            get(routes::global::get_global_queued_runs),
+        )
+        .route(
+            "/api/v1/global/runs/running",
+            get(routes::global::get_global_running_runs),
+        )
+        .route(
+            "/api/v1/global/runs/completed",
+            get(routes::global::get_global_completed_runs),
+        )
+        .route(
+            "/api/v1/global/stats",
+            get(routes::global::get_global_stats),
+        )
         // OpenAI-compatible endpoints
         .route("/v1/models", get(routes::providers::list_all_models))
         .layer(cors)
@@ -248,6 +266,7 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::
     println!("  - Providers API: http://{}/api/v1/providers", addr);
     println!("  - Scheduler API: http://{}/api/v1/scheduler", addr);
     println!("  - Orchestrator API: http://{}/api/v1/orchestrator", addr);
+    println!("  - Global View API: http://{}/api/v1/global", addr);
     println!("  - Config Import: http://{}/api/v1/config/import", addr);
     println!("  - Models API: http://{}/v1/models", addr);
 
