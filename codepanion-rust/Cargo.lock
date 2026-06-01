@@ -176,6 +176,7 @@ version = "0.1.0"
 dependencies = [
  "codepanion-providers",
  "codepanion-shared",
+ "dirs",
  "regex",
  "serde",
  "serde_json",

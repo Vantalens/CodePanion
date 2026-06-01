@@ -22,6 +22,9 @@ pub mod model_provider;
 // M-02.2: Global configuration
 pub mod global_config;
 
+// M-02.3: Configuration import (CC Switch compatibility)
+pub mod config_import;
+
 pub use definition::{
     DefinitionStore, WorkflowArchitecture, WorkflowArtifactType, WorkflowContextPolicy,
     WorkflowDefinition, WorkflowPermission, WorkflowProvider, WorkflowStep,
@@ -47,7 +50,9 @@ pub use model_provider::{
     ProviderStatus, ProviderType,
 };
 
-pub use global_config::{GlobalConfig, GlobalConfigManager};
+pub use global_config::{GlobalConfig, GlobalConfigManager, ResolvedConfig};
+
+pub use config_import::{auto_import, import_ccm_config, import_claude_settings, ImportResult};
 
 // 旧的简化版本（保留用于向后兼容）
 use codepanion_providers::ProviderDefinition;

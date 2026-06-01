@@ -507,6 +507,79 @@ Rust 目标指标：
   - [x] cargo fmt + clippy + test 全部通过（66/66 tests）
   - [x] 文档更新
 
+- [x] **M-02.3 环境变量与配置导入（CC Switch 完整兼容）** ✅
+  - **描述**: 实现环境变量支持、分层配置优先级、CC Switch 配置导入
+  - **端口**: 复用 8318
+  - **API 版本**: `/api/v1`
+  
+  **核心功能**:
+  - 环境变量支持（`ANTHROPIC_*` 系列）
+  - 分层配置优先级（环境变量 > 文件配置 > 默认值）
+  - CC Switch 配置导入（`~/.ccm_config`）
+  - Claude Code 配置导入（`~/.claude/settings.json`）
+  - 自动检测和导入
+  
+  **支持的环境变量**:
+  - `ANTHROPIC_MODEL` - 覆盖默认模型
+  - `ANTHROPIC_BASE_URL` - API 端点 URL
+  - `ANTHROPIC_AUTH_TOKEN` - API 密钥
+  - `ANTHROPIC_DEFAULT_OPUS_MODEL` - Opus 别名映射
+  - `ANTHROPIC_DEFAULT_SONNET_MODEL` - Sonnet 别名映射
+  - `ANTHROPIC_DEFAULT_HAIKU_MODEL` - Haiku 别名映射
+  - `ANTHROPIC_EFFORT_LEVEL` - 努力级别（low/medium/high/xhigh/max）
+  
+  **新增端点**:
+  - `POST /api/v1/config/import` - 导入配置
+    - `source: "ccm"` - 导入 CC Switch 配置
+    - `source: "claude"` - 导入 Claude Code 配置
+    - `source: "auto"` - 自动检测并导入
+    - `filePath` (可选) - 自定义配置文件路径
+  
+  **配置优先级**:
+  ```
+  环境变量 (ANTHROPIC_*)
+    ↓ 覆盖
+  文件配置 (~/.codepanion/config.json)
+    ↓ 覆盖
+  默认值 (内置 Claude 别名)
+  ```
+  
+  **导入示例**:
+  ```bash
+  # 导入 CC Switch 配置
+  POST /api/v1/config/import
+  {
+    "source": "ccm",
+    "filePath": "~/.ccm_config"  // 可选
+  }
+  
+  # 导入 Claude Code 配置
+  POST /api/v1/config/import
+  {
+    "source": "claude",
+    "filePath": "~/.claude/settings.json"  // 可选
+  }
+  
+  # 自动检测并导入
+  POST /api/v1/config/import
+  {
+    "source": "auto"
+  }
+  ```
+  
+  **验收标准**:
+  - [x] 环境变量支持（7 个 ANTHROPIC_* 变量）
+  - [x] load_resolved() 方法（应用环境变量覆盖）
+  - [x] ResolvedConfig 结构（解析后的配置）
+  - [x] import_ccm_config() 函数
+  - [x] import_claude_settings() 函数
+  - [x] auto_import() 函数（自动检测）
+  - [x] POST /api/v1/config/import 端点
+  - [x] 配置合并逻辑（Claude settings 合并到现有配置）
+  - [x] 11 个单元测试（8 个环境变量 + 3 个导入）
+  - [x] cargo fmt + clippy + test 全部通过（77/77 tests）
+  - [x] 文档更新
+
 - [ ] **M-03 多 run scheduler**
   - 多 workflow 并行。
   - 全局队列。

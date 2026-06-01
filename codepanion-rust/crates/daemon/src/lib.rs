@@ -138,6 +138,11 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::
             "/api/v1/providers/active",
             get(routes::providers::get_active_provider),
         )
+        // Configuration import
+        .route(
+            "/api/v1/config/import",
+            post(routes::providers::import_config),
+        )
         // OpenAI-compatible endpoints
         .route("/v1/models", get(routes::providers::list_all_models))
         .layer(cors)
@@ -156,6 +161,7 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::
     println!("  - Health: http://{}/health", addr);
     println!("  - Projects API: http://{}/api/v1/projects", addr);
     println!("  - Providers API: http://{}/api/v1/providers", addr);
+    println!("  - Config Import: http://{}/api/v1/config/import", addr);
     println!("  - Models API: http://{}/v1/models", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;

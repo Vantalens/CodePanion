@@ -422,3 +422,115 @@ pub async fn list_all_models(
     }))
 }
 
+/// POST /api/v1/config/import - Import configuration from CC Switch or Claude Code
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportConfigRequest {
+    pub source: String, // "ccm" or "claude"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_path: Option<String>,
+}
+
+pub async fn import_config(
+    State(state): State<AppState>,
+    Json(req): Json<ImportConfigRequest>,
+) -> Result<Json<codepanion_workflow_engine::ImportResult>, ErrorResponse> {
+    use codepanion_workflow_engine::{import_ccm_config, import_claude_settings};
+    use std::path::PathBuf;
+
+    let result = match req.source.as_str() {
+        "ccm" => {
+            let path = if let Some(p) = req.file_path {
+                PathBuf::from(p)
+            } else {
+                dirs::home_dir()
+                    .ok_or_else(|| {
+                        ErrorResponse::internal_error("Failed to determine home directory".to_string())
+                    })?
+                    .join(".ccm_config")
+            };
+
+            let (providers, global_config) = import_ccm_config(&path).map_err(|e| {
+                ErrorResponse::invalid_request(format!("Failed to import CC Switch config: {}", e), None)
+            })?;
+
+            // Save global config
+            state.global_config.save(&global_config).map_err(|e| {
+                ErrorResponse::internal_error(format!("Failed to save global config: {}", e))
+            })?;
+
+            // TODO: Save providers to registry (need provider ID generation)
+            codepanion_workflow_engine::ImportResult {
+                providers_imported: providers.len(),
+                aliases_imported: global_config.model_aliases.len(),
+                env_vars_imported: global_config.env.len(),
+                active_provider: global_config.active_provider_id,
+            }
+        }
+        "claude" => {
+            let path = if let Some(p) = req.file_path {
+                PathBuf::from(p)
+            } else {
+                dirs::home_dir()
+                    .ok_or_else(|| {
+                        ErrorResponse::internal_error("Failed to determine home directory".to_string())
+                    })?
+                    .join(".claude")
+                    .join("settings.json")
+            };
+
+            let global_config = import_claude_settings(&path).map_err(|e| {
+                ErrorResponse::invalid_request(format!("Failed to import Claude Code settings: {}", e), None)
+            })?;
+
+            let aliases_count = global_config.model_aliases.len();
+            let env_count = global_config.env.len();
+
+            // Merge with existing config
+            let mut existing = state.global_config.load().map_err(|e| {
+                ErrorResponse::internal_error(format!("Failed to load global config: {}", e))
+            })?;
+
+            existing.model_aliases.extend(global_config.model_aliases);
+            existing.env.extend(global_config.env);
+            if global_config.default_model.is_some() {
+                existing.default_model = global_config.default_model;
+            }
+            if !global_config.available_models.is_empty() {
+                existing.available_models = global_config.available_models;
+            }
+            if global_config.effort_level.is_some() {
+                existing.effort_level = global_config.effort_level;
+            }
+
+            state.global_config.save(&existing).map_err(|e| {
+                ErrorResponse::internal_error(format!("Failed to save global config: {}", e))
+            })?;
+
+            codepanion_workflow_engine::ImportResult {
+                providers_imported: 0,
+                aliases_imported: aliases_count,
+                env_vars_imported: env_count,
+                active_provider: None,
+            }
+        }
+        "auto" => {
+            codepanion_workflow_engine::auto_import().map_err(|e| {
+                ErrorResponse::internal_error(format!("Failed to auto-import: {}", e))
+            })?
+        }
+        _ => {
+            return Err(ErrorResponse::invalid_request(
+                format!(
+                    "Invalid source: {}. Must be 'ccm', 'claude', or 'auto'",
+                    req.source
+                ),
+                Some("source".to_string()),
+            ));
+        }
+    };
+
+    Ok(Json(result))
+}
+
+

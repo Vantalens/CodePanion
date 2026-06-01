@@ -20,6 +20,18 @@ pub struct GlobalConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_model: Option<String>,
 
+    /// Environment variable overrides (CC Switch compatibility)
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub env: HashMap<String, String>,
+
+    /// Available models restriction (CC Switch availableModels)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub available_models: Vec<String>,
+
+    /// Effort level (CC Switch effortLevel)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effort_level: Option<String>,
+
     /// Configuration version
     #[serde(default = "default_version")]
     pub version: u32,
@@ -42,9 +54,22 @@ impl Default for GlobalConfig {
             active_provider_id: None,
             model_aliases,
             default_model: Some("opus".to_string()),
+            env: HashMap::new(),
+            available_models: Vec::new(),
+            effort_level: None,
             version: 1,
         }
     }
+}
+
+/// Resolved configuration with environment variable overrides applied
+#[derive(Debug, Clone)]
+pub struct ResolvedConfig {
+    pub active_provider_id: Option<String>,
+    pub model_aliases: HashMap<String, String>,
+    pub default_model: Option<String>,
+    pub available_models: Vec<String>,
+    pub effort_level: Option<String>,
 }
 
 /// Global configuration manager
@@ -159,6 +184,120 @@ impl GlobalConfigManager {
             Ok(None)
         }
     }
+
+    /// Load configuration with environment variable overrides applied
+    /// Priority: env vars > file config > defaults
+    pub fn load_resolved(&self) -> Result<ResolvedConfig> {
+        let mut config = self.load()?;
+
+        // Apply environment variable overrides (CC Switch compatibility)
+        // ANTHROPIC_MODEL overrides default_model
+        if let Ok(model) = std::env::var("ANTHROPIC_MODEL") {
+            config.default_model = Some(model);
+        }
+
+        // ANTHROPIC_DEFAULT_OPUS_MODEL overrides opus alias
+        if let Ok(model) = std::env::var("ANTHROPIC_DEFAULT_OPUS_MODEL") {
+            config.model_aliases.insert("opus".to_string(), model);
+        }
+
+        // ANTHROPIC_DEFAULT_SONNET_MODEL overrides sonnet alias
+        if let Ok(model) = std::env::var("ANTHROPIC_DEFAULT_SONNET_MODEL") {
+            config.model_aliases.insert("sonnet".to_string(), model);
+        }
+
+        // ANTHROPIC_DEFAULT_HAIKU_MODEL overrides haiku alias
+        if let Ok(model) = std::env::var("ANTHROPIC_DEFAULT_HAIKU_MODEL") {
+            config.model_aliases.insert("haiku".to_string(), model);
+        }
+
+        // ANTHROPIC_EFFORT_LEVEL overrides effort_level
+        if let Ok(level) = std::env::var("ANTHROPIC_EFFORT_LEVEL") {
+            config.effort_level = Some(level);
+        }
+
+        // Apply env overrides from config file
+        for (key, value) in &config.env {
+            unsafe {
+                std::env::set_var(key, value);
+            }
+        }
+
+        Ok(ResolvedConfig {
+            active_provider_id: config.active_provider_id,
+            model_aliases: config.model_aliases,
+            default_model: config.default_model,
+            available_models: config.available_models,
+            effort_level: config.effort_level,
+        })
+    }
+
+    /// Resolve model alias with environment variable overrides
+    pub fn resolve_model_alias_with_env(&self) -> Result<String> {
+        let resolved = self.load_resolved()?;
+
+        // Get default model from resolved config
+        let alias = resolved.default_model.as_deref().unwrap_or("opus");
+
+        // If it's an alias, resolve it
+        if let Some(model_id) = resolved.model_aliases.get(alias) {
+            return Ok(model_id.clone());
+        }
+
+        // Otherwise, return as-is
+        Ok(alias.to_string())
+    }
+
+    /// Get environment variable overrides for provider (CC Switch compatibility)
+    pub fn get_provider_env_overrides(&self) -> Result<HashMap<String, String>> {
+        let mut overrides = HashMap::new();
+
+        // Read from environment
+        if let Ok(base_url) = std::env::var("ANTHROPIC_BASE_URL") {
+            overrides.insert("ANTHROPIC_BASE_URL".to_string(), base_url);
+        }
+
+        if let Ok(auth_token) = std::env::var("ANTHROPIC_AUTH_TOKEN") {
+            overrides.insert("ANTHROPIC_AUTH_TOKEN".to_string(), auth_token);
+        }
+
+        if let Ok(model) = std::env::var("ANTHROPIC_MODEL") {
+            overrides.insert("ANTHROPIC_MODEL".to_string(), model);
+        }
+
+        Ok(overrides)
+    }
+
+    /// Set environment variable override in config
+    pub fn set_env_override(&self, key: &str, value: &str) -> Result<()> {
+        let mut config = self.load()?;
+        config.env.insert(key.to_string(), value.to_string());
+        self.save(&config)
+    }
+
+    /// Remove environment variable override from config
+    pub fn remove_env_override(&self, key: &str) -> Result<bool> {
+        let mut config = self.load()?;
+        let removed = config.env.remove(key).is_some();
+        if removed {
+            self.save(&config)?;
+        }
+        Ok(removed)
+    }
+
+    /// Set available models restriction
+    pub fn set_available_models(&self, models: Vec<String>) -> Result<()> {
+        let mut config = self.load()?;
+        config.available_models = models;
+        self.save(&config)
+    }
+
+    /// Set effort level
+    pub fn set_effort_level(&self, level: &str) -> Result<()> {
+        let mut config = self.load()?;
+        config.effort_level = Some(level.to_string());
+        self.save(&config)
+    }
 }
 
 #[cfg(test)]
@@ -258,6 +397,122 @@ mod tests {
 
             let resolved = manager.resolve_model_alias("custom").unwrap();
             assert_eq!(resolved, "custom-model");
+        }
+    }
+
+    #[test]
+    fn test_env_override_model() {
+        let (_dir, manager) = temp_config();
+
+        // Set env var
+        unsafe {
+            std::env::set_var("ANTHROPIC_MODEL", "gpt-4");
+        }
+
+        let resolved = manager.load_resolved().unwrap();
+        assert_eq!(resolved.default_model, Some("gpt-4".to_string()));
+
+        // Clean up
+        unsafe {
+            std::env::remove_var("ANTHROPIC_MODEL");
+        }
+    }
+
+    #[test]
+    fn test_env_override_aliases() {
+        let (_dir, manager) = temp_config();
+
+        // Set env vars for aliases
+        unsafe {
+            std::env::set_var("ANTHROPIC_DEFAULT_OPUS_MODEL", "claude-opus-5");
+            std::env::set_var("ANTHROPIC_DEFAULT_SONNET_MODEL", "claude-sonnet-5");
+        }
+
+        let resolved = manager.load_resolved().unwrap();
+        assert_eq!(resolved.model_aliases.get("opus"), Some(&"claude-opus-5".to_string()));
+        assert_eq!(resolved.model_aliases.get("sonnet"), Some(&"claude-sonnet-5".to_string()));
+
+        // Clean up
+        unsafe {
+            std::env::remove_var("ANTHROPIC_DEFAULT_OPUS_MODEL");
+            std::env::remove_var("ANTHROPIC_DEFAULT_SONNET_MODEL");
+        }
+    }
+
+    #[test]
+    fn test_env_override_effort_level() {
+        let (_dir, manager) = temp_config();
+
+        unsafe {
+            std::env::set_var("ANTHROPIC_EFFORT_LEVEL", "xhigh");
+        }
+
+        let resolved = manager.load_resolved().unwrap();
+        assert_eq!(resolved.effort_level, Some("xhigh".to_string()));
+
+        unsafe {
+            std::env::remove_var("ANTHROPIC_EFFORT_LEVEL");
+        }
+    }
+
+    #[test]
+    fn test_set_env_override() {
+        let (_dir, manager) = temp_config();
+
+        manager.set_env_override("ANTHROPIC_BASE_URL", "https://custom.api.com").unwrap();
+
+        let config = manager.load().unwrap();
+        assert_eq!(config.env.get("ANTHROPIC_BASE_URL"), Some(&"https://custom.api.com".to_string()));
+    }
+
+    #[test]
+    fn test_remove_env_override() {
+        let (_dir, manager) = temp_config();
+
+        manager.set_env_override("TEST_VAR", "test-value").unwrap();
+        let removed = manager.remove_env_override("TEST_VAR").unwrap();
+        assert!(removed);
+
+        let config = manager.load().unwrap();
+        assert!(config.env.get("TEST_VAR").is_none());
+    }
+
+    #[test]
+    fn test_set_available_models() {
+        let (_dir, manager) = temp_config();
+
+        manager.set_available_models(vec!["opus".to_string(), "sonnet".to_string()]).unwrap();
+
+        let config = manager.load().unwrap();
+        assert_eq!(config.available_models, vec!["opus", "sonnet"]);
+    }
+
+    #[test]
+    fn test_set_effort_level() {
+        let (_dir, manager) = temp_config();
+
+        manager.set_effort_level("high").unwrap();
+
+        let config = manager.load().unwrap();
+        assert_eq!(config.effort_level, Some("high".to_string()));
+    }
+
+    #[test]
+    fn test_get_provider_env_overrides() {
+        let (_dir, manager) = temp_config();
+
+        unsafe {
+            std::env::set_var("ANTHROPIC_BASE_URL", "https://test.api.com");
+            std::env::set_var("ANTHROPIC_AUTH_TOKEN", "sk-test-123");
+        }
+
+        let overrides = manager.get_provider_env_overrides().unwrap();
+        assert_eq!(overrides.get("ANTHROPIC_BASE_URL"), Some(&"https://test.api.com".to_string()));
+        assert_eq!(overrides.get("ANTHROPIC_AUTH_TOKEN"), Some(&"sk-test-123".to_string()));
+
+        unsafe {
+            std::env::remove_var("ANTHROPIC_BASE_URL");
+            std::env::remove_var("ANTHROPIC_AUTH_TOKEN");
         }
     }
 }
