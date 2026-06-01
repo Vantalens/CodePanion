@@ -17,23 +17,21 @@
 
 ## 当前产品标准
 
-> **本地优先、供应商中立、面向个人开发者的 Agent AI IDE + AI 工作流控制台。**
+> **CodePanion 是一个新的 AI IDE**，专为个人开发者设计，用于管理多项目的 AI 驱动开发流程。
 
-CodePanion 核心定位：
+CodePanion 核心定位（2026-06-01 更新）：
 
-1. **个人 Agent AI IDE**：一切在 CodePanion 内进行
-2. **模型走外部 API**：DeepSeek 等 OpenAI 兼容后端
-3. **agent 架构靠逆向**：Claude Code 等工具的架构在进程内复刻
-4. **不 shell 外部 CLI**：不把任务派给外部工具
-5. **不用插件**：不依赖 VS Code 等 IDE 插件
-6. **不监听外部 IDE**：不监听外部窗口、进程或会话
+1. **新的 AI IDE**：不是代码编辑器，而是管理多项目、编排 workflow、调用 AI 能力的 IDE
+2. **调用外部 agentic coding tool**：通过逆向接口或 API 调用 Codex、Claude Code、OpenCode 等
+3. **用户自行提供 API**：支持用户配置自己的模型 API（DeepSeek、OpenAI、Claude、本地模型等）
+4. **多项目同步开发管理**：在一个 IDE 内管理多个项目的 workflow
+5. **本地工作流控制台**：任务拆分、角色分工、人工审核、产出归档
 
-执行模型：**architecture（进程内 harness）× model（外部 API）两轴**
+执行模型：**architecture（进程内 harness）× model（用户配置的 API）两轴**
 
 - `architecture=shell`：spawn 本地命令（测试、构建等非 AI 步骤）
-- `architecture=agent`：进程内 agent 运行时调模型 API（逆向自 Claude Code）
-  - single-call：无工具权限时，调一次模型即返回
-  - tool-use 循环：有 `permissions=read` 时，agent 可多轮调用只读工具
+- `architecture=agent`：进程内 agent 运行时（逆向自 Claude Code，支持 tool-use 循环）
+- `model`：用户在 config.json 中配置的模型 API（DeepSeek、OpenAI、Claude、本地模型等）
 
 ---
 
@@ -45,76 +43,201 @@ CodePanion 核心定位：
 
 - [x] **R-01** 删除 adapter-sdk 包（监听路线残留）
 - [x] **R-02** 清理 protocol.ts 中的监听外部 IDE 的 schema
-  - 删除：`RegisterSourceRequest`、`MonitorEvent`、`MonitorSource`、`SourceKind`、`HandoffTarget`、`WorkflowItem`、`WorkflowThread`、`LaunchHandoff`、`RegisterSession`、`SessionOutput`、`SessionPrompt`、`Reply`、`SessionExit`、`SessionInfo`
-  - 保留：`NotifyRequest`、`InitializeWorkspaceRequest`、`ResolveWorkflowGateRequest`、`StartWorkflowRunRequest`、`WsServerEvent`（简化为 3 种）
 - [x] **R-03** 确认 agent 架构完全走进程内
-  - 验证执行路线：workflow → daemon → agentRuntime → modelClient API
-  - 验证 `resolveStepArchitecture`：`provider=local→shell`，其余→`agent`
-  - 验证 `daemonAgentExecutor`：读 role prompt、解析 model、构建工具、调 `runAgentLoop`
-  - 验证 `runAgentLoop`：tool-use 循环、maxTurns 封顶、实时推送
-  - 验证 `chatCompletion`：fetch OpenAI 兼容 API
 - [x] **R-04** 构建和测试验证
-  - 构建成功
-  - 核心测试全部通过
-  - daemon bundle 生成成功 (1.8mb)
 - [x] **R-05** 文档记录：[docs/ARCHITECTURE_CLEANUP.md](docs/ARCHITECTURE_CLEANUP.md)
 
 **成果**：
 - ✅ adapter-sdk 已删除
 - ✅ protocol.ts 已清理监听 schema
 - ✅ agent 架构确认完全走进程内
-- ✅ 执行路线验证通过
+- ✅ 执行路线验证通过：workflow → daemon → agentRuntime → modelClient API
 - ✅ 测试全部通过
 
 ---
 
-### 阶段 2：文档清理（进行中 📝）
+### 阶段 2：定位更新（已完成 ✅）
 
-**目标**：清理所有文档中的监听路线残留，统一到工作流路线
+**目标**：更新产品定位为"新的 AI IDE"
 
-#### 2.1 核心文档清理
+- [x] **R-10** 更新 [docs/POSITIONING.md](docs/POSITIONING.md)
+  - 明确 CodePanion 是一个新的 AI IDE
+  - 强调调用外部 agentic coding tool
+  - 强调用户自行提供 API
+  - 强调多项目同步开发管理
 
-- [ ] **R-10** 清理 [docs/POSITIONING.md](docs/POSITIONING.md)
-  - 移除监听路线、handoff、外部 IDE 集成的描述
-  - 强化工作流路线、进程内 agent、两轴执行模型
-  
-- [ ] **R-11** 清理 [docs/PRODUCT_ROADMAP.md](docs/PRODUCT_ROADMAP.md)
-  - 移除监听来源、适配器、handoff 的路线图
-  - 更新为工作流路线的迭代计划
+- [x] **R-11** 更新 [README.md](README.md)
+  - 更新核心特点
+  - 更新产品边界
+  - 更新目标用户
 
-- [ ] **R-12** 清理 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-  - 移除 SourceManager、Adapter、HandoffRunner 的架构描述
-  - 更新为 workflow → daemon → agentRuntime → modelClient 的架构
-  - 补充两轴执行模型的详细说明
-
-- [ ] **R-13** 清理 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
-  - 移除监听路线的开发指南
-  - 更新为工作流路线的开发指南
-
-- [ ] **R-14** 清理 [docs/API.md](docs/API.md)
-  - 移除 `/sources`、`/events`、`/handoff`、`/sessions` 等旧端点
-  - 只保留工作流路线的端点：`/workflow/board`、`/workflow/runs`、`/workflow/gates`、`/workspace/initialize`、`/workspace/config`
-
-#### 2.2 辅助文档清理
-
-- [ ] **R-15** 清理 [docs/README.md](docs/README.md)
-  - 更新文档索引，移除监听路线相关文档
-
-- [ ] **R-16** 清理 [docs/RETENTION.md](docs/RETENTION.md)
-  - 移除监听路线的保留说明
-
-- [ ] **R-17** 检查并清理 [docs/superpowers/](docs/superpowers/) 目录
-  - 移除监听路线相关的计划文档
+**成果**：
+- ✅ 定位明确：CodePanion 是一个新的 AI IDE
+- ✅ 核心特点明确：调用外部 agentic tool + 用户自行提供 API + 多项目管理
+- ✅ 产品边界明确：不是代码编辑器，是 AI IDE
 
 ---
 
-### 阶段 3：GUI 重构（待规划 🔮）
+### 阶段 3：多项目管理（规划中 📋）
 
-**目标**：GUI 从监听式会话流转向工作流控制台
+**目标**：实现在一个 IDE 内管理多个项目
 
-#### 3.1 GUI 架构重构
+#### 3.1 多项目架构设计
 
-- [ ] **R-20** 删除旧的监听式 GUI 代码
+- [ ] **M-01** 设计多项目数据模型
+  - 项目列表存储（`~/.codepanion/projects.json`）
+  - 项目元数据（名称、路径、最近打开时间、标签、描述）
+  - 当前活跃项目（GUI 状态）
+
+- [ ] **M-02** 设计跨项目 workflow 编排
+  - 跨项目任务依赖（项目 A 的 workflow 依赖项目 B 的产出）
+  - 跨项目资源共享（共享的 role 配置、模板、工具）
+  - 跨项目并行执行（同时运行多个项目的 workflow）
+
+#### 3.2 daemon 端实现
+
+- [ ] **M-10** 实现项目管理端点
+  - `POST /projects` - 添加项目
+  - `GET /projects` - 列出所有项目
+  - `GET /projects/:id` - 获取项目详情
+  - `PUT /projects/:id` - 更新项目信息
+  - `DELETE /projects/:id` - 删除项目
+  - `POST /projects/:id/activate` - 激活项目（设为当前项目）
+
+- [ ] **M-11** 实现跨项目 workflow 编排
+  - 支持 workflow 声明跨项目依赖
+  - 支持跨项目的 artifact 引用
+  - 支持跨项目的并行执行
+
+- [ ] **M-12** 实现项目级资源管理
+  - 共享 role 配置库
+  - 共享 workflow 模板库
+  - 共享工具配置
+
+#### 3.3 GUI 实现
+
+- [ ] **M-20** 实现项目列表 UI
+  - 左侧边栏：项目列表
+  - 项目卡片：名称、路径、最近打开时间、标签
+  - 项目搜索和筛选
+  - 项目添加/删除/编辑
+
+- [ ] **M-21** 实现项目切换
+  - 点击项目卡片切换当前项目
+  - 切换后自动加载该项目的 workspace、workflow、runs
+  - 保留上一个项目的状态（下次切换回来时恢复）
+
+- [ ] **M-22** 实现跨项目视图
+  - 全局 workflow 看板（所有项目的 runs）
+  - 全局人工审核门（所有项目的 gates）
+  - 全局队列视图（所有项目的任务）
+
+---
+
+### 阶段 4：调用外部 agentic coding tool（规划中 📋）
+
+**目标**：通过逆向接口或 API 调用外部 AI 编程工具
+
+#### 4.1 逆向接口设计
+
+- [ ] **A-01** 研究 Claude Code 的 agent 架构
+  - 分析 Claude Code 的 tool-use 循环
+  - 分析 Claude Code 的文件操作工具
+  - 分析 Claude Code 的命令执行工具
+  - 分析 Claude Code 的上下文管理策略
+
+- [ ] **A-02** 研究 Codex 的 agent 架构
+  - 分析 Codex 的 agent 模式
+  - 分析 Codex 的工具集
+  - 分析 Codex 的权限控制
+
+- [ ] **A-03** 研究 OpenCode 的 agent 架构
+  - 分析 OpenCode 的 agent 管理模式
+  - 分析 OpenCode 的角色权限
+  - 分析 OpenCode 的任务委派
+
+#### 4.2 agent 架构实现
+
+- [ ] **A-10** 扩展 agent 工具集（基于 Claude Code）
+  - `write_file`：写文件（`permissions=write` 门控）
+  - `run_command`：执行命令（`permissions=command` 门控）
+  - `search_files`：搜索文件（基于 glob 或 ripgrep）
+  - `apply_diff`：应用 diff（基于 unified diff 格式）
+
+- [ ] **A-11** 实现 contextPolicy 强制
+  - `maxTokens`：限制上下文预算
+  - `include` / `exclude`：过滤可读取文件
+  - 上下文自动压缩（超出预算时）
+
+- [ ] **A-12** 实现 agent 权限控制
+  - `read`：只读文件工具
+  - `write`：写文件工具
+  - `command`：执行命令工具
+  - `network`：网络访问工具
+  - `delegate`：委派任务给其他 agent
+
+#### 4.3 API 调用实现
+
+- [ ] **A-20** 实现 Codex API 调用（如果 Codex 提供 API）
+  - 研究 Codex API 文档
+  - 实现 Codex API 客户端
+  - 在 workflow 中集成 Codex API
+
+- [ ] **A-21** 实现 Claude Code API 调用（如果 Claude Code 提供 API）
+  - 研究 Claude Code API 文档
+  - 实现 Claude Code API 客户端
+  - 在 workflow 中集成 Claude Code API
+
+- [ ] **A-22** 实现 OpenCode API 调用（如果 OpenCode 提供 API）
+  - 研究 OpenCode API 文档
+  - 实现 OpenCode API 客户端
+  - 在 workflow 中集成 OpenCode API
+
+---
+
+### 阶段 5：用户自行提供 API（部分完成 ✅）
+
+**目标**：支持用户配置自己的模型 API
+
+#### 5.1 已完成
+
+- [x] **U-01** 实现 config.json 模型配置
+  - `models`：模型后端配置（baseURL、apiKey、model、temperature、maxTokens）
+  - `defaultModel`：默认模型
+  - `agent.maxTurns`：agent 最大轮数
+
+- [x] **U-02** 实现 modelClient（OpenAI 兼容）
+  - 支持 DeepSeek、OpenAI、Claude（通过 OpenAI 兼容层）
+  - 支持 tool-use（function calling）
+  - 支持 AbortSignal（run cancel）
+
+#### 5.2 待完成
+
+- [ ] **U-10** GUI 实现模型配置编辑
+  - 模型列表展示
+  - 添加/删除/编辑模型后端
+  - 测试模型连接
+  - 设置默认模型
+
+- [ ] **U-11** 支持更多模型 API
+  - 本地模型（Ollama、LM Studio）
+  - 国产模型（通义千问、文心一言、智谱 AI）
+  - 自定义 API（用户自己部署的模型服务）
+
+- [ ] **U-12** 实现模型使用统计
+  - 记录每个模型的调用次数、token 消耗
+  - 展示模型使用统计（按项目、按 workflow、按时间）
+  - 导出统计报告
+
+---
+
+### 阶段 6：GUI 重构（规划中 📋）
+
+**目标**：GUI 从监听式会话流转向 AI IDE
+
+#### 6.1 删除旧代码
+
+- [ ] **G-01** 删除旧的监听式 GUI 代码
   - 删除 VS Code 插件面板相关代码
   - 删除来源分组任务队列
   - 删除会话流 UI
@@ -122,53 +245,64 @@ CodePanion 核心定位：
   - 删除收件箱
   - 删除 session 回复 omnibar
 
-- [ ] **R-21** 实现工作流控制台 GUI
-  - 顶栏：workspace 选择条 + 连接状态
-  - 左栏：workflow 定义列表 + 近期 runs + 人工审核门
-  - 中栏：run 时间线（steps 顺序 + 状态 + 实时输出）
-  - 右栏：详情（artifacts、delivery、role/model/permission）
+#### 6.2 实现新 GUI（AI IDE）
 
-#### 3.2 GUI 协议清理
+- [ ] **G-10** 实现顶栏
+  - 项目选择器（当前项目 + 最近项目列表）
+  - 全局搜索（跨项目搜索 workflow、runs、artifacts）
+  - 连接状态（daemon 连接状态）
+  - 用户设置（模型配置、主题、语言）
 
-- [ ] **R-22** 清理 webview ↔ host 协议
-  - 移除：`reply`、`event-reply`、`task-action`、`handoff-launch`
-  - 保留：`request-workflow-board`、`request-workflow-run`、`request-workflow-launch`、`request-gate-resolve`、`request-run-cancel`、`request-delivery`、`set-workspace`
+- [ ] **G-11** 实现左侧边栏
+  - 项目列表（所有项目 + 添加项目按钮）
+  - workflow 定义列表（当前项目的 workflows）
+  - 近期 runs（当前项目的最近 runs）
+  - 人工审核门（当前项目的 paused gates）
 
-- [ ] **R-23** 实现 WebSocket 实时更新
-  - 接收 `workflow-run-event`（run-start、step-start、step-output、step-finish、run-finish）
-  - 实时更新 run 时间线
-  - 实时滚动 step-output
+- [ ] **G-12** 实现中央区域
+  - run 时间线（steps 顺序 + 状态染色 + 实时输出）
+  - step 详情（command、args、exitCode、stdout、stderr）
+  - 实时滚动（step-output 实时追加）
+
+- [ ] **G-13** 实现右侧边栏
+  - artifacts 列表（plan、patch-summary、test-result、review-report、delivery-note）
+  - delivery 复制（markdown / handoff 格式）
+  - role/model/permission 展示
+  - contextPolicy 展示
+
+- [ ] **G-14** 实现人工审核门决策面板
+  - approve / reject / retry 按钮
+  - constraints 输入（多行文本）
+  - message 输入（可选）
+  - 决策历史展示
+
+#### 6.3 实现 WebSocket 实时更新
+
+- [ ] **G-20** 实现 WebSocket 连接
+  - 连接 daemon `/ws`
+  - 处理 `hello`、`notification`、`workflow-run-event`
+  - 断线重连
+
+- [ ] **G-21** 实现 run 实时更新
+  - `run-start`：创建 run 卡片
+  - `step-start`：添加 step 到时间线
+  - `step-output`：实时追加输出
+  - `step-finish`：更新 step 状态
+  - `run-finish`：更新 run 状态，拉取 artifacts
 
 ---
 
-### 阶段 4：功能完善（待规划 🔮）
+### 阶段 7：文档清理（待规划 📋）
 
-**目标**：完善工作流路线的核心功能
+**目标**：清理所有文档中的监听路线残留
 
-#### 4.1 Agent 工具扩展
-
-- [ ] **R-30** 实现写工具（slice 2b）
-  - `write_file`：`permissions=write` 门控，cwd 钳 workspace
-  - `run_command`：`permissions=command` 门控，Windows batch-arg 防护
-
-- [ ] **R-31** 实现 contextPolicy 强制
-  - `maxTokens`：限制上下文预算
-  - `include` / `exclude`：过滤可读取文件
-
-#### 4.2 GUI 功能完善
-
-- [ ] **R-32** 实现队列视图
-  - 可筛选的状态队列：等待我、失败、需审阅、运行中、完成
-  - 状态挂到 workflow 节点和 artifact
-
-- [ ] **R-33** 实现 role/model/permission 展示
-  - daemon 暴露 workspace roleBindings 给 board
-  - GUI 展示 role 绑定的 model、prompt、permissions、contextPolicy
-
-- [ ] **R-34** 实现 architecture/model 编辑
-  - GUI 选择 step 的 architecture（shell / agent）
-  - GUI 选择 step 的 model
-  - GUI 编辑 config.json 的 models 后端
+- [ ] **D-01** 清理 [docs/PRODUCT_ROADMAP.md](docs/PRODUCT_ROADMAP.md)
+- [ ] **D-02** 清理 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- [ ] **D-03** 清理 [docs/API.md](docs/API.md)
+- [ ] **D-04** 清理 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
+- [ ] **D-05** 清理 [docs/README.md](docs/README.md)
+- [ ] **D-06** 清理 [docs/RETENTION.md](docs/RETENTION.md)
+- [ ] **D-07** 检查并清理 [docs/superpowers/](docs/superpowers/) 目录
 
 ---
 
@@ -183,7 +317,18 @@ CodePanion 核心定位：
    - 执行路线验证通过
    - 测试全部通过
 
-2. **核心功能**（P1-P3）
+2. **定位更新**（阶段 2）
+   - 明确 CodePanion 是一个新的 AI IDE
+   - 强调调用外部 agentic coding tool
+   - 强调用户自行提供 API
+   - 强调多项目同步开发管理
+
+3. **用户自行提供 API**（阶段 5 部分）
+   - config.json 模型配置
+   - modelClient（OpenAI 兼容）
+   - 支持 DeepSeek、OpenAI、Claude
+
+4. **核心功能**
    - workspace 级配置目录
    - workflow definition schema 扩展
    - 内置角色模板
@@ -194,30 +339,28 @@ CodePanion 核心定位：
    - single-call agent
    - tool-use 循环（只读）
 
-3. **GUI 基础**（W-20/W-21 部分）
-   - 工作流控制台基础布局
-   - run 时间线实时更新
-   - artifacts 和 delivery 展示
+### 待完成 📋
 
-### 进行中 📝
+1. **多项目管理**（阶段 3）
+   - 项目列表、项目切换、跨项目编排
 
-1. **文档清理**（阶段 2）
-   - 需要清理所有文档中的监听路线残留
+2. **调用外部 agentic coding tool**（阶段 4）
+   - 逆向 Claude Code、Codex、OpenCode 的 agent 架构
+   - 扩展 agent 工具集（write_file、run_command、search_files、apply_diff）
+   - 实现 API 调用（如果外部工具提供 API）
 
-2. **GUI 完善**（W-22/W-23 部分）
-   - role/model/permission 展示
-   - 队列视图
+3. **用户自行提供 API**（阶段 5 剩余）
+   - GUI 模型配置编辑
+   - 支持更多模型 API（本地模型、国产模型、自定义 API）
+   - 模型使用统计
 
-### 待规划 🔮
-
-1. **GUI 重构**（阶段 3）
+4. **GUI 重构**（阶段 6）
    - 删除旧的监听式 GUI 代码
-   - 实现完整的工作流控制台
+   - 实现新的 AI IDE GUI
+   - 实现 WebSocket 实时更新
 
-2. **功能完善**（阶段 4）
-   - 写工具（write_file / run_command）
-   - contextPolicy 强制
-   - architecture/model 编辑
+5. **文档清理**（阶段 7）
+   - 清理所有文档中的监听路线残留
 
 ---
 
@@ -231,26 +374,45 @@ CodePanion 核心定位：
 - [x] 构建成功
 - [x] 核心测试全部通过
 
-### 阶段 2：文档清理
+### 阶段 2：定位更新 ✅
 
-- [ ] 所有文档中无监听路线、handoff、外部 IDE 集成的描述
-- [ ] 所有文档统一到工作流路线
-- [ ] API 文档只包含工作流路线的端点
+- [x] POSITIONING.md 明确 CodePanion 是新的 AI IDE
+- [x] README.md 更新核心特点和产品边界
+- [x] 强调调用外部 agentic tool + 用户自行提供 API + 多项目管理
 
-### 阶段 3：GUI 重构
+### 阶段 3：多项目管理
+
+- [ ] 项目列表 UI 实现
+- [ ] 项目切换功能实现
+- [ ] 跨项目 workflow 编排实现
+- [ ] 跨项目视图实现
+
+### 阶段 4：调用外部 agentic coding tool
+
+- [ ] 逆向 Claude Code 等工具的 agent 架构
+- [ ] 扩展 agent 工具集实现并测试通过
+- [ ] API 调用实现（如果外部工具提供 API）
+
+### 阶段 5：用户自行提供 API
+
+- [x] config.json 模型配置实现
+- [x] modelClient（OpenAI 兼容）实现
+- [ ] GUI 模型配置编辑实现
+- [ ] 支持更多模型 API
+- [ ] 模型使用统计实现
+
+### 阶段 6：GUI 重构
 
 - [ ] 旧的监听式 GUI 代码已删除
-- [ ] 工作流控制台 GUI 实现完整
-- [ ] webview ↔ host 协议清理完成
+- [ ] 新的 AI IDE GUI 实现完整
 - [ ] WebSocket 实时更新正常工作
+- [ ] 所有核心流程测试通过
 
-### 阶段 4：功能完善
+### 阶段 7：文档清理
 
-- [ ] 写工具实现并测试通过
-- [ ] contextPolicy 强制实现并测试通过
-- [ ] 队列视图实现
-- [ ] role/model/permission 展示实现
-- [ ] architecture/model 编辑实现
+- [ ] 所有文档中无监听路线残留
+- [ ] 所有文档统一到 AI IDE 定位
+- [ ] API 文档只包含工作流路线的端点
 
 ---
 
@@ -260,4 +422,5 @@ CodePanion 核心定位：
 - [docs/LOCAL_AI_WORKFLOW.md](docs/LOCAL_AI_WORKFLOW.md) - 工作流设计
 - [docs/PRODUCT_ROADMAP.md](docs/PRODUCT_ROADMAP.md) - 产品路线图
 - [docs/ARCHITECTURE_CLEANUP.md](docs/ARCHITECTURE_CLEANUP.md) - 架构清理记录
+- [docs/REFACTORING_PLAN.md](docs/REFACTORING_PLAN.md) - 重构计划
 - [README.md](README.md) - 项目说明
