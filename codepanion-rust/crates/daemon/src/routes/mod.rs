@@ -3,3 +3,4 @@ pub mod providers;
 pub mod scheduler;
 pub mod orchestrator;
 pub mod global;
+pub mod workflow;

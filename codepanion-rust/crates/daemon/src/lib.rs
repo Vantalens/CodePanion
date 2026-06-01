@@ -246,6 +246,26 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::
             "/api/v1/global/stats",
             get(routes::global::get_global_stats),
         )
+        // Workflow API endpoints (legacy compatibility)
+        .route("/workflow/board", get(routes::workflow::get_workflow_board))
+        .route("/workflow/runs", get(routes::workflow::get_workflow_runs))
+        .route(
+            "/workflow/runs/:id",
+            get(routes::workflow::get_workflow_run),
+        )
+        .route(
+            "/workflow/runs/:id/artifacts",
+            get(routes::workflow::get_run_artifacts),
+        )
+        .route(
+            "/workflow/runs/:id/delivery",
+            get(routes::workflow::get_run_delivery),
+        )
+        .route("/workflow/gates", get(routes::workflow::get_workflow_gates))
+        .route(
+            "/workflow/gates/:run_id/:step_id/resolve",
+            post(routes::workflow::resolve_gate),
+        )
         // OpenAI-compatible endpoints
         .route("/v1/models", get(routes::providers::list_all_models))
         .layer(cors)
@@ -267,6 +287,7 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::
     println!("  - Scheduler API: http://{}/api/v1/scheduler", addr);
     println!("  - Orchestrator API: http://{}/api/v1/orchestrator", addr);
     println!("  - Global View API: http://{}/api/v1/global", addr);
+    println!("  - Workflow API: http://{}/workflow", addr);
     println!("  - Config Import: http://{}/api/v1/config/import", addr);
     println!("  - Models API: http://{}/v1/models", addr);
 

@@ -242,6 +242,38 @@ Rust 目标指标：
     - `workflow-run-event` - workflow 执行事件
   - 注：此任务需要在 daemon crate 中集成 workflow-engine，不在 workflow-engine crate 范围内。
 
+- [x] **W-06 HTTP/WS 契约兼容** ✅
+  - **描述**: 在 daemon 中实现 workflow 相关的 HTTP 路由（GUI/CLI 兼容）
+  
+  **核心功能**:
+  - Workflow board（workflow 定义列表）
+  - Workflow runs（run 列表和详情）
+  - Artifacts 查询
+  - Delivery note 查询
+  - Gates 管理（列出和解决）
+  
+  **API 端点**:
+  ```
+  GET  /workflow/board                           # 列出 workflow definitions
+  GET  /workflow/runs                            # 列出 workflow runs
+  GET  /workflow/runs/:id                        # 获取单个 run
+  GET  /workflow/runs/:id/artifacts              # 获取 run 的 artifacts
+  GET  /workflow/runs/:id/delivery               # 获取 delivery note
+  GET  /workflow/gates                           # 列出 paused gates
+  POST /workflow/gates/:run_id/:step_id/resolve  # 解决 gate
+  ```
+  
+  **验收标准**:
+  - [x] 7 个 workflow API 端点
+  - [x] 与现有 scheduler 和 orchestrator 集成
+  - [x] camelCase JSON 响应（GUI 兼容）
+  - [x] daemon 启动信息更新
+  - [x] 92/92 测试通过
+  - [x] cargo clippy 通过
+  - [ ] WorkflowArtifactStore 集成（artifacts/delivery）- 需要 P3 完整实现
+  - [ ] HumanGateManager 集成（gates）- 需要 P3 完整实现
+  - [ ] WebSocket 实时推送（workflow-run-event）- 后续实现
+
 ---
 
 ## P4：多项目/多任务并行
