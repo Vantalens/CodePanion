@@ -4,6 +4,9 @@ pub mod definition;
 // W-02: Step executor
 pub mod executor;
 
+// W-03: Run history
+pub mod history;
+
 pub use definition::{
     DefinitionStore, WorkflowArchitecture, WorkflowArtifactType, WorkflowContextPolicy,
     WorkflowDefinition, WorkflowPermission, WorkflowProvider, WorkflowStep,
@@ -13,6 +16,8 @@ pub use executor::{
     DefaultShellExecutor, StepExecutionResult, StepExecutor, StepRun, StepStatus, WorkflowExecutor,
     WorkflowRun, WorkflowRunStatus,
 };
+
+pub use history::WorkflowRunHistory;
 
 // 旧的简化版本（保留用于向后兼容）
 use codepanion_providers::ProviderDefinition;

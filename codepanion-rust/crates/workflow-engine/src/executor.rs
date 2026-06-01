@@ -5,6 +5,7 @@
 
 use crate::definition::{WorkflowArchitecture, WorkflowDefinition, WorkflowStep};
 use codepanion_shared::{CodePanionError, Result};
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -43,7 +44,7 @@ impl StepExecutionResult {
 }
 
 /// Step 运行状态
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StepStatus {
     Pending,
     Running,
@@ -54,7 +55,7 @@ pub enum StepStatus {
 }
 
 /// Step 运行记录
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StepRun {
     pub id: String,
     pub status: StepStatus,
@@ -122,7 +123,7 @@ impl StepRun {
 }
 
 /// Workflow 运行状态
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum WorkflowRunStatus {
     Success,
     Failed,
@@ -131,7 +132,7 @@ pub enum WorkflowRunStatus {
 }
 
 /// Workflow 运行记录
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkflowRun {
     pub id: String,
     pub workflow_name: String,

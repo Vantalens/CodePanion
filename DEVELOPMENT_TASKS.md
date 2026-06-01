@@ -214,9 +214,10 @@ Rust 目标指标：
   - 支持依赖顺序、失败短路、取消。
   - 验收：实现 `StepExecutor` trait、`DefaultShellExecutor`、`WorkflowExecutor`；支持 shell 命令执行；支持依赖检查、失败短路、checkpoint；实现 `StepRun`、`WorkflowRun` 状态跟踪；7 个测试全部通过（dry-run、依赖检查、checkpoint、shell 执行、失败处理）；通过 fmt 和 clippy 检查。
 
-- [ ] **W-03 Run history**
+- [x] **W-03 Run history**
   - NDJSON 或等价 append-only 存储。
   - 支持坏行跳过、compaction、workspace 隔离。
+  - 验收：实现 `WorkflowRunHistory`；支持 NDJSON append-only 存储；支持 list、get、search、append 操作；支持坏行跳过（parse 失败不影响其他记录）；支持自动 compaction（超过阈值时保留最近的 max_runs 条）；支持重复 ID 去重（保留后写入的）；7 个测试全部通过（append、list、get、search、去重、compaction、坏行跳过）；通过 fmt 和 clippy 检查。
 
 - [ ] **W-04 Artifact store**
   - plan、patch-summary、test-result、review-report、human-decision、delivery-note。
