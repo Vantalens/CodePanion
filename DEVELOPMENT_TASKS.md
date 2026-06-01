@@ -248,9 +248,10 @@ Rust 目标指标：
 
 目标：一个 IDE 同时管理多个项目和多个 workflow。
 
-- [ ] **M-01 Project registry**
+- [x] **M-01 Project registry**
   - `~/.codepanion/projects.json`
   - 项目名称、路径、标签、最近活动时间、描述。
+  - 验收：实现 `ProjectRegistry`；支持 list、get、upsert、remove、touch、search 操作；支持按 name、path、tags、description 搜索；支持按 last_active_at 排序；支持路径验证；支持自动生成唯一 ID；11 个测试全部通过（list empty、upsert and get、list sorted、remove、touch、search by name/tag/description、upsert updates、generate id、validate path）；通过 fmt 和 clippy 检查。
 
 - [ ] **M-02 Project API**
   - `POST /projects`

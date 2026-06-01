@@ -13,6 +13,9 @@ pub mod artifacts;
 // W-05: Human gate
 pub mod human_gate;
 
+// M-01: Project registry
+pub mod project;
+
 pub use definition::{
     DefinitionStore, WorkflowArchitecture, WorkflowArtifactType, WorkflowContextPolicy,
     WorkflowDefinition, WorkflowPermission, WorkflowProvider, WorkflowStep,
@@ -30,6 +33,8 @@ pub use artifacts::{ArtifactInput, ArtifactType, WorkflowArtifact, WorkflowArtif
 pub use human_gate::{
     GateDecision, GateResolution, GateResolutionResult, HumanGateManager, PausedGate,
 };
+
+pub use project::{Project, ProjectRegistry};
 
 // 旧的简化版本（保留用于向后兼容）
 use codepanion_providers::ProviderDefinition;

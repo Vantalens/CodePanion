@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::Result;
 use crate::artifacts::{ArtifactInput, ArtifactType, WorkflowArtifactStore};
 use crate::history::WorkflowRunHistory;
-use crate::Result;
 
 /// Human gate decision types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
