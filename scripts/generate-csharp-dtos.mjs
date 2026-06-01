@@ -33,6 +33,57 @@ const protocol = await import(pathToFileURL(distPath).href);
 
 const pascal = (s) => s[0].toUpperCase() + s.slice(1);
 
+// 监听路线已从 daemon protocol.ts 下线，但 WPF GUI 里仍有少量旧事件处理分支和 ViewModel
+// 依赖这些 DTO 类型。生成器本地保留 legacy DTO shape，避免重新引入 daemon 端旧 schema；
+// 等 GUI 死订阅清理完成后，可以删除这三组 legacy DTO。
+const LegacySessionInfoSchema = z.object({
+  id: z.string(),
+  command: z.string(),
+  args: z.array(z.string()).default([]),
+  cwd: z.string().optional(),
+  source: z.string().optional(),
+  sourceId: z.string().optional(),
+  windowTitle: z.string().optional(),
+  workspace: z.string().optional(),
+  parentThreadId: z.string().optional(),
+  startedAt: z.number().int(),
+  status: z.enum(['running', 'exited']).default('running'),
+  exitCode: z.number().int().optional(),
+  lastPrompt: z.string().optional(),
+  lastPromptOptions: z.array(z.string()).optional(),
+});
+
+const LegacyMonitorSourceSchema = z.object({
+  id: z.string(),
+  kind: z.string(),
+  name: z.string(),
+  windowTitle: z.string().optional(),
+  workspace: z.string().optional(),
+  url: z.string().optional(),
+  pid: z.number().int().optional(),
+  capabilities: z.array(z.string()).default([]),
+  capabilityLevel: z.string(),
+  integrationKind: z.string(),
+  privacyBoundary: z.string(),
+  registeredAt: z.number().int(),
+  lastSeenAt: z.number().int(),
+  status: z.enum(['online', 'offline']).default('online'),
+});
+
+const LegacyMonitorEventSchema = z.object({
+  type: z.string(),
+  sourceId: z.string().optional(),
+  source: z.string().optional(),
+  sessionId: z.string().optional(),
+  title: z.string().optional(),
+  content: z.string().default(''),
+  options: z.array(z.string()).optional(),
+  level: z.string().optional(),
+  windowTitle: z.string().optional(),
+  workspace: z.string().optional(),
+  url: z.string().optional(),
+});
+
 // 限定到 schema 的字段级类型 hint：key 形如 "SchemaName.fieldName"。
 // 用于把语义清晰的整数字段保留为 int? 而不是 long?，避免未来同名字段被误覆盖。
 const FIELD_TYPE_HINTS = {
@@ -137,16 +188,16 @@ function emitClass(className, schema) {
   return lines.join('\n');
 }
 
-// 与 daemon WS 广播一致：在 MonitorEvent 之上加 id（运行时由 server 注入），并把 timestamp 收紧为必需整数。
+// Legacy GUI DTO：在 MonitorEvent 之上加 id（运行时曾由 server 注入），并把 timestamp 收紧为必需整数。
 const MonitorEventBroadcastSchema = z.object({
   id: z.string(),
-  ...protocol.MonitorEventSchema.shape,
+  ...LegacyMonitorEventSchema.shape,
   timestamp: z.number().int(),
 });
 
 const targets = [
-  { name: 'SessionInfo', schema: protocol.SessionInfoSchema },
-  { name: 'MonitorSourceInfo', schema: protocol.MonitorSourceSchema },
+  { name: 'SessionInfo', schema: LegacySessionInfoSchema },
+  { name: 'MonitorSourceInfo', schema: LegacyMonitorSourceSchema },
   { name: 'MonitorEventInfo', schema: MonitorEventBroadcastSchema },
 ];
 

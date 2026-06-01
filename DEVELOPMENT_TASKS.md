@@ -1,9 +1,9 @@
-# CodePanion 当前开发任务标准
+# CodePanion 开发任务与重构路线
 
 ## 使用规则
 
-- 本文件只记录路线大改后的当前任务，不再承载旧监听路线、历史审计流水账或已废弃验收项。
-- 新任务必须符合 [docs/POSITIONING.md](docs/POSITIONING.md) 和 [docs/LOCAL_AI_WORKFLOW.md](docs/LOCAL_AI_WORKFLOW.md)。
+- 本文件只记录当前可执行路线和状态，不再堆叠历史叙事。
+- 所有任务必须符合 [docs/POSITIONING.md](docs/POSITIONING.md)、[docs/LOCAL_AI_WORKFLOW.md](docs/LOCAL_AI_WORKFLOW.md)、[docs/RUST_REWRITE_PLAN.md](docs/RUST_REWRITE_PLAN.md)。
 - 每完成一组可验证改动，必须同步更新本文件状态。
 
 状态标记：
@@ -17,83 +17,317 @@
 
 ## 当前产品标准
 
-> **本地优先、供应商中立、面向个人开发者的 Agent AI IDE + AI 工作流控制台。**
+CodePanion 是一个 **Rust 本地全自动 AI IDE**，面向个人开发者，支持全自动 AI 驱动开发、多 AI 角色分工、外部 agentic coding tool 调用、多项目/多任务并行和用户自带模型 API。
 
-CodePanion 后续专注：
+当前开发顺序：
 
-1. **任务拆分**：把用户目标拆成可审核、可执行、可回收的 workflow 节点。
-2. **角色协作**：用 Orchestrator、Planner、Builder、Tester、Reviewer、Docs Writer 等角色推进开发。
-3. **能力源调用**：通过逆向接口 / API / CLI 调用 Codex、Claude Code、OpenCode、本地 CLI/PTY 等外部能力 —— CodePanion 是调用方，把它们当作可编排的能力源，不是把任务派给它们。
-4. **人工审核**：需求、计划、审查、交付等关键节点必须能由用户批准、拒绝或要求重试。
-5. **产出闭环**：记录计划、变更摘要、测试结果、审查报告、人工决策和交付摘要。
+1. **Rust daemon 优先**：Node daemon 是过渡实现和行为基线，最终 daemon 以 Rust 为准。
+2. **全自动本地开发闭环**：AI 自动拆解、计划、实现、测试、审查、文档和归档。
+3. **Provider 能力源并行设计**：Codex、Claude Code、OpenCode、本地模型和国产 AI 编程工具必须能作为 workflow 角色能力源接入。
+4. **多项目/多任务并行**：全局 runs、gates、队列、跨项目 artifact 和跨项目依赖。
 
-明确不继续投入（监听路线 daemon 运行时已下线，仅 protocol schema 暂留待 GUI PR 一并清）：
+核心执行模型：
 
-- 外部窗口监听（SourceManager / 适配器已删）
-- 进程识别路线（AiToolProcessAdapter 已删）
-- Codex Desktop 被动同步路线（CodexDesktopAdapter 已删）
-- VS Code 来源事件路线（/sources、/events 已删）
-- 多源监控看板路线（/workflow/snapshot、threads 已删）
-- 旧的 handoff / 接力作为产品主概念（handoff 端点 + pty/handoffRunner 已删）
-- 交互式 PTY 监控 CLI（codepanion run/reply、pty/ 已删）
+- `architecture=shell`：spawn 本地命令，用于测试、构建等非 AI 步骤。
+- `architecture=agent`：进程内 agent runtime，支持 tool-use 循环。
+- `provider=api|cli|harness`：外部 agentic coding tool 或内部 harness 能力源。
+- `model`：用户在 config.json 中配置的模型 API 或本地模型。
 
----
+Rust 目标指标：
 
-## P0：路线重排与仓库清理
-
-- [x] **W-01** 更新 [docs/POSITIONING.md](docs/POSITIONING.md)：确认监听路线退出当前产品定义。
-- [x] **W-02** 新增 [docs/LOCAL_AI_WORKFLOW.md](docs/LOCAL_AI_WORKFLOW.md)：定义 workspace、role、workflow、human gate、artifact、executor 边界。
-- [x] **W-03** 更新 [docs/PRODUCT_ROADMAP.md](docs/PRODUCT_ROADMAP.md)：Alpha 改为个人本地 AI 工作流闭环。
-- [x] **W-04** 更新 [README.md](README.md)：对外说明任务拆分、角色协作、多模型和人工审核闭环。
-- [x] **W-05** 清理旧路线文档：删除监控源、能力证据、工具接入、旧审计、旧验收、旧用户指南和旧实现日志。
-- [x] **W-06** 重写本文件，移除旧监听路线 backlog。
+- daemon 空闲内存 < 50MB
+- daemon 冷启动 < 500ms
+- daemon 二进制 < 20MB
+- workflow 启动 < 50ms
+- 实时输出延迟 < 5ms
 
 ---
 
-## P1：建立本地 workflow 模型
+## 当前阻塞
 
-- [x] **W-10** 定义 workspace 级配置目录：`.codepanion/workflow.json`、`.codepanion/roles/*.md`、`.codepanion/artifacts/`。
-- [x] **W-11** 扩展 workflow definition schema，支持 role、model、permissions、contextPolicy、humanGate、artifact 输出契约。
-- [x] **W-12** 新增内置角色模板：Orchestrator、Planner、Builder、Tester、Reviewer、Docs Writer。
-- [x] **W-13** 将现有 handoff 状态收敛为 role assignment / executor run 状态，避免继续围绕“转交给外部工具”组织主概念。
-- [x] **W-14** 新增 workflow run artifact 历史：计划、变更摘要、测试结果、审查报告、人工决策、交付摘要。
-
----
-
-## P2：GUI 从会话流转向 workflow board
-
-- [x] **W-20** 将主界面第一层重排为 workspace / workflow 列表，而不是外部会话列表。
-  - **GUI 整体重建为工作流控制台**：删除监听式 shell（VS Code 插件面板 / 来源分组任务队列 / 会话流 / 接力 PTY 面板 / 收件箱 / session 回复 omnibar），chat.html/js/css 全部重写。
-  - 顶栏 workspace 选择条（路径 + 最近列表 localStorage 持久化，空=全局）+ 连接状态。
-  - 三栏：左 workflow 定义/近期 runs/人工门，中 run 时间线，右 详情/人工门决策。
-  - webview ↔ host 协议收敛为工作流控制台：`request-workflow-board/run/launch/gate-resolve/run-cancel/delivery` + `set-workspace`；旧的 reply/event-reply/task-action/handoff-launch 移除。
-- [x] **W-21** 中央区域展示 workflow 节点、当前角色、状态、阻塞点和人工审核门。
-  - 中栏 run 时间线：steps 顺序 + 状态染色 + 当前步 + exitCode；接 daemon WS `workflow-run-event` 实时更新（run-start/step-start/step-output/step-finish/run-finish），step-output 实时滚动。
-- [-] **W-22** 右侧抽屉展示角色、模型、权限、artifact 和原始执行记录。
-  - 已做：右栏展示 artifacts、delivery（复制 markdown/handoff）、步骤 stdout/stderr 输出。
-  - 待办：role / model / permission / contextPolicy 绑定展示（需 daemon 暴露 workspace roleBindings 给 board）。
-- [-] **W-23** 保留 `等待我 / 失败 / 需审阅 / 运行中 / 完成`，但状态挂到 workflow 节点和 artifact。
-  - 已做：run 状态（running/paused/failed/success）挂到 run 卡片与时间线 chip；paused gate 单列展示。
-  - 待办：把这些状态做成可筛选的队列视图。
+- [x] **B-01 DTO 生成器仍引用旧监听 schema**
+  - 现象：`npm test` 在 `scripts/generate-csharp-dtos.mjs` 失败，仍引用已移除的 `MonitorEventSchema.shape`。
+  - 影响：Node 行为基线不稳定，Rust 迁移前建议先修复。
+  - 验收：`node --test packages/daemon/test/generateCsharpDtos.test.mjs` 通过；`npm run validate:dtos` 通过。
 
 ---
 
-## P3：多模型与多角色执行闭环
+## 已完成基线
 
-- [x] **W-30** 支持同一模型绑定不同角色 prompt、权限和上下文策略。
-- [-] **W-31** 支持不同 architecture / model 在同一 workflow 中协作。
-  - **执行模型两轴化（2026-05-29 定位细化）**：step 执行 = architecture（`shell` 进程内 spawn / `agent` 进程内调模型 API）× model（config.models 的 OpenAI 兼容后端）。旧 `provider` 兼容派生（local→shell，其余→agent），`providerInvocation` 的外部 CLI 拼装已退役。
-  - slice 1 = single-call agent：组 prompt → 调一次 `/chat/completions` → 文本落 stepRun.output + WS step-output 实时推送 + delivery-note `## Step output preview`。
-  - `daemonWorkflowExecutor` 返回结构化结果（exitCode + stdout + stderr + truncated），shell/agent 两路都落 `stepRun.output`，每流 cap 32KB。
-  - config.json `models` / `defaultModel` + [modelClient.ts](packages/daemon/src/models/modelClient.ts)（内置 fetch）；daemon `agentExecutor` 解析 role/model→后端→调模型。
-  - slice 2a = tool-use 循环（只读）：`read_file` / `list_dir`，`permissions=read` + workspace 门控，`ensurePathInside` 钳沙箱，`config.agent.maxTurns` 封顶，每轮经 WS step-output 实时推。[agentRuntime.ts](packages/daemon/src/models/agentRuntime.ts) + [agentTools.ts](packages/daemon/src/workflows/agentTools.ts)。
-  - 待办：slice 2b 写工具（`write_file` / `run_command`，write/command 权限 + cwd 钳 workspace + batch-arg 防护）；contextPolicy 强制；GUI 选择 architecture/model + 编辑模型后端。
-- [x] **W-32** 支持人工在计划、审查、交付门中批准、拒绝、要求重试或追加约束。
-  - approve：复用原 runId 从 checkpoint 之后续跑（PR #8）
-  - reject：仅落 human-decision artifact，run 维持 paused
-  - retry：复用原 runId，回到 checkpoint 前最近一个 success step 重跑该 step，checkpoint 因 yes:true 自动跳过
-  - constraints：列表并入 resumed run 的 `values.constraints`，后续 step 可用 `{constraints}` 模板引用
-- [x] **W-33** 每次完成 workflow 后生成可复盘交付摘要，并能复制给 Codex / Claude Code / OpenCode 继续处理。
-  - delivery-note 由 `recordDeliveryNote` 在每次 workflow 结束（含 paused/failed）自动落条
-  - `GET /workflow/runs/:runId/delivery?format=markdown|handoff` 把最新 delivery-note 拉成可直接复制的文本
-  - `format=handoff` 在 delivery-note 外再包一层 continuation prompt，可整段贴到 `codex exec` / `claude -p` / `opencode run`
+- [x] **C-01 下线监听路线残留**
+  - 删除 adapter-sdk 包。
+  - 清理 `protocol.ts` 中外部 IDE 监听 schema。
+  - 记录在 [docs/ARCHITECTURE_CLEANUP.md](docs/ARCHITECTURE_CLEANUP.md)。
+
+- [x] **C-02 确认现有进程内 agent 路线**
+  - 执行链路：workflow -> daemon -> agentRuntime -> modelClient API。
+  - 已有 single-call agent 与只读 tool-use 循环。
+
+- [x] **C-03 用户模型 API 基线**
+  - `config.json` 支持 `models`、`defaultModel`、`agent.maxTurns`。
+  - `modelClient` 支持 OpenAI-compatible API、tool-use 和取消。
+
+- [x] **C-04 工作流基线**
+  - workspace 配置目录。
+  - workflow definition schema。
+  - run history、artifact、delivery-note。
+  - human gate：approve / reject / retry。
+
+- [x] **C-05 文档路线校准**
+  - README、POSITIONING、PRODUCT_ROADMAP、ARCHITECTURE、LOCAL_AI_WORKFLOW、DEVELOPMENT、RUST_REWRITE_PLAN 已统一到 Rust 本地全自动 AI IDE 主线。
+
+---
+
+## P0：Rust Daemon 技术验证
+
+目标：证明 Rust 可以承担最终 daemon 架构，并兼容现有 GUI/HTTP/WS 行为基线。
+
+- [x] **R-01 创建 Rust workspace**
+  - 目录：`codepanion-rust/`
+  - crates：`daemon`、`shared`、`config`、`model-client`、`providers`、`agent-runtime`、`workflow-engine`、`storage`
+  - 验收：`cargo fmt --all` 通过；`cargo test --workspace` 通过。
+
+- [x] **R-02 最小 HTTP daemon**
+  - 使用 `axum` 或同级 Rust HTTP 框架。
+  - 实现 `GET /health`。
+  - 验收：无外部依赖 bootstrap HTTP server 已实现；本地启动成功，`GET /health` 返回 ok/pid/version。
+
+- [x] **R-03 最小 WebSocket**
+  - 建立 observer 连接。
+  - 推送 hello / ping / 简单 event。
+  - 验收：单元测试覆盖 WebSocket accept key 和 server text frame；真实 socket smoke 返回 `101 Switching Protocols` 和 hello frame。
+
+- [x] **R-04 Rust 模型客户端**
+  - OpenAI-compatible `/chat/completions`。
+  - 支持非流式、流式、tool_calls、取消。
+  - 验收：本地 TCP mock server 单测覆盖成功、非 2xx 错误、预取消、tool_calls、SSE streaming。
+
+- [x] **R-05 性能基准**
+  - 记录空闲内存、冷启动时间、二进制大小、`/health` 延迟、WS 事件延迟。
+  - 验收：`codepanion-rust/scripts/measure-baseline.ps1` 可重复执行；基准记录见 [codepanion-rust/benchmarks/baseline-2026-06-01.md](codepanion-rust/benchmarks/baseline-2026-06-01.md)。
+
+---
+
+## P1：Provider Registry 与外部 Agentic Tool 调用
+
+目标：Codex、Claude Code、OpenCode 等必须能作为 workflow 角色能力源接入，而不是只做文档概念。
+
+- [x] **P-01 定义 provider schema**
+  - 字段：`id`、`kind`、`displayName`、`capabilities`、`permissions`、`runtime`。
+  - kind：`api` / `cli` / `harness`。
+  - capabilities：read / write / command / network / delegate / streaming / cancel。
+  - 验收：`codepanion-rust/crates/providers` 已定义 `ProviderDefinition`、`ProviderPermissions`、`ProviderRuntime`；测试覆盖 schema 字段和 kind/runtime 校验。
+
+- [x] **P-02 实现 Provider Registry**
+  - 注册、查询、校验 provider。
+  - provider 输出统一映射为 step output、artifact、delivery-note。
+  - 验收：`ProviderRegistry` 支持注册、查询、稳定列表和重复 id 拒绝；`ProviderOutput` / `ProviderArtifact` 定义统一输出 envelope。
+
+- [x] **P-03 CLI provider executor**
+  - 受控 `cwd = workspace root`。
+  - 参数白名单、环境变量策略、超时、取消。
+  - stdout/stderr 捕获和 WS streaming。
+  - 验收：`execute_cli_provider` 覆盖受控 cwd、allowlisted extra args、显式 env、timeout、cancel、stdout/stderr capture 和可转发 stream events。
+
+- [x] **P-04 API provider executor**
+  - 统一请求/响应/错误模型。
+  - API key 本地配置与日志脱敏。
+  - token/usage 统计。
+  - 流式输出映射为 `step-output`。
+  - 验收：`execute_api_provider` 支持 JSON POST、Bearer key 脱敏、非 2xx 错误、usage 解析、预取消和 SSE content chunk event。
+
+- [x] **P-05 Harness provider 接口**
+  - 复用 Rust agent runtime。
+  - 支持 tool-use、任务委派、权限声明和高危行为检测。
+  - 验收：provider crate 已定义 `HarnessExecutor`、`HarnessExecutionRequest`、`HarnessExecutionResult`、`HarnessDelegatedTask` 和 `HarnessRisk`；agent-runtime crate 已提供 `InProcessHarness` adapter，测试覆盖权限拒绝、任务委派、取消和 high-risk human gate 标记。
+
+- [x] **P-06 首批外部工具 provider**
+  - Codex CLI provider：受控调用 `codex exec`。
+  - Claude Code CLI provider：受控调用 `claude -p`。
+  - OpenCode CLI provider：受控调用 `opencode run`。
+  - 若外部工具提供稳定 API，再实现对应 API provider。
+  - 验收：`default_external_tool_registry()` 注册 `codex-cli`、`claude-code-cli`、`opencode-cli`；`AppConfig::with_default_external_providers()` 可加载首批外部工具 provider。
+
+---
+
+## P2：Rust Agent Runtime 与安全工具
+
+目标：实现能自动开发的 agent runtime，而不是只读问答。
+
+- [x] **A-01 Tool-use loop**
+  - 模型 -> tool call -> tool result -> 模型续答。
+  - 支持 max turns、取消、错误回填。
+  - 验收：`run_agent_loop` 实现完整循环；`AgentLoopEvent` 支持实时推送；`AgentToolRunner` trait 定义工具执行接口；测试覆盖 request builder、event types 和基础循环逻辑。
+
+- [x] **A-02 只读工具**
+  - `read_file`
+  - `list_dir`
+  - `search_files`（暂未实现，后续补充）
+  - 所有路径必须限制在 workspace 内。
+  - 验收：`ReadonlyTools` 实现 `read_file` 和 `list_dir`；`ensure_path_inside` 实现纯词法路径安全检查；测试覆盖路径越界拒绝、文件读取、目录列出、错误处理和空 workspace 场景；17 个测试全部通过。
+
+- [x] **A-03 写入工具**
+  - `write_file`
+  - `apply_diff`（暂未实现，后续补充）
+  - `create_file`
+  - 写入前后必须产出 patch summary。
+  - 验收：`WriteTools` 实现 `write_file` 和 `create_file`；`generate_patch_summary` 生成修改摘要；测试覆盖新建文件、覆盖文件、父目录创建、路径越界拒绝、大小限制、已存在文件拒绝；29 个测试全部通过。
+
+- [x] **A-04 命令工具**
+  - `run_command`
+  - cwd 钳在 workspace root。
+  - 命令风险分级、超时、取消、输出截断。
+  - 验收：`CommandTools` 实现 `run_command`，cwd 强制钳在 workspace root；`classify_command` 实现 safe/medium/high 三级风险分级（覆盖删除、提权、git 历史改写、网络外泄等 8 类高危模式）；high 风险命令默认拒绝执行并标记需 human gate；支持超时（默认 30s）、取消（Arc<AtomicBool>）、输出截断（stdout/stderr 各 32KB）；21 个命令工具测试 + 4 个真实 mock-server tool-use loop 测试全部通过。
+
+- [ ] **A-05 高危行为检测**
+  - 删除文件/目录。
+  - 修改关键配置、凭据、权限文件。
+  - 危险命令。
+  - 网络请求。
+  - git 历史修改。
+  - 验收：高危动作必须进入 human gate。
+
+- [ ] **A-06 自动修复循环**
+  - 测试失败 -> 诊断 -> 修复 -> 重跑测试。
+  - 超过重试上限进入人工门。
+
+---
+
+## P3：Rust Workflow Engine
+
+目标：迁移并强化现有 workflow 行为基线。
+
+- [ ] **W-01 Workflow definition**
+  - 解析 workflow、step、role、model、provider、permissions、contextPolicy、artifacts、checkpoint。
+
+- [ ] **W-02 Step executor**
+  - 支持 shell / agent / provider 三类执行。
+  - 支持依赖顺序、失败短路、取消。
+
+- [ ] **W-03 Run history**
+  - NDJSON 或等价 append-only 存储。
+  - 支持坏行跳过、compaction、workspace 隔离。
+
+- [ ] **W-04 Artifact store**
+  - plan、patch-summary、test-result、review-report、human-decision、delivery-note。
+
+- [ ] **W-05 Human gate**
+  - approve / reject / retry。
+  - constraints 注入后续 step。
+  - 决策记录为 artifact。
+
+- [ ] **W-06 HTTP/WS 契约兼容**
+  - `/workflow/board`
+  - `/workflow/runs`
+  - `/workflow/runs/:id`
+  - `/workflow/runs/:id/artifacts`
+  - `/workflow/runs/:id/delivery`
+  - `/workflow/gates`
+  - `/workflow/gates/:runId/:stepId/resolve`
+  - WS `workflow-run-event`
+
+---
+
+## P4：多项目/多任务并行
+
+目标：一个 IDE 同时管理多个项目和多个 workflow。
+
+- [ ] **M-01 Project registry**
+  - `~/.codepanion/projects.json`
+  - 项目名称、路径、标签、最近活动时间、描述。
+
+- [ ] **M-02 Project API**
+  - `POST /projects`
+  - `GET /projects`
+  - `GET /projects/:id`
+  - `PUT /projects/:id`
+  - `DELETE /projects/:id`
+  - `POST /projects/:id/activate`
+
+- [ ] **M-03 多 run scheduler**
+  - 多 workflow 并行。
+  - 全局队列。
+  - 取消、暂停、恢复。
+  - 按项目隔离 cwd、history、artifacts。
+
+- [ ] **M-04 跨项目编排**
+  - workflow 声明跨项目依赖。
+  - artifact 跨项目引用。
+  - 共享 role 配置库、workflow 模板库、工具配置。
+
+- [ ] **M-05 全局视图 API**
+  - 全局 runs。
+  - 全局 gates。
+  - 全局任务队列。
+
+---
+
+## P5：GUI 工作台
+
+目标：GUI 从过渡 workflow board 升级为多项目 AI 开发工作台。
+
+- [ ] **G-01 项目侧栏**
+  - 项目列表、添加/删除/编辑。
+  - 项目搜索和筛选。
+  - 项目切换后恢复上次状态。
+
+- [ ] **G-02 全局任务视图**
+  - 全局 runs。
+  - 全局 gates。
+  - 全局队列。
+  - 状态筛选：运行中、等待我、失败、完成。
+
+- [ ] **G-03 当前 run 时间线**
+  - step 状态。
+  - 实时 stdout/stderr。
+  - role/model/provider/permissions 展示。
+
+- [ ] **G-04 Artifact 与 delivery**
+  - artifacts 列表。
+  - delivery markdown / handoff 复制。
+  - 测试结果、审查报告、patch summary 展示。
+
+- [ ] **G-05 Human gate 决策面板**
+  - approve / reject / retry。
+  - constraints 输入。
+  - message 输入。
+  - 决策历史。
+
+- [ ] **G-06 模型与 provider 配置**
+  - 模型 API 配置编辑。
+  - provider 列表和连接测试。
+  - 默认模型、默认 provider、角色绑定。
+
+---
+
+## P6：文档与发布质量
+
+- [ ] **D-01 清理 API 文档**
+  - 移除旧 `/sources`、`/events`、`/sessions`、handoff 路线。
+  - 只保留 workflow/project/provider 路线。
+
+- [ ] **D-02 更新开发文档**
+  - Rust 命令、测试、性能基准、目录结构。
+
+- [ ] **D-03 更新用户文档**
+  - 安装、启动、模型配置、provider 配置、workspace/project 使用。
+
+- [ ] **D-04 发布门禁**
+  - `npm test` 作为 Node 行为基线。
+  - `cargo fmt --all`
+  - `cargo test --workspace`
+  - `cargo clippy --workspace --all-targets -- -D warnings`
+  - `dotnet build packages/gui/CodePanion.Gui.csproj -c Release`
+  - `git diff --check`
+
+---
+
+## 参考文档
+
+- [README.md](README.md) - 项目说明
+- [docs/POSITIONING.md](docs/POSITIONING.md) - 产品定位
+- [docs/PRODUCT_ROADMAP.md](docs/PRODUCT_ROADMAP.md) - 产品路线
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - 架构设计
+- [docs/LOCAL_AI_WORKFLOW.md](docs/LOCAL_AI_WORKFLOW.md) - 工作流设计
+- [docs/RUST_REWRITE_PLAN.md](docs/RUST_REWRITE_PLAN.md) - Rust 重构计划
+- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) - 开发指南

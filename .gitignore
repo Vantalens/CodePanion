@@ -6,6 +6,11 @@ yarn-error.log*
 .npm
 .eslintcache
 
+# Rust (codepanion-rust workspace)
+target/
+**/*.rs.bk
+*.pdb
+
 # Build outputs
 dist/
 build/

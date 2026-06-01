@@ -2,21 +2,25 @@
 
 ## 产品定位
 
-CodePanion 是一个本地优先、供应商中立、面向个人开发者的 **Agent AI IDE + AI 工作流控制台**。它服务于需要把产品目标推进到代码、测试、审查、文档和交付记录的用户：CodePanion 自身就是 Agent IDE，通过逆向接口和 API 调用 Codex、Claude Code、OpenCode 等外部 AI 编程工具的能力，并把整个过程组织成本地可控的多角色、多模型、可审核的 workflow。仓库内具体措辞以 [产品定位契约](POSITIONING.md) 和 [本地 AI 工作流设计](LOCAL_AI_WORKFLOW.md) 为准。
+CodePanion 是一个本地优先、供应商中立、面向个人开发者的 **Rust 轻量 AI IDE**。它服务于需要把产品目标自动推进到代码、测试、审查、文档和交付记录的用户：CodePanion 自身就是本地全自动开发系统，通过多 AI 角色分工、多模型协作、高危行为审核门和多项目/多任务调度，把开发目标组织成可复盘的本地 workflow。仓库内具体措辞以 [产品定位契约](POSITIONING.md)、[本地 AI 工作流设计](LOCAL_AI_WORKFLOW.md) 和 [Rust 重构计划](RUST_REWRITE_PLAN.md) 为准。
 
-现有产品不推倒重做。当前的 Windows GUI、本地 daemon、CLI/PTTY 和统一任务 / workflow 模型，都是 Agent AI IDE 路线的基础资产。变化在于主线：监听外部工具状态不再进入路线，后续只做用户主动发起的 workflow 编排与对外部 AI 能力的主动调用。
+现有产品不是最终性能架构。当前 Windows GUI、本地 Node daemon 和 workflow 模型作为过渡实现与行为基线保留；下一步开发主线是 Rust daemon 技术验证、核心 agent/workflow 引擎迁移、高危行为检测、多任务并行调度和多项目管理。监听外部工具状态不再进入路线；外部 agentic coding tool 调用能力是必须保留的一等能力源，但要接入本地 workflow，而不是把产品退回外部工具面板。
 
 ## 市场判断与差异化
 
-AI 开发正在从单次对话转向长链路、多角色、多模型、可审核的工程流程。CodePanion 不在代码编辑体验上和 Cursor、Trae、Windsurf、VS Code/Copilot 这类传统编辑器型 AI IDE 正面竞争，也不做 OpenClaw 类通用个人 Agent、Raycast 式通用 launcher、Activity Monitor 式进程监控器或模型聊天客户端；它要做的是位于这些工具**之上**的个人 Agent IDE 与本地 AI 工作流控制台 —— 由 CodePanion 主动调用各家 AI 编程工具的接口/API，把它们的能力编织进可审核的本地流程。
+AI 开发正在从单次对话转向长链路、多角色、多模型、可审核、可并行的工程流程。CodePanion 不在代码编辑体验上和 Cursor、Trae、Windsurf、VS Code/Copilot 这类传统编辑器型 AI IDE 正面竞争，也不做 OpenClaw 类通用个人 Agent、Raycast 式通用 launcher、Activity Monitor 式进程监控器或模型聊天客户端；它要做的是本地全自动、多 AI、多项目并行的轻量 AI IDE。
+
+CodePanion 更接近“个人本地 Devin + 多 agent 调度器 + Rust 高性能 daemon”的组合：用户输入目标，系统在本地拆解任务、分派角色、运行多个 workflow、做自动审查和高危门控，并归档交付记录。
 
 核心差异化：
 
-1. **能力源中立**：不绑定单一 IDE、模型或云平台；workflow 角色可以通过逆向接口 / API / CLI 调用 Codex、Claude Code、OpenCode、本地 CLI 或后续能力源 —— CodePanion 是调用方。
-2. **本地优先**：状态、日志、规则和操作默认留在本机。
-3. **闭环优先**：用户能在一个 GUI 中完成目标输入、任务拆分、计划确认、执行、测试、审查、交付确认和归档。
-4. **权限边界透明**：按角色声明读写、命令、网络、任务委派和外部目录权限，不把弱接入包装成深度接管。
-5. **产出优先**：围绕代码、测试、审查、文档和交付记录组织体验，而不是围绕聊天、模型或系统进程组织体验。
+1. **Rust 轻量高性能**：用原生 daemon 支撑低内存、低启动延迟和多任务并行，而不是依赖 Node 运行时达成最终性能指标。
+2. **本地全自动闭环**：用户能在一个 GUI 中完成目标输入、任务拆分、计划、执行、测试、审查、交付确认和归档。
+3. **多 AI 角色分工**：角色、模型、权限、上下文策略和输出契约是产品一等概念。
+4. **多项目/多任务调度**：全局 runs、gates、队列、artifact 和跨项目依赖是核心能力，不是后期附加看板。
+5. **能力源中立**：不绑定单一 IDE、模型或云平台；workflow 角色可以使用用户 API、本地模型、Codex、Claude Code、OpenCode 或后续能力源。
+6. **权限边界透明**：按角色声明读写、命令、网络、任务委派和外部目录权限，高危行为进入人工门。
+7. **产出优先**：围绕代码、测试、审查、文档和交付记录组织体验，而不是围绕聊天、模型或系统进程组织体验。
 
 ## 目标用户
 
@@ -27,23 +31,46 @@ AI 开发正在从单次对话转向长链路、多角色、多模型、可审�
 ## 产品保留决策
 
 - **保留当前入口**：Windows Alpha 继续以 `CodePanion.Gui.exe` 双击运行为普通用户路径。
-- **保留当前技术栈**：Alpha 阶段继续使用 Node daemon、HTTP/WebSocket、WPF/WebView2 GUI，不立即迁移 Tauri 或 Avalonia。
-- **保留当前核心能力**：CLI/PTTY 包装、提示检测、直接回复、系统通知、GUI 时间线和本地 workflow 模型。
-- **重排当前主线**：上述能力后续服务于本地 workflow、角色分工和人工审核；监听、识别和外部来源不再进入新路线。
+- **Rust daemon 优先**：Node daemon 作为过渡实现保留；新开发优先落到 Rust 技术验证和核心模块重构。
+- **保留当前行为基线**：HTTP/WebSocket 契约、workflow 定义、run history、artifact、人工门和 GUI 工作台作为迁移验收标准。
+- **重排当前主线**：先 Rust 化本地全自动 workflow，再做多项目/多任务调度和外部能力源接入；监听、识别和外部来源不再进入新路线。
 - **后置评估**：Tauri/Avalonia 跨平台 GUI、provider adapter、Enterprise 治理能力和规则跨生态同步进入后续路线，不作为 Alpha 阻塞项。
 
 ## 核心原则
 
-1. **先闭环，后扩展能力源**：先让一个本地开发 workflow 从目标到产出完整跑通，再增加更多被 CodePanion 调用的外部 AI 能力源。
-2. **先角色，后自动化**：先定义角色权限、输出契约和人工审核门，再讨论自动调度。
-3. **分层描述能力调用深度**：L1 手动上下文输入，L2 单节点调用一个外部能力，L3 可审核 workflow 节点，L4 多角色 / 多模型 workflow 编排。
-4. **不卖模型调用**：商业化围绕本地工作流管理、角色权限、产出归档、本地审计、隐私和中立性，不做 token 二次分销。
+1. **先 Rust 技术验证，再迁移核心闭环**：先验证内存、启动、HTTP/WS、模型客户端，再迁移 agent runtime、workflow engine 和 storage。
+2. **先全自动单项目闭环，再多任务并行**：先让一个 workflow 自动完成开发，再扩展到多个项目和多个 workflow 同步运行。
+3. **先角色权限和高危门控，再扩大工具权限**：`read_file`、`write_file`、`run_command`、网络访问和 git 操作必须有明确风险分级。
+4. **外部工具作为一等 provider 接入**：Codex、Claude Code、OpenCode 等接入要服务本地 workflow，可通过 API provider、CLI provider 或 in-process harness 三种方式实现。
+5. **不卖模型调用**：商业化围绕本地工作流管理、角色权限、产出归档、本地审计、隐私和中立性，不做 token 二次分销。
 
-## Alpha：Windows 个人本地 AI 工作流闭环
+## Alpha 0：Rust Daemon 技术验证
 
 ### 目标
 
-让一个人能够从一个 Windows GUI 把一个开发目标拆成任务，由 CodePanion 内不同角色调用对应外部 AI 能力源执行，在关键节点人工审核，并归档最终产品产出。
+证明 Rust 可以承担 CodePanion 的最终性能架构，并兼容当前 GUI 需要的 HTTP/WS 交互。
+
+### 关键能力
+
+- Rust workspace 和 daemon 二进制
+- `/health` HTTP 服务
+- WebSocket 实时事件推送
+- OpenAI-compatible 模型客户端
+- 内存、启动时间、二进制大小基准
+
+### 成功标准
+
+- Rust daemon 空闲内存 < 50MB
+- daemon 冷启动 < 500ms
+- daemon 二进制 < 20MB
+- HTTP/WebSocket 正常工作
+- 模型客户端能调用 OpenAI-compatible API
+
+## Alpha 1：Windows 个人本地 AI 工作流闭环
+
+### 目标
+
+让一个人能够从一个 Windows GUI 把一个开发目标拆成任务，由 CodePanion 内不同 AI 角色自动计划、实现、测试、审查和归档，在高危动作或关键节点人工审核，并归档最终产品产出。
 
 ### 关键能力
 
@@ -53,7 +80,9 @@ AI 开发正在从单次对话转向长链路、多角色、多模型、可审�
 - 同一模型多角色与多模型协作的配置模型
 - 人工审核门：需求、计划、审查、交付
 - 产出归档：计划、变更摘要、测试结果、审查意见、人工决策、交付摘要
-- 通过逆向接口 / API / CLI 调用 Codex、Claude Code、OpenCode、本地 CLI/PTY 作为角色能力源
+- 进程内 agent runtime 支持 tool-use 循环、只读/写文件/跑命令工具和高危行为检测
+- 用户 API、本地模型和外部 agentic coding tool 都作为角色能力源
+- provider 抽象支持 API provider、CLI provider 和 in-process harness 三类外部能力调用
 
 ### 成功标准
 
@@ -67,7 +96,7 @@ AI 开发正在从单次对话转向长链路、多角色、多模型、可审�
 
 ### 目标
 
-在 Alpha 闭环稳定后，扩大 CodePanion 可调用的外部 AI 编程工具能力源，并加强角色市场、项目模板、任务历史和跨工具协作能力。
+在 Alpha 闭环稳定后，扩大 CodePanion 可调用的外部 AI 编程工具能力源，并加强多项目/多任务调度、角色模板、任务历史和跨工具协作能力。外部工具调用不是可选装饰，而是 CodePanion 供应商中立和多 AI 协作能力的重要组成部分。
 
 ### 接入优先级
 
@@ -81,7 +110,7 @@ AI 开发正在从单次对话转向长链路、多角色、多模型、可审�
 ### 关键能力
 
 - 对首批工具按 L1/L2/L3/L4 分层推进，不强行读取闭源私有状态
-- 能力源接入 SDK 草案，降低对一个新外部 AI 工具完成逆向接口适配的成本
+- 能力源接入 SDK 草案，降低对一个新外部 AI 工具完成 API provider / CLI provider / in-process harness 适配的成本
 - 本地 workflow 历史、artifact 查询、角色模板和跨工具能力编排基础
 - Tauri/Avalonia 跨平台 GUI 评估，但只在 Alpha 稳定后决定是否迁移
 
@@ -112,13 +141,15 @@ Enterprise 是中后期治理方向，不改变当前阶段不做团队协作平
 - 不做团队协作平台
 - 不做默认系统级 OCR 或全局屏幕读取
 - 不读取 token、cookie、私有插件数据库以及任何上游工具非公开的存储或登录态（注：可调用上游工具公开/逆向得到的接口与 API 作为能力源，这是 CodePanion 的核心实现方式）
-- 不把 CodePanion 定位为 Codex、Claude Code、VS Code、Cursor、Trae 或 CodeBuddy 的替代品（CodePanion 是它们之上的 Agent IDE 与控制台）
+- 不把 CodePanion 定位为 Codex、Claude Code、VS Code、Cursor、Trae 或 CodeBuddy 的替代品；CodePanion 是本地全自动开发主系统，它们是可接入的能力源
 - 不做监听外部窗口路线
 
 ## 当前开发优先级
 
-1. 完成本地 AI 工作流模型设计：workspace、role、workflow、human gate、artifact
-2. 将现有 workflow / handoff / task state 代码重排为 role assignment 与 artifact loop 的实现基础
-3. 重建 GUI 信息架构：从会话流转向 workflow board
-4. 建立多模型与同模型多角色的配置、权限和输出契约
-5. 移除监听来源、进程识别和被动状态采集路线，按 CodePanion 主动调用能力源的能力分层推进
+1. **Rust 技术验证**：创建 Rust workspace，实现最小 `/health`、WebSocket、模型客户端和性能基准。
+2. **Rust 核心迁移**：迁移 config、model client、agent runtime、workflow engine、storage、HTTP/WS 契约。
+3. **自动开发工具链**：实现 `write_file`、`run_command`、风险分级、高危行为审核门和失败自动修复循环。
+4. **多任务并行调度**：支持多个 workflow 同时运行、取消、恢复、排队、全局 runs/gates。
+5. **多项目管理**：实现 project registry、项目切换、跨项目 artifact、跨项目依赖和全局队列视图。
+6. **GUI 工作台完善**：围绕项目、任务、角色、模型、权限、审核门和 delivery-note 组织界面。
+7. **外部能力源接入**：在本地主闭环稳定后，把 Codex、Claude Code、OpenCode、本地模型和国产 AI 编程工具接入为可编排 provider。

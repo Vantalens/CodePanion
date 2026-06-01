@@ -1,6 +1,6 @@
 # CodePanion 开发指南
 
-本文档面向希望参与 CodePanion 开发或基于 CodePanion 进行二次开发的开发者。CodePanion 当前定位为个人本地 AI 工作流操作台，开发优先级应服务“任务拆分、AI 角色协作、显式 executor、人工审核和产品产出归档”。旧的监听、监控源和被动状态采集路线不再作为开发主线。
+本文档面向希望参与 CodePanion 开发或基于 CodePanion 进行二次开发的开发者。CodePanion 当前定位为 Rust 本地全自动 AI IDE，开发优先级应服务“Rust 轻量 daemon、全自动 AI 工作流、多 AI 角色协作、高危行为审核、多项目/多任务并行和产品产出归档”。旧的监听、监控源和被动状态采集路线不再作为开发主线。
 
 ## 目录
 
@@ -20,6 +20,7 @@
 ### 前置要求
 
 - **Node.js**: >= 24.0.0（Windows 便携包当前固定 `node.exe` 为 v24.14.1，并校验 SHA256）
+- **Rust**: stable toolchain（Rust 重构主线；建议通过 `rustup` 安装）
 - **.NET SDK**: >= 8.0 (GUI 开发)
 - **Git**: 最新版本
 - **编辑器**: VS Code (推荐) 或其他
@@ -52,6 +53,28 @@ npm run dev:daemon
 # 终端 2: 运行 GUI（开发模式）
 npm run gui:run
 ```
+
+### Rust 重构入口
+
+当前新开发优先从 Rust daemon 技术验证开始。Node daemon 是行为基线，Rust daemon 是目标架构。
+
+推荐执行顺序：
+
+1. 创建 Rust workspace：`codepanion-rust` / `crates/{daemon,shared,config,model-client,agent-runtime,workflow-engine,storage}`。
+2. 实现 `GET /health` 和最小 WebSocket hello，验证 GUI 可连接或用测试客户端连接。
+3. 实现 OpenAI-compatible 模型客户端，支持非流式和流式响应。
+4. 迁移 agent tool-use 循环和 `read_file` / `list_dir`。
+5. 增加 `write_file` / `run_command`，所有写入和命令都必须经过 workspace containment 与高危行为检测。
+6. 迁移 workflow engine、run history、artifact、delivery-note、gate resolve。
+7. 增加 project registry 和多 run scheduler，支持多项目/多任务并行。
+
+Rust daemon 的第一轮验收指标：
+
+- daemon 空闲内存 < 50MB
+- daemon 冷启动 < 500ms
+- daemon 二进制 < 20MB
+- HTTP/WebSocket 正常工作
+- 模型客户端可以调用 OpenAI-compatible API
 
 ### VS Code 配置
 
@@ -110,8 +133,17 @@ npm run gui:run
 
 ```
 CodePanion/
+├── codepanion-rust/           # 规划中的 Rust daemon workspace（新增核心能力优先落这里）
+│   └── crates/
+│       ├── daemon/            # axum HTTP/WS, auth, lifecycle
+│       ├── shared/            # DTO/protocol/error model
+│       ├── config/            # config.json and model backends
+│       ├── model-client/      # OpenAI-compatible client
+│       ├── agent-runtime/     # tool-use, permissions, risk gates
+│       ├── workflow-engine/   # runs, gates, artifacts, scheduler
+│       └── storage/           # workspace/project stores
 ├── packages/
-│   ├── daemon/                 # Node.js 守护进程和 CLI
+│   ├── daemon/                 # Node.js 过渡 daemon 和行为基线
 │   │   ├── src/
 │   │   │   ├── cli/           # CLI 命令实现
 │   │   │   │   ├── index.ts   # CLI 入口
@@ -169,7 +201,7 @@ CodePanion/
 
 ### 当前质量门禁
 
-任何涉及 daemon、GUI、扩展或文档的变更，提交前至少运行：
+任何涉及 Node daemon、GUI、扩展或文档的变更，提交前至少运行：
 
 ```bash
 npm run build
@@ -177,6 +209,23 @@ npm run validate:extensions
 dotnet build packages/gui/CodePanion.Gui.csproj -c Release
 git diff --check
 ```
+
+涉及 Rust daemon 的变更，提交前至少运行：
+
+```bash
+cargo fmt --all
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+git diff --check
+```
+
+Rust 性能验证相关变更还必须记录：
+
+- daemon 启动时间
+- 空闲内存占用
+- 二进制大小
+- HTTP `/health` 延迟
+- WS `workflow-run-event` 推送延迟
 
 涉及通知、编码或 WebView 的变更还必须手动验证：
 
@@ -188,13 +237,15 @@ git diff --check
 
 ### 工作流开发边界
 
-新增能力时优先判断它是否服务于本地 AI 工作流闭环：任务拆分、角色执行、人工审核和 artifact 归档。不要新增外部窗口监听、进程识别、被动状态采集或多源监控看板能力。
+新增能力时优先判断它是否服务于 Rust 本地全自动 AI 开发闭环：目标拆解、角色分工、自动执行、自动测试、自动审查、高危行为门控、多项目/多任务并行和 artifact 归档。不要新增外部窗口监听、进程识别、被动状态采集或多源监控看板能力。
 
 开发时先判断新能力属于哪一层：
 
-- **P1 模型层**：workspace、role、workflow、human gate、artifact、executor。
-- **P2 GUI 层**：workflow board、节点状态、角色权限、审核门和产出视图。
-- **P3 执行层**：显式 executor、多模型路由、角色上下文和失败重试。
+- **P0 Rust 基础层**：daemon、HTTP/WS、配置、storage、性能基准。
+- **P1 Agent 层**：模型客户端、tool-use、文件工具、命令工具、高危行为检测。
+- **P2 Workflow 层**：workspace、project、role、workflow、human gate、artifact、scheduler。
+- **P3 GUI 层**：多项目工作台、全局 runs/gates/队列、节点状态、角色权限、产出视图。
+- **P4 能力源层**：Codex、Claude Code、OpenCode、本地模型和其它 provider 接入。
 - 不要把多用户、权限审批平台、共享空间或企业协作能力引入当前路线。
 
 ### 1. 创建功能分支
