@@ -1,84 +1,17 @@
-# CodePanion 开发任务与重构路线
+# CodePanion 开发任务
 
-## 使用规则
+> 本文件记录开发任务和进度。产品定位见 [docs/POSITIONING.md](docs/POSITIONING.md)，架构设计见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
-- 本文件只记录当前可执行路线和状态，不再堆叠历史叙事。
-- 所有任务必须符合 [docs/POSITIONING.md](docs/POSITIONING.md)、[docs/LOCAL_AI_WORKFLOW.md](docs/LOCAL_AI_WORKFLOW.md)、[docs/RUST_REWRITE_PLAN.md](docs/RUST_REWRITE_PLAN.md)。
-- 每完成一组可验证改动，必须同步更新本文件状态。
-
-状态标记：
+## 状态标记
 
 - `[ ]` 未开始
-- `[-]` 进行中
+- `[>]` 进行中
 - `[x]` 已完成
 - `[!]` 受阻
 
 ---
 
-## 当前产品标准
-
-CodePanion 是一个 **Rust 本地全自动 AI IDE**，面向个人开发者，支持全自动 AI 驱动开发、多 AI 角色分工、外部 agentic coding tool 调用、多项目/多任务并行和用户自带模型 API。
-
-当前开发顺序：
-
-1. **Rust daemon 优先**：Node daemon 是过渡实现和行为基线，最终 daemon 以 Rust 为准。
-2. **全自动本地开发闭环**：AI 自动拆解、计划、实现、测试、审查、文档和归档。
-3. **Provider 能力源并行设计**：Codex、Claude Code、OpenCode、本地模型和国产 AI 编程工具必须能作为 workflow 角色能力源接入。
-4. **多项目/多任务并行**：全局 runs、gates、队列、跨项目 artifact 和跨项目依赖。
-
-核心执行模型：
-
-- `architecture=shell`：spawn 本地命令，用于测试、构建等非 AI 步骤。
-- `architecture=agent`：进程内 agent runtime，支持 tool-use 循环。
-- `provider=api|cli|harness`：外部 agentic coding tool 或内部 harness 能力源。
-- `model`：用户在 config.json 中配置的模型 API 或本地模型。
-
-Rust 目标指标：
-
-- daemon 空闲内存 < 50MB
-- daemon 冷启动 < 500ms
-- daemon 二进制 < 20MB
-- workflow 启动 < 50ms
-- 实时输出延迟 < 5ms
-
----
-
-## 当前阻塞
-
-- [x] **B-01 DTO 生成器仍引用旧监听 schema**
-  - 现象：`npm test` 在 `scripts/generate-csharp-dtos.mjs` 失败，仍引用已移除的 `MonitorEventSchema.shape`。
-  - 影响：Node 行为基线不稳定，Rust 迁移前建议先修复。
-  - 验收：`node --test packages/daemon/test/generateCsharpDtos.test.mjs` 通过；`npm run validate:dtos` 通过。
-
----
-
-## 已完成基线
-
-- [x] **C-01 下线监听路线残留**
-  - 删除 adapter-sdk 包。
-  - 清理 `protocol.ts` 中外部 IDE 监听 schema。
-  - 记录在 [docs/ARCHITECTURE_CLEANUP.md](docs/ARCHITECTURE_CLEANUP.md)。
-
-- [x] **C-02 确认现有进程内 agent 路线**
-  - 执行链路：workflow -> daemon -> agentRuntime -> modelClient API。
-  - 已有 single-call agent 与只读 tool-use 循环。
-
-- [x] **C-03 用户模型 API 基线**
-  - `config.json` 支持 `models`、`defaultModel`、`agent.maxTurns`。
-  - `modelClient` 支持 OpenAI-compatible API、tool-use 和取消。
-
-- [x] **C-04 工作流基线**
-  - workspace 配置目录。
-  - workflow definition schema。
-  - run history、artifact、delivery-note。
-  - human gate：approve / reject / retry。
-
-- [x] **C-05 文档路线校准**
-  - README、POSITIONING、PRODUCT_ROADMAP、ARCHITECTURE、LOCAL_AI_WORKFLOW、DEVELOPMENT、RUST_REWRITE_PLAN 已统一到 Rust 本地全自动 AI IDE 主线。
-
----
-
-## P0：Rust Daemon 技术验证
+## P0：Rust Daemon 技术验证 ✅
 
 目标：证明 Rust 可以承担最终 daemon 架构，并兼容现有 GUI/HTTP/WS 行为基线。
 
