@@ -13,10 +13,12 @@ use std::sync::{
 pub mod auto_fix;
 pub mod command;
 pub mod risk_detector;
+pub mod sandbox;
 pub mod tools;
 pub use auto_fix::{AutoFixConfig, AutoFixEvent, AutoFixResult, FixAttempt, run_auto_fix_loop};
 pub use command::{CommandRequest, CommandResult, CommandRisk, CommandTools, classify_command};
 pub use risk_detector::{RiskDetection, RiskDetector, RiskSeverity, RiskType};
+pub use sandbox::{IsolationLevel, Sandbox, SandboxConfig, SandboxResult};
 pub use tools::{ReadonlyTools, WriteTools, ensure_path_inside};
 
 // Tool-use loop 事件，用于实时推送到 GUI

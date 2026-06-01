@@ -154,7 +154,7 @@ Rust 目标指标：
 
 目标：实现能自动开发的 agent runtime，而不是只读问答。
 
-**进度**: 6/7 完成（86%）
+**进度**: 7/7 完成（100%）
 
 - [x] **A-01 Tool-use loop**
   - 模型 -> tool call -> tool result -> 模型续答。
@@ -194,6 +194,10 @@ Rust 目标指标：
   - 测试失败 -> 诊断 -> 修复 -> 重跑测试。
   - 超过重试上限进入人工门。
   - 验收：`run_auto_fix_loop` 实现完整循环；`AutoFixConfig` 配置测试命令和重试次数；`AutoFixResult` 记录修复历史；`AutoFixEvent` 支持实时事件推送；`diagnose_test_failure` 和 `generate_fix_plan` 提供占位实现；7 个测试覆盖配置构建、结果结构、事件类型和诊断逻辑；70 个 agent-runtime 测试全部通过。
+
+- [x] **A-07 沙箱隔离执行**
+  - 4 层隔离级别：None（无隔离）、PathRestricted（路径限制）、ResourceLimited（资源限制）、NetworkIsolated（网络隔离，未来实现）。
+  - 验收：`Sandbox` 实现 4 层隔离级别；`IsolationLevel` 枚举定义隔离级别并支持排序；`SandboxConfig` 配置隔离级别、超时、输出限制；`run_command` 根据隔离级别执行命令；`is_path_allowed` 检查路径是否在 workspace 内；9 个测试覆盖隔离级别排序、配置构建、路径检查、命令执行、高危命令阻止、超时强制执行；79 个 agent-runtime 测试全部通过。
 
 ---
 
