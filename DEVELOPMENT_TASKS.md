@@ -1,10 +1,10 @@
-# CodePanion 当前开发任务标准
+# CodePanion 开发任务与重构路线
 
 ## 使用规则
 
-- 本文件只记录路线大改后的当前任务，不再承载旧监听路线、历史审计流水账或已废弃验收项。
-- 新任务必须符合 [docs/POSITIONING.md](docs/POSITIONING.md) 和 [docs/LOCAL_AI_WORKFLOW.md](docs/LOCAL_AI_WORKFLOW.md)。
-- 每完成一组可验证改动，必须同步更新本文件状态。
+- 本文件记录当前开发任务和重构路线规划
+- 所有任务必须符合 [docs/POSITIONING.md](docs/POSITIONING.md) 和 [docs/LOCAL_AI_WORKFLOW.md](docs/LOCAL_AI_WORKFLOW.md)
+- 每完成一组可验证改动，必须同步更新本文件状态
 
 状态标记：
 
@@ -19,81 +19,245 @@
 
 > **本地优先、供应商中立、面向个人开发者的 Agent AI IDE + AI 工作流控制台。**
 
-CodePanion 后续专注：
+CodePanion 核心定位：
 
-1. **任务拆分**：把用户目标拆成可审核、可执行、可回收的 workflow 节点。
-2. **角色协作**：用 Orchestrator、Planner、Builder、Tester、Reviewer、Docs Writer 等角色推进开发。
-3. **能力源调用**：通过逆向接口 / API / CLI 调用 Codex、Claude Code、OpenCode、本地 CLI/PTY 等外部能力 —— CodePanion 是调用方，把它们当作可编排的能力源，不是把任务派给它们。
-4. **人工审核**：需求、计划、审查、交付等关键节点必须能由用户批准、拒绝或要求重试。
-5. **产出闭环**：记录计划、变更摘要、测试结果、审查报告、人工决策和交付摘要。
+1. **个人 Agent AI IDE**：一切在 CodePanion 内进行
+2. **模型走外部 API**：DeepSeek 等 OpenAI 兼容后端
+3. **agent 架构靠逆向**：Claude Code 等工具的架构在进程内复刻
+4. **不 shell 外部 CLI**：不把任务派给外部工具
+5. **不用插件**：不依赖 VS Code 等 IDE 插件
+6. **不监听外部 IDE**：不监听外部窗口、进程或会话
 
-明确不继续投入（监听路线 daemon 运行时已下线，仅 protocol schema 暂留待 GUI PR 一并清）：
+执行模型：**architecture（进程内 harness）× model（外部 API）两轴**
 
-- 外部窗口监听（SourceManager / 适配器已删）
-- 进程识别路线（AiToolProcessAdapter 已删）
-- Codex Desktop 被动同步路线（CodexDesktopAdapter 已删）
-- VS Code 来源事件路线（/sources、/events 已删）
-- 多源监控看板路线（/workflow/snapshot、threads 已删）
-- 旧的 handoff / 接力作为产品主概念（handoff 端点 + pty/handoffRunner 已删）
-- 交互式 PTY 监控 CLI（codepanion run/reply、pty/ 已删）
+- `architecture=shell`：spawn 本地命令（测试、构建等非 AI 步骤）
+- `architecture=agent`：进程内 agent 运行时调模型 API（逆向自 Claude Code）
+  - single-call：无工具权限时，调一次模型即返回
+  - tool-use 循环：有 `permissions=read` 时，agent 可多轮调用只读工具
 
 ---
 
-## P0：路线重排与仓库清理
+## 重构路线规划
 
-- [x] **W-01** 更新 [docs/POSITIONING.md](docs/POSITIONING.md)：确认监听路线退出当前产品定义。
-- [x] **W-02** 新增 [docs/LOCAL_AI_WORKFLOW.md](docs/LOCAL_AI_WORKFLOW.md)：定义 workspace、role、workflow、human gate、artifact、executor 边界。
-- [x] **W-03** 更新 [docs/PRODUCT_ROADMAP.md](docs/PRODUCT_ROADMAP.md)：Alpha 改为个人本地 AI 工作流闭环。
-- [x] **W-04** 更新 [README.md](README.md)：对外说明任务拆分、角色协作、多模型和人工审核闭环。
-- [x] **W-05** 清理旧路线文档：删除监控源、能力证据、工具接入、旧审计、旧验收、旧用户指南和旧实现日志。
-- [x] **W-06** 重写本文件，移除旧监听路线 backlog。
+### 阶段 1：架构清理（已完成 ✅）
 
----
+**目标**：彻底下线监听路线残留，确认工作流路线
 
-## P1：建立本地 workflow 模型
+- [x] **R-01** 删除 adapter-sdk 包（监听路线残留）
+- [x] **R-02** 清理 protocol.ts 中的监听外部 IDE 的 schema
+  - 删除：`RegisterSourceRequest`、`MonitorEvent`、`MonitorSource`、`SourceKind`、`HandoffTarget`、`WorkflowItem`、`WorkflowThread`、`LaunchHandoff`、`RegisterSession`、`SessionOutput`、`SessionPrompt`、`Reply`、`SessionExit`、`SessionInfo`
+  - 保留：`NotifyRequest`、`InitializeWorkspaceRequest`、`ResolveWorkflowGateRequest`、`StartWorkflowRunRequest`、`WsServerEvent`（简化为 3 种）
+- [x] **R-03** 确认 agent 架构完全走进程内
+  - 验证执行路线：workflow → daemon → agentRuntime → modelClient API
+  - 验证 `resolveStepArchitecture`：`provider=local→shell`，其余→`agent`
+  - 验证 `daemonAgentExecutor`：读 role prompt、解析 model、构建工具、调 `runAgentLoop`
+  - 验证 `runAgentLoop`：tool-use 循环、maxTurns 封顶、实时推送
+  - 验证 `chatCompletion`：fetch OpenAI 兼容 API
+- [x] **R-04** 构建和测试验证
+  - 构建成功
+  - 核心测试全部通过
+  - daemon bundle 生成成功 (1.8mb)
+- [x] **R-05** 文档记录：[docs/ARCHITECTURE_CLEANUP.md](docs/ARCHITECTURE_CLEANUP.md)
 
-- [x] **W-10** 定义 workspace 级配置目录：`.codepanion/workflow.json`、`.codepanion/roles/*.md`、`.codepanion/artifacts/`。
-- [x] **W-11** 扩展 workflow definition schema，支持 role、model、permissions、contextPolicy、humanGate、artifact 输出契约。
-- [x] **W-12** 新增内置角色模板：Orchestrator、Planner、Builder、Tester、Reviewer、Docs Writer。
-- [x] **W-13** 将现有 handoff 状态收敛为 role assignment / executor run 状态，避免继续围绕“转交给外部工具”组织主概念。
-- [x] **W-14** 新增 workflow run artifact 历史：计划、变更摘要、测试结果、审查报告、人工决策、交付摘要。
-
----
-
-## P2：GUI 从会话流转向 workflow board
-
-- [x] **W-20** 将主界面第一层重排为 workspace / workflow 列表，而不是外部会话列表。
-  - **GUI 整体重建为工作流控制台**：删除监听式 shell（VS Code 插件面板 / 来源分组任务队列 / 会话流 / 接力 PTY 面板 / 收件箱 / session 回复 omnibar），chat.html/js/css 全部重写。
-  - 顶栏 workspace 选择条（路径 + 最近列表 localStorage 持久化，空=全局）+ 连接状态。
-  - 三栏：左 workflow 定义/近期 runs/人工门，中 run 时间线，右 详情/人工门决策。
-  - webview ↔ host 协议收敛为工作流控制台：`request-workflow-board/run/launch/gate-resolve/run-cancel/delivery` + `set-workspace`；旧的 reply/event-reply/task-action/handoff-launch 移除。
-- [x] **W-21** 中央区域展示 workflow 节点、当前角色、状态、阻塞点和人工审核门。
-  - 中栏 run 时间线：steps 顺序 + 状态染色 + 当前步 + exitCode；接 daemon WS `workflow-run-event` 实时更新（run-start/step-start/step-output/step-finish/run-finish），step-output 实时滚动。
-- [-] **W-22** 右侧抽屉展示角色、模型、权限、artifact 和原始执行记录。
-  - 已做：右栏展示 artifacts、delivery（复制 markdown/handoff）、步骤 stdout/stderr 输出。
-  - 待办：role / model / permission / contextPolicy 绑定展示（需 daemon 暴露 workspace roleBindings 给 board）。
-- [-] **W-23** 保留 `等待我 / 失败 / 需审阅 / 运行中 / 完成`，但状态挂到 workflow 节点和 artifact。
-  - 已做：run 状态（running/paused/failed/success）挂到 run 卡片与时间线 chip；paused gate 单列展示。
-  - 待办：把这些状态做成可筛选的队列视图。
+**成果**：
+- ✅ adapter-sdk 已删除
+- ✅ protocol.ts 已清理监听 schema
+- ✅ agent 架构确认完全走进程内
+- ✅ 执行路线验证通过
+- ✅ 测试全部通过
 
 ---
 
-## P3：多模型与多角色执行闭环
+### 阶段 2：文档清理（进行中 📝）
 
-- [x] **W-30** 支持同一模型绑定不同角色 prompt、权限和上下文策略。
-- [-] **W-31** 支持不同 architecture / model 在同一 workflow 中协作。
-  - **执行模型两轴化（2026-05-29 定位细化）**：step 执行 = architecture（`shell` 进程内 spawn / `agent` 进程内调模型 API）× model（config.models 的 OpenAI 兼容后端）。旧 `provider` 兼容派生（local→shell，其余→agent），`providerInvocation` 的外部 CLI 拼装已退役。
-  - slice 1 = single-call agent：组 prompt → 调一次 `/chat/completions` → 文本落 stepRun.output + WS step-output 实时推送 + delivery-note `## Step output preview`。
-  - `daemonWorkflowExecutor` 返回结构化结果（exitCode + stdout + stderr + truncated），shell/agent 两路都落 `stepRun.output`，每流 cap 32KB。
-  - config.json `models` / `defaultModel` + [modelClient.ts](packages/daemon/src/models/modelClient.ts)（内置 fetch）；daemon `agentExecutor` 解析 role/model→后端→调模型。
-  - slice 2a = tool-use 循环（只读）：`read_file` / `list_dir`，`permissions=read` + workspace 门控，`ensurePathInside` 钳沙箱，`config.agent.maxTurns` 封顶，每轮经 WS step-output 实时推。[agentRuntime.ts](packages/daemon/src/models/agentRuntime.ts) + [agentTools.ts](packages/daemon/src/workflows/agentTools.ts)。
-  - 待办：slice 2b 写工具（`write_file` / `run_command`，write/command 权限 + cwd 钳 workspace + batch-arg 防护）；contextPolicy 强制；GUI 选择 architecture/model + 编辑模型后端。
-- [x] **W-32** 支持人工在计划、审查、交付门中批准、拒绝、要求重试或追加约束。
-  - approve：复用原 runId 从 checkpoint 之后续跑（PR #8）
-  - reject：仅落 human-decision artifact，run 维持 paused
-  - retry：复用原 runId，回到 checkpoint 前最近一个 success step 重跑该 step，checkpoint 因 yes:true 自动跳过
-  - constraints：列表并入 resumed run 的 `values.constraints`，后续 step 可用 `{constraints}` 模板引用
-- [x] **W-33** 每次完成 workflow 后生成可复盘交付摘要，并能复制给 Codex / Claude Code / OpenCode 继续处理。
-  - delivery-note 由 `recordDeliveryNote` 在每次 workflow 结束（含 paused/failed）自动落条
-  - `GET /workflow/runs/:runId/delivery?format=markdown|handoff` 把最新 delivery-note 拉成可直接复制的文本
-  - `format=handoff` 在 delivery-note 外再包一层 continuation prompt，可整段贴到 `codex exec` / `claude -p` / `opencode run`
+**目标**：清理所有文档中的监听路线残留，统一到工作流路线
+
+#### 2.1 核心文档清理
+
+- [ ] **R-10** 清理 [docs/POSITIONING.md](docs/POSITIONING.md)
+  - 移除监听路线、handoff、外部 IDE 集成的描述
+  - 强化工作流路线、进程内 agent、两轴执行模型
+  
+- [ ] **R-11** 清理 [docs/PRODUCT_ROADMAP.md](docs/PRODUCT_ROADMAP.md)
+  - 移除监听来源、适配器、handoff 的路线图
+  - 更新为工作流路线的迭代计划
+
+- [ ] **R-12** 清理 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+  - 移除 SourceManager、Adapter、HandoffRunner 的架构描述
+  - 更新为 workflow → daemon → agentRuntime → modelClient 的架构
+  - 补充两轴执行模型的详细说明
+
+- [ ] **R-13** 清理 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
+  - 移除监听路线的开发指南
+  - 更新为工作流路线的开发指南
+
+- [ ] **R-14** 清理 [docs/API.md](docs/API.md)
+  - 移除 `/sources`、`/events`、`/handoff`、`/sessions` 等旧端点
+  - 只保留工作流路线的端点：`/workflow/board`、`/workflow/runs`、`/workflow/gates`、`/workspace/initialize`、`/workspace/config`
+
+#### 2.2 辅助文档清理
+
+- [ ] **R-15** 清理 [docs/README.md](docs/README.md)
+  - 更新文档索引，移除监听路线相关文档
+
+- [ ] **R-16** 清理 [docs/RETENTION.md](docs/RETENTION.md)
+  - 移除监听路线的保留说明
+
+- [ ] **R-17** 检查并清理 [docs/superpowers/](docs/superpowers/) 目录
+  - 移除监听路线相关的计划文档
+
+---
+
+### 阶段 3：GUI 重构（待规划 🔮）
+
+**目标**：GUI 从监听式会话流转向工作流控制台
+
+#### 3.1 GUI 架构重构
+
+- [ ] **R-20** 删除旧的监听式 GUI 代码
+  - 删除 VS Code 插件面板相关代码
+  - 删除来源分组任务队列
+  - 删除会话流 UI
+  - 删除接力 PTY 面板
+  - 删除收件箱
+  - 删除 session 回复 omnibar
+
+- [ ] **R-21** 实现工作流控制台 GUI
+  - 顶栏：workspace 选择条 + 连接状态
+  - 左栏：workflow 定义列表 + 近期 runs + 人工审核门
+  - 中栏：run 时间线（steps 顺序 + 状态 + 实时输出）
+  - 右栏：详情（artifacts、delivery、role/model/permission）
+
+#### 3.2 GUI 协议清理
+
+- [ ] **R-22** 清理 webview ↔ host 协议
+  - 移除：`reply`、`event-reply`、`task-action`、`handoff-launch`
+  - 保留：`request-workflow-board`、`request-workflow-run`、`request-workflow-launch`、`request-gate-resolve`、`request-run-cancel`、`request-delivery`、`set-workspace`
+
+- [ ] **R-23** 实现 WebSocket 实时更新
+  - 接收 `workflow-run-event`（run-start、step-start、step-output、step-finish、run-finish）
+  - 实时更新 run 时间线
+  - 实时滚动 step-output
+
+---
+
+### 阶段 4：功能完善（待规划 🔮）
+
+**目标**：完善工作流路线的核心功能
+
+#### 4.1 Agent 工具扩展
+
+- [ ] **R-30** 实现写工具（slice 2b）
+  - `write_file`：`permissions=write` 门控，cwd 钳 workspace
+  - `run_command`：`permissions=command` 门控，Windows batch-arg 防护
+
+- [ ] **R-31** 实现 contextPolicy 强制
+  - `maxTokens`：限制上下文预算
+  - `include` / `exclude`：过滤可读取文件
+
+#### 4.2 GUI 功能完善
+
+- [ ] **R-32** 实现队列视图
+  - 可筛选的状态队列：等待我、失败、需审阅、运行中、完成
+  - 状态挂到 workflow 节点和 artifact
+
+- [ ] **R-33** 实现 role/model/permission 展示
+  - daemon 暴露 workspace roleBindings 给 board
+  - GUI 展示 role 绑定的 model、prompt、permissions、contextPolicy
+
+- [ ] **R-34** 实现 architecture/model 编辑
+  - GUI 选择 step 的 architecture（shell / agent）
+  - GUI 选择 step 的 model
+  - GUI 编辑 config.json 的 models 后端
+
+---
+
+## 当前进度总结
+
+### 已完成 ✅
+
+1. **架构清理**（阶段 1）
+   - adapter-sdk 已删除
+   - protocol.ts 已清理监听 schema
+   - agent 架构确认完全走进程内
+   - 执行路线验证通过
+   - 测试全部通过
+
+2. **核心功能**（P1-P3）
+   - workspace 级配置目录
+   - workflow definition schema 扩展
+   - 内置角色模板
+   - workflow run artifact 历史
+   - 人工审核门（approve/reject/retry）
+   - delivery-note 生成
+   - 执行模型两轴化（architecture × model）
+   - single-call agent
+   - tool-use 循环（只读）
+
+3. **GUI 基础**（W-20/W-21 部分）
+   - 工作流控制台基础布局
+   - run 时间线实时更新
+   - artifacts 和 delivery 展示
+
+### 进行中 📝
+
+1. **文档清理**（阶段 2）
+   - 需要清理所有文档中的监听路线残留
+
+2. **GUI 完善**（W-22/W-23 部分）
+   - role/model/permission 展示
+   - 队列视图
+
+### 待规划 🔮
+
+1. **GUI 重构**（阶段 3）
+   - 删除旧的监听式 GUI 代码
+   - 实现完整的工作流控制台
+
+2. **功能完善**（阶段 4）
+   - 写工具（write_file / run_command）
+   - contextPolicy 强制
+   - architecture/model 编辑
+
+---
+
+## 验收标准
+
+### 阶段 1：架构清理 ✅
+
+- [x] adapter-sdk 目录已删除
+- [x] protocol.ts 中无监听 schema 残留
+- [x] agent 执行路线验证通过
+- [x] 构建成功
+- [x] 核心测试全部通过
+
+### 阶段 2：文档清理
+
+- [ ] 所有文档中无监听路线、handoff、外部 IDE 集成的描述
+- [ ] 所有文档统一到工作流路线
+- [ ] API 文档只包含工作流路线的端点
+
+### 阶段 3：GUI 重构
+
+- [ ] 旧的监听式 GUI 代码已删除
+- [ ] 工作流控制台 GUI 实现完整
+- [ ] webview ↔ host 协议清理完成
+- [ ] WebSocket 实时更新正常工作
+
+### 阶段 4：功能完善
+
+- [ ] 写工具实现并测试通过
+- [ ] contextPolicy 强制实现并测试通过
+- [ ] 队列视图实现
+- [ ] role/model/permission 展示实现
+- [ ] architecture/model 编辑实现
+
+---
+
+## 参考文档
+
+- [docs/POSITIONING.md](docs/POSITIONING.md) - 产品定位
+- [docs/LOCAL_AI_WORKFLOW.md](docs/LOCAL_AI_WORKFLOW.md) - 工作流设计
+- [docs/PRODUCT_ROADMAP.md](docs/PRODUCT_ROADMAP.md) - 产品路线图
+- [docs/ARCHITECTURE_CLEANUP.md](docs/ARCHITECTURE_CLEANUP.md) - 架构清理记录
+- [README.md](README.md) - 项目说明
