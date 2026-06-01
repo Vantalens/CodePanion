@@ -21,6 +21,18 @@ impl std::fmt::Display for CodePanionError {
 
 impl std::error::Error for CodePanionError {}
 
+impl From<std::io::Error> for CodePanionError {
+    fn from(err: std::io::Error) -> Self {
+        Self::Runtime(err.to_string())
+    }
+}
+
+impl From<serde_json::Error> for CodePanionError {
+    fn from(err: serde_json::Error) -> Self {
+        Self::Runtime(err.to_string())
+    }
+}
+
 pub type Result<T> = std::result::Result<T, CodePanionError>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

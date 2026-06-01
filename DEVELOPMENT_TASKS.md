@@ -219,8 +219,9 @@ Rust 目标指标：
   - 支持坏行跳过、compaction、workspace 隔离。
   - 验收：实现 `WorkflowRunHistory`；支持 NDJSON append-only 存储；支持 list、get、search、append 操作；支持坏行跳过（parse 失败不影响其他记录）；支持自动 compaction（超过阈值时保留最近的 max_runs 条）；支持重复 ID 去重（保留后写入的）；7 个测试全部通过（append、list、get、search、去重、compaction、坏行跳过）；通过 fmt 和 clippy 检查。
 
-- [ ] **W-04 Artifact store**
+- [x] **W-04 Artifact store**
   - plan、patch-summary、test-result、review-report、human-decision、delivery-note。
+  - 验收：实现 `WorkflowArtifactStore`；支持 6 种 artifact 类型（plan、patch-summary、test-result、review-report、human-decision、delivery-note）；支持 NDJSON append-only 存储；支持 append、list、get_by_type 操作；支持坏行跳过（parse 失败不影响其他记录）；支持自动 compaction（超过阈值时保留最近的 max_artifacts 条）；支持自定义 artifact ID；7 个测试全部通过（append、list、filter by run_id、filter by type、custom id、compaction、坏行跳过）；通过 fmt 和 clippy 检查。
 
 - [ ] **W-05 Human gate**
   - approve / reject / retry。

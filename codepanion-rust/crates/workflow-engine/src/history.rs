@@ -366,7 +366,6 @@ fn string_to_step_status(s: &str) -> Result<StepStatus> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::definition::{WorkflowContextPolicy, WorkflowProvider, WorkflowStep};
     use std::collections::HashMap;
     use tempfile::TempDir;
 
