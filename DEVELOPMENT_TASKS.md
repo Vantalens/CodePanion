@@ -17,21 +17,29 @@
 
 ## 当前产品标准
 
-> **CodePanion 是一个新的 AI IDE**，专为个人开发者设计，支持**全自动 AI 驱动开发**和**多项目同步管理**。
+> **CodePanion 是一个轻量、高性能的新 AI IDE**，专为个人开发者设计，支持**全自动 AI 驱动开发**和**多项目同步管理**。
 
 CodePanion 核心定位（2026-06-01 更新）：
 
-1. **全自动 AI 驱动开发**：AI 自行进行角色分工（Orchestrator、Planner、Builder、Tester、Reviewer）和任务执行，用户只需观察监控，必要时介入
-2. **用户可介入控制**：用户可以随时介入、修改任务方向、自行编辑代码、批准/拒绝/重试任务
-3. **调用外部 agentic coding tool**：通过逆向接口或 API 调用 Codex、Claude Code、OpenCode 等
-4. **用户自行提供 API**：支持用户配置自己的模型 API（DeepSeek、OpenAI、Claude、本地模型等）
-5. **多项目同步开发管理**：在一个 IDE 内管理多个项目的 workflow
+1. **轻量高性能**：内存占用极低（< 100MB 空闲）、硬盘占用低（< 150MB）、启动快速（< 3s）、性能极强
+2. **全自动 AI 驱动开发**：AI 自行进行角色分工和任务执行，AI 自主审核代码，只有高危行为才需要用户判断
+3. **用户操作简单**：输入目标 → 观察监控 → 必要时介入，无需复杂配置
+4. **调用外部 agentic coding tool**：通过逆向接口或 API 调用 Codex、Claude Code、OpenCode 等
+5. **用户自行提供 API**：支持用户配置自己的模型 API（DeepSeek、OpenAI、Claude、本地模型等）
+6. **多项目同步开发管理**：在一个 IDE 内管理多个项目的 workflow
 
 执行模型：**architecture（进程内 harness）× model（用户配置的 API）两轴**
 
 - `architecture=shell`：spawn 本地命令（测试、构建等非 AI 步骤）
 - `architecture=agent`：进程内 agent 运行时（逆向自 Claude Code，支持 tool-use 循环）
 - `model`：用户在 config.json 中配置的模型 API（DeepSeek、OpenAI、Claude、本地模型等）
+
+性能指标：
+
+- **内存占用**：daemon < 100MB（空闲）、GUI < 50MB（空闲）、运行 workflow < 500MB
+- **硬盘占用**：安装包 < 50MB、安装后 < 150MB
+- **启动时间**：冷启动 < 3s、热启动 < 1s
+- **执行延迟**：workflow 启动 < 100ms、step 执行 < 50ms、实时输出 < 10ms
 
 ---
 
