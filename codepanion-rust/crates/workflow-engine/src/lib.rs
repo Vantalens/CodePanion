@@ -1,9 +1,17 @@
 // W-01: Workflow definition
 pub mod definition;
 
+// W-02: Step executor
+pub mod executor;
+
 pub use definition::{
     DefinitionStore, WorkflowArchitecture, WorkflowArtifactType, WorkflowContextPolicy,
     WorkflowDefinition, WorkflowPermission, WorkflowProvider, WorkflowStep,
+};
+
+pub use executor::{
+    DefaultShellExecutor, StepExecutionResult, StepExecutor, StepRun, StepStatus, WorkflowExecutor,
+    WorkflowRun, WorkflowRunStatus,
 };
 
 // 旧的简化版本（保留用于向后兼容）

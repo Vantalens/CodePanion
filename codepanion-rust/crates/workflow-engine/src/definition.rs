@@ -31,7 +31,6 @@ pub enum WorkflowProvider {
     Opencode,
 }
 
-
 /// 执行架构（harness）
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -65,7 +64,6 @@ pub struct WorkflowContextPolicy {
     #[serde(default)]
     pub exclude: Vec<String>,
 }
-
 
 impl WorkflowContextPolicy {
     /// 验证 context glob 路径

@@ -209,9 +209,10 @@ Rust 目标指标：
   - 解析 workflow、step、role、model、provider、permissions、contextPolicy、artifacts、checkpoint。
   - 验收：实现 `WorkflowDefinition`、`WorkflowStep`、`WorkflowContextPolicy`、`WorkflowPermission`、`WorkflowProvider`、`WorkflowArchitecture`、`WorkflowArtifactType`、`DefinitionStore` 结构；支持 JSON 序列化/反序列化；完整的验证逻辑（标识符、路径、依赖关系、唯一性）；11 个测试全部通过；通过 fmt 和 clippy 检查。
 
-- [ ] **W-02 Step executor**
+- [x] **W-02 Step executor**
   - 支持 shell / agent / provider 三类执行。
   - 支持依赖顺序、失败短路、取消。
+  - 验收：实现 `StepExecutor` trait、`DefaultShellExecutor`、`WorkflowExecutor`；支持 shell 命令执行；支持依赖检查、失败短路、checkpoint；实现 `StepRun`、`WorkflowRun` 状态跟踪；7 个测试全部通过（dry-run、依赖检查、checkpoint、shell 执行、失败处理）；通过 fmt 和 clippy 检查。
 
 - [ ] **W-03 Run history**
   - NDJSON 或等价 append-only 存储。
