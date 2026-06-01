@@ -5,7 +5,9 @@
 
 ## 背景
 
-CodePanion 的定位是**个人 Agent AI IDE + 本地 AI 工作流控制台**，核心原则是：
+CodePanion 的当前定位已校准为**Rust 本地全自动 AI IDE**。本文件记录的是 2026-06-01 已完成的“下线监听路线”清理结果；后续开发主线以 [RUST_REWRITE_PLAN.md](RUST_REWRITE_PLAN.md)、[POSITIONING.md](POSITIONING.md) 和 [DEVELOPMENT_TASKS.md](../DEVELOPMENT_TASKS.md) 为准。
+
+清理阶段确认的核心原则是：
 
 1. **一切在 CodePanion 内进行**
 2. **模型走外部 API**（如 DeepSeek）

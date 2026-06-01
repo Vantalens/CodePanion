@@ -3,23 +3,26 @@
 本文档用于约束 README、路线图、GUI 文案、包描述和后续功能规划。
 
 - 2026-05-28 起，CodePanion 放弃外部监听路线，主线调整为「个人本地 AI 工作流闭环」。
-- 2026-05-29 起，进一步将定位明确为「**个人 Agent AI IDE + AI 工作流控制台**」双重身份。
+- 2026-05-29 起，曾将定位明确为「个人 Agent AI IDE + AI 工作流控制台」双重身份；该表述已被 2026-06-01 的 Rust 本地全自动 AI IDE 主线取代。
 - **2026-06-01 起，明确 CodePanion 是一个新的 AI IDE**：通过逆向或调用接口使用外部 agentic coding tool，使用用户自行提供的 API 进行本地工作流搭建，实现对多项目的同步开发管理。
 - **2026-06-01 更新：支持全自动 AI 驱动开发**：AI 自行进行角色分工和任务执行，用户观察监控项目进程，可以介入、修改任务方向和自行编辑。
 - **2026-06-01 更新：轻量、高性能、简单操作、AI 自主审核**：内存占用极低、硬盘占用低、性能极强、用户操作简单、AI 自主审核代码（只有高危行为才需要用户判断）。
+- **2026-06-01 开发主线校准：Rust 重构优先**：CodePanion 的最终形态不是普通控制台，而是 Rust daemon 驱动的本地全自动、多 AI、多项目并行开发 IDE；现有 Node daemon / GUI 是过渡实现和行为基线。
 
 ## 定位声明
 
-**CodePanion 是一个轻量、高性能的新 AI IDE**，专为个人开发者设计，支持**全自动 AI 驱动开发**和**多项目同步管理**。
+**CodePanion 是一个本地优先、轻量高性能的新 AI IDE**，专为个人开发者设计，目标是用 Rust daemon 承载**全自动 AI 驱动开发**、**多 AI 角色分工**和**多项目/多任务同步开发管理**。
 
 核心特点：
 
-1. **轻量高性能**：内存占用极低、硬盘占用低、性能极强、启动快速
-2. **全自动 AI 驱动开发**：AI 自行进行角色分工和任务执行，AI 自主审核代码，只有高危行为才需要用户判断
-3. **用户操作简单**：输入目标 → 观察监控 → 必要时介入，无需复杂配置
-4. **调用外部 agentic coding tool**：通过逆向接口或 API 调用 Codex、Claude Code、OpenCode 等
-5. **用户自行提供 API**：支持用户配置自己的模型 API（DeepSeek、OpenAI 等），不依赖特定供应商
-6. **多项目同步开发管理**：在一个 IDE 内管理多个项目的 workflow
+1. **Rust 轻量高性能**：daemon 目标 < 50MB 空闲内存、< 500ms 冷启动、二进制 < 20MB
+2. **本地全自动 AI 驱动开发**：输入目标后，AI 自动拆解、计划、实现、测试、审查、文档和归档
+3. **多 AI 角色分工**：Orchestrator、Planner、Builder、Tester、Reviewer、Docs Writer 可绑定不同模型或能力源协作
+4. **AI 自主审核 + 高危门控**：低危开发动作自动推进，高危行为交给用户判断
+5. **用户操作简单**：输入目标 → 观察多任务进程 → 必要时介入，无需复杂配置
+6. **多项目/多任务同步开发管理**：在一个 IDE 内同时管理多个项目、多个 workflow、全局 runs/gates/队列
+7. **用户自行提供 API**：支持用户配置自己的模型 API（DeepSeek、OpenAI、Claude、本地模型等），不依赖特定供应商
+8. **外部 agentic coding tool 调用能力**：Codex、Claude Code、OpenCode 等必须能作为 workflow 角色的能力源，通过公开 API、CLI executor 或进程内复刻的 agent 架构接入
 
 **CodePanion 是主体（调用方），外部 AI 工具和模型 API 是被它调用的能力（被调用方）。**
 
@@ -27,33 +30,37 @@
 
 | 相邻产品类型 | 容易撞车的说法 | CodePanion 的正确说法 |
 |---|---|---|
-| OpenCode / Codex / Claude Code | 替代某个 AI 编程工具 | 调用它们的能力，CodePanion 是上层 AI IDE，支持全自动 AI 驱动开发 |
+| OpenCode / Codex / Claude Code | 替代某个 AI 编程工具 | 调用并编排它们的 agentic coding 能力，同时保留 CodePanion 的本地全自动多角色主闭环 |
 | Cursor / Windsurf / Cline | 新一代代码编辑器 | 不做代码编辑器，做轻量高性能的 AI IDE：AI 自行进行角色分工和任务执行，AI 自主审核 |
 | Devin / OpenDevin | 全自动 AI 软件工程师 | 类似理念，但 CodePanion 更轻量、更高性能、更简单、本地优先、供应商中立 |
-| 通用个人 Agent / OpenClaw | 全能个人助手 | 只围绕开发场景，管理多项目的 AI 工作流 |
+| 通用个人 Agent / OpenClaw | 全能个人助手 | 只围绕开发场景，管理多项目、多任务并行的 AI 开发工作流 |
 
 ## 做什么
 
-### 1. 轻量高性能
+### 1. Rust 轻量高性能
+
+当前开发优先级是 Rust 重构。Node.js daemon 是过渡实现，保留用于验证 HTTP/WS 契约、workflow 行为和 GUI 交互；最终性能架构以 Rust daemon 为准。
 
 - **内存占用极低**：
-  - daemon 进程内存占用 < 100MB（空闲时）
+  - Rust daemon 进程内存占用 < 50MB（空闲时）
   - GUI 进程内存占用 < 50MB（空闲时）
-  - 运行 workflow 时内存占用 < 500MB
+  - 运行单个 workflow 时内存占用 < 300MB
+  - 多项目/多任务并行时内存占用 < 500MB
   - 不加载不必要的依赖，按需加载模块
 
 - **硬盘占用低**：
-  - 安装包 < 50MB（压缩后）
-  - 安装后 < 150MB
+  - Rust daemon 二进制 < 20MB
+  - 安装包 < 30MB（压缩后）
+  - 安装后 < 100MB
   - 不内置模型，不内置大型依赖
   - 日志和缓存自动清理
 
 - **性能极强**：
-  - daemon 启动时间 < 1s
+  - daemon 启动时间 < 500ms
   - GUI 启动时间 < 2s
-  - workflow 启动延迟 < 100ms
-  - step 执行延迟 < 50ms（不含模型 API 调用）
-  - 实时输出延迟 < 10ms
+  - workflow 启动延迟 < 50ms
+  - step 执行延迟 < 20ms（不含模型 API 调用）
+  - 实时输出延迟 < 5ms
 
 - **启动快速**：
   - 冷启动 < 3s（daemon + GUI）
@@ -97,14 +104,19 @@
 ### 5. 新的 AI IDE
 
 - **多项目管理**：在一个 IDE 内管理多个项目，每个项目有独立的 workspace、workflow 和角色配置
-- **跨项目编排**：支持跨项目的任务依赖、资源共享和并行执行
-- **统一控制台**：在一个界面内查看所有项目的 workflow 状态、高危行为审核门和产出
+- **多任务同步开发**：同一时间运行多个 workflow，按项目、优先级、风险等级和人工门状态调度
+- **跨项目编排**：支持跨项目的任务依赖、artifact 引用、资源共享和并行执行
+- **统一工作台**：在一个界面内查看所有项目的 workflow 状态、高危行为审核门、全局队列和产出
 
 ### 6. 调用外部 agentic coding tool
 
-- **逆向接口**：通过逆向工程复刻 Claude Code、Codex、OpenCode 等工具的 agent 架构，在 CodePanion 进程内运行
-- **API 调用**：通过 API 调用外部工具的能力（如果它们提供 API）
-- **能力编排**：把外部工具当作可编排的能力源，在 workflow 中组合使用
+外部 agentic coding tool 是 CodePanion 必须支持的一等能力源。调用方式分三层：
+
+- **API provider**：外部工具提供公开 API 时，由 CodePanion 实现 provider client，并把它映射为 workflow step executor。
+- **CLI provider**：外部工具只提供 CLI 时，由 CodePanion 以受控 `cwd`、参数白名单、超时、取消、输出捕获和权限声明运行。
+- **In-process harness**：对 Claude Code、Codex、OpenCode 等工具的 agent 架构进行研究，把可复用的 tool-use、上下文管理、任务委派和权限模型复刻到 CodePanion daemon 内。
+
+外部工具能力应服务于本地 workflow：角色可以绑定不同外部工具或模型，同一 workflow 可以组合 Codex 负责实现、Claude Code 风格 reviewer 负责审查、OpenCode 风格 subagent 负责局部任务。CodePanion 不读取外部工具私有 token、cookie、插件数据库、闭源内部状态或全局屏幕内容。
 
 ### 7. 用户自行提供 API
 
@@ -135,15 +147,16 @@
 
 ## MVP 焦点
 
-0 到 1 的 MVP 围绕"**轻量高性能的新 AI IDE：全自动 AI 驱动开发 + AI 自主审核 + 用户操作简单 + 多项目管理 + 调用外部 agentic tool + 用户自行提供 API**"成立：
+0 到 1 的 MVP 围绕"**Rust 本地全自动 AI IDE：全自动 AI 驱动开发 + 多 AI 角色分工 + AI 自主审核 + 多项目/多任务并行 + 用户自行提供 API**"成立：
 
-1. **轻量高性能**：内存占用 < 100MB（空闲）、硬盘占用 < 150MB、启动时间 < 3s
+1. **Rust 轻量高性能**：daemon 空闲内存 < 50MB、二进制 < 20MB、daemon 冷启动 < 500ms
 2. **全自动 AI 驱动开发**：AI 自行进行角色分工和任务执行，AI 自主审核代码
 3. **AI 自主审核**：只有高危行为才需要用户判断，其他自动通过
 4. **用户操作简单**：输入目标 → 观察监控 → 必要时介入，无需复杂配置
-5. **多项目管理**：workspace 列表、项目切换、跨项目任务编排
-6. **调用外部 agentic tool**：逆向 Claude Code 等工具的 agent 架构，在进程内运行
+5. **多项目/多任务管理**：workspace 列表、项目切换、跨项目任务编排、全局 runs/gates/队列
+6. **多 AI 角色协作**：同一模型多角色与多模型协作都能在本地 workflow 中运行
 7. **用户自行提供 API**：config.json 配置模型 API，支持 DeepSeek、OpenAI、Claude、本地模型
+8. **外部 agentic tool 调用能力**：通过 API provider、CLI provider 或进程内 harness 调用 Codex、Claude Code、OpenCode 等能力源
 
 外部监听、跨工具自动转派和更深国产工具适配不进入当前主线。
 

@@ -1,39 +1,42 @@
 # CodePanion
 
-CodePanion 是一个**轻量、高性能的新 AI IDE**，专为个人开发者设计，支持**全自动 AI 驱动开发**和**多项目同步管理**。
+CodePanion 是一个**本地优先、轻量高性能的新 AI IDE**，专为个人开发者设计，目标是用 Rust daemon 承载**全自动 AI 驱动开发**、**多 AI 角色分工**和**多项目/多任务同步开发管理**。
+
+> 当前开发主线：先完成 Rust 重构技术验证与核心模块迁移，再把全自动本地 AI 工作流、多角色协作、高危行为审核门和多项目并行调度做成可真实使用的闭环。现有 Node daemon + WPF/WebView2 GUI 是过渡实现和行为基线，不是最终性能架构。
 
 ## 核心特点
 
-1. **轻量高性能**：内存占用极低（< 100MB 空闲）、硬盘占用低（< 150MB）、启动快速（< 3s）、性能极强
-2. **全自动 AI 驱动开发**：AI 自行进行角色分工和任务执行，AI 自主审核代码，只有高危行为才需要用户判断
-3. **用户操作简单**：输入目标 → 观察监控 → 必要时介入，无需复杂配置
-4. **调用外部 agentic coding tool**：通过逆向接口或 API 调用 Codex、Claude Code、OpenCode 等
-5. **用户自行提供 API**：支持用户配置自己的模型 API（DeepSeek、OpenAI、Claude、本地模型等），不依赖特定供应商
-6. **多项目同步开发管理**：在一个 IDE 内管理多个项目的 workflow
+1. **Rust 轻量高性能**：daemon 目标 < 50MB 空闲内存、< 500ms 冷启动、二进制 < 20MB
+2. **本地全自动 AI 开发工作流**：输入目标后，AI 自动拆解、计划、实现、测试、审查、文档和归档
+3. **多 AI 角色分工**：Orchestrator、Planner、Builder、Tester、Reviewer、Docs Writer 可绑定不同模型或能力源协作
+4. **AI 自主审核 + 高危门控**：低危开发动作自动推进，高危行为交给用户判断
+5. **多项目/多任务同步开发**：一个 IDE 同时管理多个项目、多个 workflow、全局 runs/gates/队列
+6. **用户自行提供 API**：支持 DeepSeek、OpenAI、Claude、本地模型等，不做 token 二次分销
+7. **外部 agentic coding tool 调用能力**：必须能把 Codex、Claude Code、OpenCode 等作为 workflow 角色的能力源，通过公开 API、CLI executor 或进程内复刻的 agent 架构调用
 
 ## 性能指标
 
-### 内存占用
-- daemon 空闲：< 100MB
-- GUI 空闲：< 50MB
+### Rust daemon 目标
+- daemon 空闲：< 50MB
 - 运行 1 个 workflow：< 300MB
-- 运行 3 个 workflow（多项目）：< 500MB
+- 多项目/多任务并行：< 500MB
+- 二进制：< 20MB
 
 ### 硬盘占用
-- 安装包（压缩）：< 50MB
-- 安装后：< 150MB
+- 安装包（压缩）：< 30MB
+- 安装后：< 100MB
 - 日志和缓存：< 50MB（自动清理）
 
 ### 启动时间
-- daemon 冷启动：< 1s
-- GUI 冷启动：< 2s
-- 总冷启动：< 3s
+- daemon 冷启动：< 500ms
+- daemon 热启动：< 100ms
+- GUI 总冷启动：< 3s
 - GUI 热启动：< 1s
 
 ### 执行延迟
-- workflow 启动延迟：< 100ms
-- step 执行延迟：< 50ms（不含模型 API 调用）
-- 实时输出延迟：< 10ms
+- workflow 启动延迟：< 50ms
+- step 执行延迟：< 20ms（不含模型 API 调用）
+- 实时输出延迟：< 5ms
 - GUI 更新延迟：< 16ms（60fps）
 
 ## 核心能力
@@ -84,13 +87,17 @@ CodePanion 是一个**轻量、高性能的新 AI IDE**，专为个人开发者�
 
 - 在一个 IDE 内管理多个项目，每个项目有独立的 workspace、workflow 和角色配置
 - 支持跨项目的任务依赖、资源共享和并行执行
-- 统一控制台查看所有项目的 workflow 状态、高危行为审核门和产出
+- 统一工作台查看所有项目的 workflow 状态、高危行为审核门、全局队列和产出
 
 ### 6. 调用外部 agentic coding tool
 
-- **逆向接口**：通过逆向工程复刻 Claude Code、Codex、OpenCode 等工具的 agent 架构，在 CodePanion 进程内运行
-- **API 调用**：通过 API 调用外部工具的能力（如果它们提供 API）
-- **能力编排**：把外部工具当作可编排的能力源，在 workflow 中组合使用
+外部 agentic coding tool 是 CodePanion 的一等能力源。CodePanion 不替代 Codex、Claude Code、OpenCode，而是把它们纳入本地 workflow：
+
+- **公开 API 调用**：外部工具提供稳定 API 时，作为 provider client 接入 workflow step。
+- **CLI executor 调用**：外部工具只提供 CLI 时，以受控 `cwd`、参数白名单、超时、取消和输出捕获运行。
+- **进程内架构复刻**：研究 Claude Code、Codex、OpenCode 的 agent/tool-use 结构，把可复用的 agent 架构实现到 CodePanion daemon 内。
+- **能力编排**：Planner、Builder、Tester、Reviewer 等角色可以绑定不同模型或外部工具；一个 workflow 可组合多个能力源。
+- **安全边界**：不读取 token、cookie、插件私有数据库、闭源工具私有状态或全局屏幕内容；网络/API/命令调用按权限和高危行为门控。
 
 ### 7. 用户自行提供 API
 

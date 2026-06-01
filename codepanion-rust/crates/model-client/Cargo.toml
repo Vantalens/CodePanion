@@ -1,0 +1,14 @@
+[package]
+name = "codepanion-model-client"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+codepanion-config = { path = "../config" }
+codepanion-shared = { path = "../shared" }
+
+[lib]
+path = "src/lib.rs"
+

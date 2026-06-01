@@ -2,25 +2,98 @@
 
 ## 概述
 
-CodePanion 是一个本地优先、供应商中立、面向个人开发者的 AI 工作流操作台，用于把产品目标拆成可执行任务，让不同 AI 角色和模型协作完成规划、实现、测试、审查、文档和交付归档。核心架构仍是 daemon 事件中心与本地 workflow 模型，但后续开发重心从被动监听外部工具转向用户主动发起的 workflow 编排、角色执行、人工审核和产出归档。
+CodePanion 是一个本地优先、供应商中立、面向个人开发者的轻量 AI IDE，用于把产品目标拆成可执行任务，让不同 AI 角色和模型协作完成规划、实现、测试、审查、文档和交付归档。最终架构以 Rust daemon 为核心，支撑本地全自动开发 workflow、多 AI 角色分工、高危行为审核门和多项目/多任务并行调度。
 
-当前架构不废弃。Node daemon、HTTP/WebSocket、WPF/WebView2 GUI、`session` / `workflow` / `event` 语义模型是后续本地 AI 工作流路线的稳定基础。既有 `source` 语义只作为历史兼容层保留，不作为新路线的产品对象。Alpha 阶段继续保留 Windows GUI 和双击 `CodePanion.Gui.exe` 的普通用户入口；Tauri/Avalonia、provider adapter、Enterprise 治理能力和规则跨生态同步放入 Beta 或更后阶段评估。
+当前 Node daemon、HTTP/WebSocket、WPF/WebView2 GUI、`workflow` / `event` 语义模型不作为最终性能架构，但作为 Rust 迁移的行为基线保留。Rust 重构必须兼容现有 GUI 所需的 workflow board、run detail、artifact、delivery、gate resolve 和 WS `workflow-run-event` 契约。既有 `source` / `session` 语义只作为历史兼容或清理对象，不作为新路线的产品对象。
 
-产品路线分为两个阶段：
+产品路线分为四个阶段：
 
-1. **Windows Alpha 个人本地 AI 工作流闭环**：先解决 workspace、role、workflow、human gate、artifact 和最小 executor 边界。
-2. **本地 AI 工作流执行器增强**：再在闭环稳定后增加更深工具接入、角色模板、跨工具协作和结果归档能力。
+1. **Rust daemon 技术验证**：验证内存、启动、二进制大小、HTTP/WS、模型客户端和流式输出。
+2. **Rust 核心模块迁移**：迁移 model client、agent runtime、tool-use、workflow engine、provider registry、storage 和 HTTP/WS 契约。
+3. **本地全自动开发闭环**：实现多 AI 角色分工、自动计划/实现/测试/审查/文档、高危行为检测和人工门。
+4. **多项目/多任务并行调度**：实现 projects、全局 runs/gates/队列、跨项目 artifact 和跨项目依赖。
 
 第一阶段不做默认系统级 OCR、全局窗口内容读取或外部窗口监听；外部工具只作为用户显式授权的 executor。国产 AI 编程工具采用分层覆盖策略，首批按通义灵码 / Qoder、CodeBuddy、Trae、百度 Comate、CodeGeeX 推进，MarsCode、CodeArts 放入下一梯队验证。CodePanion 明确不以多用户协作或团队平台为目标，也不做通用个人 Agent、聊天聚合器、模型聊天客户端、完整 AI IDE、通用 launcher、系统进程监控器或 token 二次分销平台。
 
 ## 架构契约
 
+- **Rust 优先**：新增 daemon 核心能力优先在 Rust 实现；Node 实现只作为过渡基线和迁移参照。
 - **本地优先**：daemon 默认监听 `127.0.0.1`，除健康检查外请求需要本地 token；运行权限保持在当前用户范围内。
 - **最小采集**：默认只采集完成本地 workflow 所需的会话状态、事件、必要上下文、角色执行记录和用户明确选择的数据。
-- **显式执行**：深度操作优先通过 CLI/PTTY、公开 CLI 或用户授权的 executor 完成。
+- **全自动执行 + 高危门控**：低危读写、测试、审查和文档动作可自动推进；删除、关键配置修改、危险命令、网络请求、git 历史修改等高危行为必须进入人工门。
 - **不读私有状态**：不读取账号、token、cookie、插件私有数据库、上游工具私有 API 或全局屏幕内容。
-- **能力分层**：L1 表示工具存在识别，L2 表示状态事件，L3 表示可执行 workflow 节点，L4 表示多角色 / 多模型工作流编排。文档和 GUI 不应把低层能力描述为深度集成。
-- **接口稳定**：`session`、`workflow`、`event` 是事件协议的核心语义；`source` 仅为现有兼容层，后续新能力应优先围绕 workflow executor 建模。
+- **多任务并行**：workflow run 必须能按项目隔离、并行执行、取消、恢复，并在全局队列中可观察。
+- **接口稳定**：`workflow`、`event`、`artifact`、`gate` 是事件协议的核心语义；`source` 仅为历史兼容层，后续新能力应优先围绕 workflow executor 建模。
+
+## Rust 目标架构
+
+Rust daemon 是下一阶段开发入口。它应按模块拆分，而不是照搬 Node 文件结构：
+
+```text
+codepanion-rust/
+├── crates/
+│   ├── daemon/          # axum HTTP/WS, process lifecycle, auth
+│   ├── shared/          # DTO, protocol, error model
+│   ├── config/          # config.json, model backends, owner-only writes
+│   ├── model-client/    # OpenAI-compatible client, streaming, tool calls
+│   ├── providers/       # external agentic coding tool API/CLI/harness providers
+│   ├── agent-runtime/   # tool-use loop, permissions, high-risk detection
+│   ├── workflow-engine/ # definitions, runs, gates, artifacts, scheduler
+│   └── storage/         # workspace/project stores, NDJSON history, migration
+└── Cargo.toml
+```
+
+迁移验收顺序：
+
+1. `/health` + WebSocket hello 可由 GUI 连接。
+2. `POST /workflow/runs` 能启动 shell step 并推送 `workflow-run-event`。
+3. agent step 能调用 OpenAI-compatible API，并支持只读 tool-use。
+4. provider registry 能注册 API provider、CLI provider 和 in-process harness，并把外部工具输出归一为 step output。
+5. `write_file` / `run_command` 经过权限和高危行为检测。
+6. `GET /workflow/board`、run detail、artifacts、delivery、gates 与现有 GUI 契约兼容。
+7. project registry 和多 run scheduler 支持多项目/多任务并行。
+
+## Provider 架构
+
+外部 agentic coding tool 通过 provider 接入 Rust daemon。provider 是 workflow step executor 的一种实现，必须统一遵守 workspace、permission、risk gate、event 和 artifact 契约。
+
+### Provider 类型
+
+| 类型 | 用途 | 例子 |
+| --- | --- | --- |
+| `api` | 调用外部工具公开 API | Codex API、Claude Code API、OpenCode API（若可用） |
+| `cli` | 受控运行外部 CLI | `codex exec`、`claude -p`、`opencode run` |
+| `harness` | 在 CodePanion 内复刻 agent 架构 | Claude Code 风格 tool-use、Codex 风格任务执行、OpenCode 风格 subagent |
+
+### Provider 契约
+
+每个 provider 必须声明：
+
+- `id` / `kind` / `displayName`
+- 支持的能力：read、write、command、network、delegate、streaming、cancel
+- 默认权限：readWorkspace、writeWorkspace、runCommand、useNetwork、delegateTask
+- 是否默认要求人工门：`requiresHumanGate`
+- runtime：`api.baseUrl`、`cli.command + args` 或 `harness.name`
+- 对 workspace cwd、文件范围、环境变量和网络访问的约束
+- 输出映射：stdout/stderr、assistant text、tool calls、artifacts、delivery-note preview
+
+Rust bootstrap 已提供 `ProviderRegistry`，按稳定 `id` 注册 provider，并拒绝重复 id。所有 executor 后续都必须归一为 `ProviderOutput`，再由 workflow engine 映射到 step output、artifact、delivery-note 和 GUI 事件。
+
+CLI provider 的 bootstrap executor 只运行用户配置的 `cli.command + args`，强制 `cwd = workspace root`，额外参数必须命中 allowlist，父进程环境默认清空后只注入显式 env，workflow prompt 通过 stdin 传给外部工具，支持 timeout 和取消，并把 stdout/stderr 同时归档为 `ProviderOutput` 与可转发到 WebSocket 的 stream event。
+
+API provider 的 bootstrap executor 只调用用户配置的 `api.baseUrl`，默认使用 OpenAI-compatible `/chat/completions` 路径，API key 只作为显式 Bearer header 注入，日志和请求摘要必须脱敏。非 2xx 响应进入统一错误模型，请求前与响应读取期间都必须响应取消，usage 字段归一为 token 统计，SSE `data:` 内容 chunk 映射为 step-output stream event。
+
+Harness provider 通过进程内 `HarnessExecutor` 接口复用 Rust agent runtime。provider 层负责校验权限、取消和 high-risk 标记；agent-runtime 层实现 `InProcessHarness`，把 agent 响应归一为 `ProviderOutput`，并把 subagent/role 委派记录为 delegated task。高危 harness 请求必须设置 `requires_human_gate`，由 workflow engine 后续转成人工门。
+
+首批内置外部工具 provider 模板：
+
+- `codex-cli`：`codex exec`
+- `claude-code-cli`：`claude -p`
+- `opencode-cli`：`opencode run`
+
+这些模板不会绕过 CLI executor 的 cwd、参数、环境、超时、取消和输出捕获约束；默认声明写入、命令和委派能力，因此默认需要 human gate。
+
+Provider 不允许读取外部工具的私有 token、cookie、插件数据库、闭源内部状态或全局屏幕内容。CLI provider 只能通过用户显式配置的命令和凭据运行；API provider 只能使用用户配置的 API endpoint/key；harness provider 只能复刻通用 agent 结构，不伪装成拥有闭源内部能力。
 
 ## 系统架构
 

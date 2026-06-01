@@ -1,7 +1,7 @@
 # CodePanion 项目重构计划
 
 **日期**: 2026-06-01  
-**目标**: 彻底下线监听路线，全面转向工作流路线
+**目标**: 彻底下线监听路线，全面转向 Rust 本地全自动 AI IDE 路线
 
 ---
 
@@ -9,7 +9,9 @@
 
 ### 当前状态
 
-CodePanion 的定位已明确为**个人 Agent AI IDE + 本地 AI 工作流控制台**，核心原则：
+CodePanion 的定位已校准为**Rust 本地全自动 AI IDE**。本文件保留对监听路线下线和过渡 GUI 重构的记录；开始新开发时，以 [RUST_REWRITE_PLAN.md](RUST_REWRITE_PLAN.md) 和 [DEVELOPMENT_TASKS.md](../DEVELOPMENT_TASKS.md) 的 Rust 重构任务为优先级。
+
+核心原则：
 
 1. ✅ 一切在 CodePanion 内进行
 2. ✅ 模型走外部 API（DeepSeek）
@@ -32,25 +34,26 @@ CodePanion 的定位已明确为**个人 Agent AI IDE + 本地 AI 工作流控�
 
 ### 待完成的工作
 
-1. **文档清理**：清理所有文档中的监听路线残留
-2. **GUI 重构**：从监听式会话流转向工作流控制台
-3. **功能完善**：完善工作流路线的核心功能
+1. **Rust 重构**：建立 Rust daemon、HTTP/WS、模型客户端、agent runtime、workflow engine 和 storage
+2. **全自动开发闭环**：完善多 AI 角色分工、写文件/跑命令工具、高危行为检测和自动修复循环
+3. **多项目/多任务并行**：实现 project registry、全局 runs/gates/队列和跨项目 artifact
+4. **GUI 工作台完善**：从过渡 workflow board 升级为多项目 AI 开发工作台
 
 ---
 
 ## 重构路线图
 
-### 阶段 2：文档清理（预计 1-2 天）
+### 阶段 2：文档清理与路线校准（预计 1-2 天）
 
-**目标**：清理所有文档中的监听路线残留，统一到工作流路线
+**目标**：清理所有文档中的监听路线残留，统一到 Rust 本地全自动 AI IDE 路线
 
 #### 优先级 P0：核心文档
 
 | 文档 | 清理内容 | 预计工作量 |
 |------|---------|-----------|
-| [POSITIONING.md](POSITIONING.md) | 移除监听路线、handoff、外部 IDE 集成的描述；强化工作流路线、进程内 agent、两轴执行模型 | 1h |
-| [PRODUCT_ROADMAP.md](PRODUCT_ROADMAP.md) | 移除监听来源、适配器、handoff 的路线图；更新为工作流路线的迭代计划 | 1h |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | 移除 SourceManager、Adapter、HandoffRunner；更新为 workflow → daemon → agentRuntime → modelClient；补充两轴执行模型 | 2h |
+| [POSITIONING.md](POSITIONING.md) | 强化 Rust daemon、本地全自动开发、多 AI 角色分工、多项目/多任务并行 | 1h |
+| [PRODUCT_ROADMAP.md](PRODUCT_ROADMAP.md) | 更新为 Rust 技术验证 → 核心迁移 → 全自动闭环 → 多项目并行 → 外部能力源 | 1h |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | 补充 Rust 目标架构、迁移验收顺序、agent/workflow/scheduler 边界 | 2h |
 | [API.md](API.md) | 移除 `/sources`、`/events`、`/handoff`、`/sessions`；只保留工作流路线的端点 | 1h |
 
 #### 优先级 P1：辅助文档
@@ -64,7 +67,7 @@ CodePanion 的定位已明确为**个人 Agent AI IDE + 本地 AI 工作流控�
 
 **验收标准**：
 - [ ] 所有文档中无监听路线、handoff、外部 IDE 集成的描述
-- [ ] 所有文档统一到工作流路线
+- [ ] 所有文档统一到 Rust 本地全自动 AI IDE 路线
 - [ ] API 文档只包含工作流路线的端点
 - [ ] 文档之间无矛盾
 
@@ -72,7 +75,7 @@ CodePanion 的定位已明确为**个人 Agent AI IDE + 本地 AI 工作流控�
 
 ### 阶段 3：GUI 重构（预计 3-5 天）
 
-**目标**：GUI 从监听式会话流转向工作流控制台
+**目标**：GUI 从监听式会话流转向多项目 AI 开发工作台；现有 workflow board 是过渡形态
 
 #### 3.1 现状分析
 
@@ -84,7 +87,7 @@ CodePanion 的定位已明确为**个人 Agent AI IDE + 本地 AI 工作流控�
 - 收件箱
 - session 回复 omnibar
 
-**目标 GUI 架构**（工作流控制台）：
+**目标 GUI 架构**（多项目 AI 开发工作台）：
 - 顶栏：workspace 选择条 + 连接状态
 - 左栏：workflow 定义列表 + 近期 runs + 人工审核门
 - 中栏：run 时间线（steps 顺序 + 状态 + 实时输出）
@@ -144,7 +147,7 @@ CodePanion 的定位已明确为**个人 Agent AI IDE + 本地 AI 工作流控�
 
 **验收标准**：
 - [ ] 旧的监听式 GUI 代码已删除
-- [ ] 工作流控制台 GUI 实现完整
+- [ ] 多项目 AI 开发工作台 GUI 实现完整
 - [ ] webview ↔ host 协议清理完成
 - [ ] WebSocket 实时更新正常工作
 - [ ] 所有核心流程测试通过
