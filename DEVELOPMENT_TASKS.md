@@ -154,6 +154,8 @@ Rust 目标指标：
 
 目标：实现能自动开发的 agent runtime，而不是只读问答。
 
+**进度**: 5/7 完成（71%）
+
 - [x] **A-01 Tool-use loop**
   - 模型 -> tool call -> tool result -> 模型续答。
   - 支持 max turns、取消、错误回填。
@@ -179,13 +181,14 @@ Rust 目标指标：
   - 命令风险分级、超时、取消、输出截断。
   - 验收：`CommandTools` 实现 `run_command`，cwd 强制钳在 workspace root；`classify_command` 实现 safe/medium/high 三级风险分级（覆盖删除、提权、git 历史改写、网络外泄等 8 类高危模式）；high 风险命令默认拒绝执行并标记需 human gate；支持超时（默认 30s）、取消（Arc<AtomicBool>）、输出截断（stdout/stderr 各 32KB）；21 个命令工具测试 + 4 个真实 mock-server tool-use loop 测试全部通过。
 
-- [ ] **A-05 高危行为检测**
-  - 删除文件/目录。
-  - 修改关键配置、凭据、权限文件。
-  - 危险命令。
-  - 网络请求。
-  - git 历史修改。
-  - 验收：高危动作必须进入 human gate。
+- [x] **A-05 高危行为检测**
+  - 统一的高危行为检测层，覆盖 5 类风险：
+    1. 文件删除操作（命令 + 工具调用）
+    2. 关键配置/凭据文件修改（.env、credentials.json、id_rsa、appsettings 等）
+    3. 危险命令（复用 A-04 的 CommandRisk）
+    4. 网络请求（预留接口，检测可疑外泄域名）
+    5. Git 历史修改（force push、reset --hard、rebase 等）
+  - 验收：`RiskDetector` 实现 5 类检测方法；`RiskDetection` 定义统一风险结果；`RiskSeverity` 分 4 级（Low/Medium/High/Critical）；所有高危行为标记 `requires_human_gate: true`；8 个测试覆盖文件删除、关键文件修改、危险命令、git 操作、网络请求和安全操作；63 个 agent-runtime 测试全部通过。
 
 - [ ] **A-06 自动修复循环**
   - 测试失败 -> 诊断 -> 修复 -> 重跑测试。

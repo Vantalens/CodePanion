@@ -11,8 +11,10 @@ use std::sync::{
 };
 
 pub mod command;
+pub mod risk_detector;
 pub mod tools;
 pub use command::{CommandRequest, CommandResult, CommandRisk, CommandTools, classify_command};
+pub use risk_detector::{RiskDetection, RiskDetector, RiskSeverity, RiskType};
 pub use tools::{ReadonlyTools, WriteTools, ensure_path_inside};
 
 // Tool-use loop 事件，用于实时推送到 GUI
