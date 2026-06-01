@@ -165,6 +165,7 @@ struct Provider {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 struct Project {
     id: String,
     path: PathBuf,

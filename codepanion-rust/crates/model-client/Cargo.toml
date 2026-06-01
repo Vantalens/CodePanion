@@ -8,6 +8,7 @@ repository.workspace = true
 [dependencies]
 codepanion-config = { path = "../config" }
 codepanion-shared = { path = "../shared" }
+serde_json = "1.0"
 
 [lib]
 path = "src/lib.rs"

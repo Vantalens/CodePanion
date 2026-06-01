@@ -80,7 +80,7 @@ impl DaemonManager {
         #[cfg(windows)]
         {
             Command::new("taskkill")
-                .args(&["/PID", &pid.to_string(), "/F"])
+                .args(["/PID", &pid.to_string(), "/F"])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .spawn()
@@ -168,7 +168,7 @@ impl DaemonManager {
         {
             // 使用 tasklist 检查进程是否存在
             Command::new("tasklist")
-                .args(&["/FI", &format!("PID eq {}", pid), "/NH"])
+                .args(["/FI", &format!("PID eq {}", pid), "/NH"])
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null())
                 .output()
@@ -258,12 +258,12 @@ impl DaemonManager {
         std::thread::sleep(std::time::Duration::from_millis(500));
 
         // 验证进程是否还在运行
-        if let Some(pid) = self.read_pid()? {
-            if !self.is_process_running(pid) {
-                return Err(CodePanionError::Runtime(
-                    "Daemon failed to start (process exited immediately)".to_string(),
-                ));
-            }
+        if let Some(pid) = self.read_pid()?
+            && !self.is_process_running(pid)
+        {
+            return Err(CodePanionError::Runtime(
+                "Daemon failed to start (process exited immediately)".to_string(),
+            ));
         }
 
         Ok(())

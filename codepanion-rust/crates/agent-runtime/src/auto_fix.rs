@@ -312,7 +312,7 @@ mod tests {
 
     #[test]
     fn auto_fix_event_types() {
-        let events = vec![
+        let events = [
             AutoFixEvent::TestRunning { attempt: 1 },
             AutoFixEvent::TestFailed {
                 attempt: 1,

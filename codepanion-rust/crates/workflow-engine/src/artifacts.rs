@@ -491,7 +491,7 @@ mod tests {
     fn test_all_artifact_types() {
         let (_dir, store) = temp_store();
 
-        let types = vec![
+        let types = [
             ArtifactType::Plan,
             ArtifactType::PatchSummary,
             ArtifactType::TestResult,

@@ -490,7 +490,7 @@ mod tests {
         assert!(removed);
 
         let config = manager.load().unwrap();
-        assert!(config.env.get("TEST_VAR").is_none());
+        assert!(!config.env.contains_key("TEST_VAR"));
     }
 
     #[test]

@@ -209,14 +209,14 @@ mod tests {
     #[test]
     fn sandbox_path_check() {
         let config = SandboxConfig::new("/workspace");
-        let sandbox = Sandbox::new(config);
+        let _sandbox = Sandbox::new(config);
 
         // 注意：这些测试依赖于 ensure_path_inside 的实现
         // 在 Windows 上路径格式可能不同
         #[cfg(unix)]
         {
-            assert!(sandbox.is_path_allowed(Path::new("/workspace/file.txt")));
-            assert!(!sandbox.is_path_allowed(Path::new("/etc/passwd")));
+            assert!(_sandbox.is_path_allowed(Path::new("/workspace/file.txt")));
+            assert!(!_sandbox.is_path_allowed(Path::new("/etc/passwd")));
         }
     }
 

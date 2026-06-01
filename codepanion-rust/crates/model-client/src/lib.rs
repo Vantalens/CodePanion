@@ -1,5 +1,7 @@
 use std::io::{Read, Write};
 use std::net::TcpStream;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use codepanion_config::ModelBackendConfig;
@@ -11,7 +13,7 @@ pub struct ChatMessage {
     pub content: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct ChatRequest {
     pub backend: ModelBackendConfig,
     pub messages: Vec<ChatMessage>,
@@ -41,18 +43,30 @@ impl ChatRequest {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default)]
 pub struct CancellationToken {
-    cancelled: bool,
+    cancelled: Arc<AtomicBool>,
 }
 
 impl CancellationToken {
+    pub fn new() -> Self {
+        Self {
+            cancelled: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
     pub fn cancelled() -> Self {
-        Self { cancelled: true }
+        Self {
+            cancelled: Arc::new(AtomicBool::new(true)),
+        }
+    }
+
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::SeqCst);
     }
 
     pub fn is_cancelled(&self) -> bool {
-        self.cancelled
+        self.cancelled.load(Ordering::SeqCst)
     }
 }
 
@@ -117,7 +131,7 @@ pub fn chat_completion(request: &ChatRequest) -> Result<ChatCompletionResult> {
     }
 
     let url = parse_http_url(&request.backend.base_url)?;
-    let body = build_chat_body(request);
+    let body = build_chat_body(request)?;
     let mut headers = vec![
         format!(
             "POST {} HTTP/1.1",
@@ -186,45 +200,32 @@ fn join_path(base: &str, suffix: &str) -> String {
     )
 }
 
-fn build_chat_body(request: &ChatRequest) -> String {
-    let messages = request
+fn build_chat_body(request: &ChatRequest) -> Result<String> {
+    use serde_json::json;
+
+    let messages: Vec<_> = request
         .messages
         .iter()
         .map(|message| {
-            format!(
-                r#"{{"role":"{}","content":"{}"}}"#,
-                json_escape(&message.role),
-                json_escape(&message.content)
-            )
+            json!({
+                "role": message.role,
+                "content": message.content
+            })
         })
-        .collect::<Vec<_>>()
-        .join(",");
-    let stream = if request.stream {
-        r#","stream":true"#
-    } else {
-        ""
-    };
-    format!(
-        r#"{{"model":"{}","messages":[{}]{stream}}}"#,
-        json_escape(&request.backend.model),
-        messages
-    )
-}
+        .collect();
 
-fn json_escape(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for ch in value.chars() {
-        match ch {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            ch if ch.is_control() => out.push_str(&format!("\\u{:04x}", ch as u32)),
-            ch => out.push(ch),
-        }
+    let mut body = json!({
+        "model": request.backend.model,
+        "messages": messages
+    });
+
+    if request.stream {
+        body["stream"] = json!(true);
     }
-    out
+
+    serde_json::to_string(&body).map_err(|e| {
+        CodePanionError::InvalidInput(format!("Failed to serialize request: {}", e))
+    })
 }
 
 fn parse_chat_response(response: &str) -> Result<ChatCompletionResult> {
