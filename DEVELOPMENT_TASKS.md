@@ -580,6 +580,67 @@ Rust 目标指标：
   - [x] cargo fmt + clippy + test 全部通过（77/77 tests）
   - [x] 文档更新
 
+- [x] **M-02.4 CLI 命令工具（CC Switch 完整兼容 Phase 3）** ✅
+  - **描述**: 实现命令行工具，提供 provider、model、config 管理命令
+  - **二进制**: `codepanion`
+  
+  **核心功能**:
+  - Provider 管理命令（list、active、switch、add、remove、test、import）
+  - Model 管理命令（list、alias）
+  - Config 管理命令（set-model、set-effort）
+  - 全局 --api-url 选项（支持自定义 daemon 地址）
+  
+  **Provider 命令**:
+  ```bash
+  codepanion provider list                    # 列出所有 provider
+  codepanion provider active                  # 查看当前活跃 provider
+  codepanion provider switch <id>             # 切换 provider
+  codepanion provider add <id> --name ... --provider-type ... --api-key ... --base-url ... --default-model ...
+  codepanion provider remove <id>             # 删除 provider
+  codepanion provider test <id>               # 测试连接
+  codepanion provider import --source <ccm|claude|auto> [--file <path>]
+  ```
+  
+  **Model 命令**:
+  ```bash
+  codepanion model list                       # 列出所有模型
+  codepanion model alias <alias> <model-id>   # 设置别名
+  ```
+  
+  **Config 命令**:
+  ```bash
+  codepanion config set-model <model>         # 设置默认模型
+  codepanion config set-effort <level>        # 设置努力级别
+  ```
+  
+  **使用示例**:
+  ```bash
+  # 快速切换 API
+  codepanion provider switch deepseek-main
+  
+  # 从 CC Switch 导入配置
+  codepanion provider import --source ccm
+  
+  # 查看所有可用模型
+  codepanion model list
+  
+  # 自定义 API URL
+  codepanion --api-url http://localhost:9000 provider list
+  ```
+  
+  **验收标准**:
+  - [x] CLI 架构设计（clap 框架）
+  - [x] Provider 子命令（7 个命令）
+  - [x] Model 子命令（2 个命令）
+  - [x] Config 子命令（2 个命令）
+  - [x] 全局 --api-url 选项
+  - [x] HTTP 客户端集成（reqwest）
+  - [x] 友好的输出格式（表格、状态符号）
+  - [x] 错误处理和用户提示
+  - [x] 编译成功（cargo build --bin codepanion）
+  - [x] cargo clippy 通过
+  - [x] CLI 文档（docs/CLI.md）
+
 - [ ] **M-03 多 run scheduler**
   - 多 workflow 并行。
   - 全局队列。

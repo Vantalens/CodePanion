@@ -145,7 +145,40 @@ CodePanion 是一个**本地优先、轻量高性能的新 AI IDE**，专为个�
 
 ## 使用方式
 
-CodePanion 当前以 Windows 本地图形软件的方式提供使用。
+CodePanion 提供两种使用方式：
+
+### 1. GUI 应用（主要方式）
+Windows 本地图形软件，提供完整的可视化界面。
+
+### 2. CLI 工具（辅助方式）
+命令行工具，用于快速管理 provider、模型和配置。
+
+#### 安装 CLI
+```bash
+cd codepanion-rust
+cargo build --release --bin codepanion
+# 二进制文件位于 target/release/codepanion
+```
+
+#### 快速开始
+```bash
+# 启动 daemon
+codepanion-daemon --serve
+
+# 查看所有 provider
+codepanion provider list
+
+# 切换 provider
+codepanion provider switch deepseek-main
+
+# 导入 CC Switch 配置
+codepanion provider import --source ccm
+
+# 查看所有可用模型
+codepanion model list
+```
+
+详细文档：[CLI 使用指南](docs/CLI.md)
 
 下载或生成便携版后，直接运行：
 
