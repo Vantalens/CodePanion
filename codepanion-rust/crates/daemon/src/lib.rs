@@ -6,7 +6,8 @@ use axum::{
     Router,
 };
 use codepanion_workflow_engine::{
-    GlobalConfigManager, ProjectRegistry, ProviderRegistry, RunScheduler, SchedulerConfig,
+    CrossProjectOrchestrator, GlobalConfigManager, ProjectRegistry, ProviderRegistry, RunScheduler,
+    SchedulerConfig,
 };
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -43,6 +44,7 @@ pub struct AppState {
     pub provider_registry: Arc<ProviderRegistry>,
     pub global_config: Arc<GlobalConfigManager>,
     pub scheduler: Arc<RunScheduler>,
+    pub orchestrator: Arc<std::sync::Mutex<CrossProjectOrchestrator>>,
 }
 
 pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::Error>> {
@@ -52,6 +54,7 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::
         provider_registry: Arc::new(ProviderRegistry::new(config.providers_path)),
         global_config: Arc::new(GlobalConfigManager::new(config.global_config_path)),
         scheduler: Arc::new(RunScheduler::new(SchedulerConfig::default())),
+        orchestrator: Arc::new(std::sync::Mutex::new(CrossProjectOrchestrator::new())),
     };
 
     // Configure CORS
@@ -196,6 +199,35 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::
             "/api/v1/scheduler/completed",
             delete(routes::scheduler::clear_completed),
         )
+        // Orchestrator API endpoints
+        .route(
+            "/api/v1/orchestrator/workflows",
+            post(routes::orchestrator::register_workflow),
+        )
+        .route(
+            "/api/v1/orchestrator/workflows",
+            get(routes::orchestrator::list_workflows),
+        )
+        .route(
+            "/api/v1/orchestrator/workflows/:project_id/:workflow_id",
+            get(routes::orchestrator::get_workflow),
+        )
+        .route(
+            "/api/v1/orchestrator/workflows/:project_id/:workflow_id",
+            delete(routes::orchestrator::remove_workflow),
+        )
+        .route(
+            "/api/v1/orchestrator/workflows/:project_id/:workflow_id/dependencies",
+            get(routes::orchestrator::get_dependencies),
+        )
+        .route(
+            "/api/v1/orchestrator/workflows/:project_id/:workflow_id/resolve",
+            post(routes::orchestrator::resolve_dependencies),
+        )
+        .route(
+            "/api/v1/orchestrator/workflows/:project_id/:workflow_id/has-dependencies",
+            get(routes::orchestrator::has_dependencies),
+        )
         // OpenAI-compatible endpoints
         .route("/v1/models", get(routes::providers::list_all_models))
         .layer(cors)
@@ -215,6 +247,7 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::
     println!("  - Projects API: http://{}/api/v1/projects", addr);
     println!("  - Providers API: http://{}/api/v1/providers", addr);
     println!("  - Scheduler API: http://{}/api/v1/scheduler", addr);
+    println!("  - Orchestrator API: http://{}/api/v1/orchestrator", addr);
     println!("  - Config Import: http://{}/api/v1/config/import", addr);
     println!("  - Models API: http://{}/v1/models", addr);
 

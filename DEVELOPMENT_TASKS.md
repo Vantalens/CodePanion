@@ -708,10 +708,104 @@ Rust 目标指标：
   - [x] 84/84 测试通过
   - [x] cargo clippy 通过
 
-- [ ] **M-04 跨项目编排**
-  - workflow 声明跨项目依赖。
-  - artifact 跨项目引用。
-  - 共享 role 配置库、workflow 模板库、工具配置。
+- [x] **M-04 跨项目编排** ✅
+  - **描述**: 实现跨项目 workflow 依赖声明、artifact 引用、依赖解析和拓扑排序
+  
+  **核心功能**:
+  - Workflow 依赖声明（跨项目、跨 workflow）
+  - Artifact 跨项目引用（project_id + run_id + artifact_key）
+  - 依赖解析（拓扑排序、循环检测）
+  - 执行顺序计算（DFS 后序遍历）
+  - 依赖图可视化（execution_order + edges）
+  
+  **数据结构**:
+  ```rust
+  pub struct WorkflowDependency {
+      project_id, workflow_id,
+      required_artifacts: Vec<String>,
+      optional: bool
+  }
+  
+  pub struct ArtifactReference {
+      project_id, run_id, artifact_key
+  }
+  
+  pub struct WorkflowWithDeps {
+      project_id, workflow_id,
+      dependencies: Vec<WorkflowDependency>
+  }
+  
+  pub struct DependencyGraph {
+      execution_order: Vec<(project_id, workflow_id)>,  // 拓扑排序结果
+      edges: HashMap<(from), Vec<(to)>>                 // 依赖边
+  }
+  
+  pub struct CrossProjectOrchestrator {
+      workflows: HashMap<(project_id, workflow_id), WorkflowWithDeps>
+  }
+  ```
+  
+  **API 端点**:
+  ```
+  POST   /api/v1/orchestrator/workflows                              # 注册 workflow 依赖
+  GET    /api/v1/orchestrator/workflows                              # 列出所有 workflow
+  GET    /api/v1/orchestrator/workflows/:project_id/:workflow_id     # 获取特定 workflow
+  DELETE /api/v1/orchestrator/workflows/:project_id/:workflow_id     # 移除 workflow
+  GET    /api/v1/orchestrator/workflows/:project_id/:workflow_id/dependencies  # 获取依赖
+  POST   /api/v1/orchestrator/workflows/:project_id/:workflow_id/resolve       # 解析依赖
+  GET    /api/v1/orchestrator/workflows/:project_id/:workflow_id/has-dependencies  # 检查是否有依赖
+  ```
+  
+  **依赖解析算法**:
+  - DFS 拓扑排序（后序遍历）
+  - 循环依赖检测（stack 集合）
+  - 依赖先执行（递归访问依赖，再加入当前节点）
+  - 支持菱形依赖（Diamond dependency）
+  - 支持跨项目依赖（project-1:build → project-2:deploy）
+  
+  **使用场景**:
+  ```json
+  // 注册 workflow 依赖
+  POST /api/v1/orchestrator/workflows
+  {
+    "projectId": "project-2",
+    "workflowId": "deploy",
+    "dependencies": [{
+      "projectId": "project-1",
+      "workflowId": "build",
+      "requiredArtifacts": ["dist.zip"],
+      "optional": false
+    }]
+  }
+  
+  // 解析依赖
+  POST /api/v1/orchestrator/workflows/project-2/deploy/resolve
+  {
+    "executionOrder": [
+      {"projectId": "project-1", "workflowId": "build"},
+      {"projectId": "project-2", "workflowId": "deploy"}
+    ],
+    "edges": [{
+      "fromProjectId": "project-2",
+      "fromWorkflowId": "deploy",
+      "toProjectId": "project-1",
+      "toWorkflowId": "build"
+    }]
+  }
+  ```
+  
+  **验收标准**:
+  - [x] CrossProjectOrchestrator 核心实现
+  - [x] WorkflowDependency 和 ArtifactReference 数据结构
+  - [x] 依赖解析（拓扑排序）
+  - [x] 循环依赖检测
+  - [x] 菱形依赖支持
+  - [x] 跨项目依赖支持
+  - [x] 8 个单元测试（简单依赖、跨项目、循环、菱形、查询）
+  - [x] API 路由集成（7 个端点）
+  - [x] daemon 启动信息更新
+  - [x] 92/92 测试通过
+  - [x] cargo clippy 通过
 
 - [ ] **M-05 全局视图 API**
   - 全局 runs。

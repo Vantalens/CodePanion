@@ -28,6 +28,9 @@ pub mod config_import;
 // M-03: Multi-run scheduler
 pub mod scheduler;
 
+// M-04: Cross-project orchestration
+pub mod cross_project;
+
 pub use definition::{
     DefinitionStore, WorkflowArchitecture, WorkflowArtifactType, WorkflowContextPolicy,
     WorkflowDefinition, WorkflowPermission, WorkflowProvider, WorkflowStep,
@@ -59,6 +62,11 @@ pub use config_import::{auto_import, import_ccm_config, import_claude_settings, 
 
 pub use scheduler::{
     RunPriority, RunScheduler, RunStatus, ScheduledRun, SchedulerConfig, SchedulerStats,
+};
+
+pub use cross_project::{
+    ArtifactReference, CrossProjectOrchestrator, DependencyGraph, WorkflowDependency,
+    WorkflowWithDeps,
 };
 
 // 旧的简化版本（保留用于向后兼容）
