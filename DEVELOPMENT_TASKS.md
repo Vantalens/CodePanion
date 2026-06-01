@@ -154,6 +154,8 @@ Rust 目标指标：
 
 目标：实现能自动开发的 agent runtime，而不是只读问答。
 
+**进度**: 4/7 完成（57%）
+
 - [x] **A-01 Tool-use loop**
   - 模型 -> tool call -> tool result -> 模型续答。
   - 支持 max turns、取消、错误回填。
@@ -177,6 +179,7 @@ Rust 目标指标：
   - `run_command`
   - cwd 钳在 workspace root。
   - 命令风险分级、超时、取消、输出截断。
+  - **注意**：当前仅做 cwd 钳制和风险分级，未实现真正的沙箱隔离（见 A-07）。
   - 验收：`CommandTools` 实现 `run_command`，cwd 强制钳在 workspace root；`classify_command` 实现 safe/medium/high 三级风险分级（覆盖删除、提权、git 历史改写、网络外泄等 8 类高危模式）；high 风险命令默认拒绝执行并标记需 human gate；支持超时（默认 30s）、取消（Arc<AtomicBool>）、输出截断（stdout/stderr 各 32KB）；21 个命令工具测试 + 4 个真实 mock-server tool-use loop 测试全部通过。
 
 - [ ] **A-05 高危行为检测**
@@ -190,6 +193,35 @@ Rust 目标指标：
 - [ ] **A-06 自动修复循环**
   - 测试失败 -> 诊断 -> 修复 -> 重跑测试。
   - 超过重试上限进入人工门。
+
+- [ ] **A-07 沙箱隔离执行**
+  - **目标**：类似 Codex 的运行方式，在隔离的沙箱中执行命令和 agent 操作。
+  - **隔离层级**：
+    - **L1 基础隔离**（当前已有）：cwd 钳制、路径验证、命令风险分级
+    - **L2 进程隔离**：受限用户、资源限制（CPU/内存/文件描述符）
+    - **L3 容器隔离**：Docker/Podman 容器、只读文件系统 + 可写 workspace 挂载
+    - **L4 网络隔离**：禁用网络或白名单域名（仅允许 API 端点）
+  - **实现策略**：
+    - Windows：Job Objects（资源限制）+ 受限 token（权限降级）
+    - Linux：cgroups v2（资源限制）+ seccomp（系统调用过滤）+ namespaces（PID/mount/network 隔离）
+    - 跨平台：Docker/Podman 容器（可选，用户配置启用）
+  - **配置项**：
+    - `sandbox.enabled: bool`（默认 false，向后兼容）
+    - `sandbox.level: "basic" | "process" | "container"`
+    - `sandbox.network: "allow" | "deny" | "whitelist"`
+    - `sandbox.resource_limits: { cpu_percent, memory_mb, disk_mb }`
+  - **验收标准**：
+    - 沙箱内命令无法访问 workspace 外路径
+    - 沙箱内命令受资源限制约束（超限被 kill）
+    - 网络隔离模式下无法访问外部网络（除白名单）
+    - 沙箱逃逸尝试被检测并阻止
+    - 性能开销 <20%（相比无沙箱）
+    - 测试覆盖 Windows/Linux 两平台
+  - **参考实现**：
+    - Codex sandbox 机制
+    - Firecracker microVM（轻量级 VM 隔离）
+    - gVisor（用户态内核）
+    - Bubblewrap（Linux 沙箱工具）
 
 ---
 
