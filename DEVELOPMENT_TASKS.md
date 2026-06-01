@@ -928,17 +928,17 @@ Rust 目标指标：
 
 ## P6：文档与发布质量
 
-- [ ] **D-01 清理 API 文档**
+- [ ] **P6-01 清理 API 文档**
   - 移除旧 `/sources`、`/events`、`/sessions`、handoff 路线。
   - 只保留 workflow/project/provider 路线。
 
-- [ ] **D-02 更新开发文档**
+- [ ] **P6-02 更新开发文档**
   - Rust 命令、测试、性能基准、目录结构。
 
-- [ ] **D-03 更新用户文档**
+- [ ] **P6-03 更新用户文档**
   - 安装、启动、模型配置、provider 配置、workspace/project 使用。
 
-- [ ] **D-04 发布门禁**
+- [ ] **P6-04 发布门禁**
   - `npm test` 作为 Node 行为基线。
   - `cargo fmt --all`
   - `cargo test --workspace`
@@ -950,7 +950,7 @@ Rust 目标指标：
 
 ## P7：Rust Daemon 重构
 
-**进度**: 0/4 完成（0%）
+**进度**: 3/4 完成（75%）
 
 目标：用 Rust 重写 daemon 核心，降低资源占用，提升性能。
 
@@ -967,7 +967,7 @@ Rust 目标指标：
 - 日志：tracing
 - CLI：clap
 
-- [x] **D-01 HTTP/WS 服务器** ✅
+- [x] **P7-01 WebSocket 实时推送** ✅
   - 使用 axum 实现 HTTP 服务器。
   - 使用 axum WebSocket 实现 WebSocket。
   - 兼容现有 `/workflow/*` API 路由。
@@ -994,7 +994,7 @@ Rust 目标指标：
   - [x] cargo clippy 通过（0 warnings）
   - [x] cargo fmt 通过
 
-- [x] **D-02 Workflow 执行器**
+- [x] **P7-02 Workflow 执行器** ✅
   - 集成 P3 workflow engine（W-01 到 W-06）。
   - 集成 P2 agent runtime（A-01 到 A-07）。
   - 实现 fire-and-forget 续跑逻辑。
@@ -1019,7 +1019,7 @@ Rust 目标指标：
     - AgentLoopRequest + run_agent_loop（agent 执行）
     - WorkflowExecutor（workflow engine 集成）
 
-- [x] **D-03 CLI 命令**
+- [x] **P7-03 CLI 命令** ✅
   - 使用 clap 实现 CLI 参数解析。
   - `codepanion start` - 启动 daemon。
   - `codepanion stop` - 停止 daemon。
@@ -1047,7 +1047,7 @@ Rust 目标指标：
     - 后台运行（Unix: nohup, Windows: CREATE_NO_WINDOW）
     - reqwest（API 客户端）
 
-- [ ] **D-04 测试、迁移与性能基准**
+- [ ] **P7-04 测试、迁移与性能基准**
   - 端到端测试（daemon + GUI + CLI）。
   - GUI/VSCode 扩展适配（如需要）。
   - 性能基准测试（内存、启动时间、workflow 执行时间）。
