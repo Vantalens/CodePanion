@@ -34,7 +34,7 @@ pub use human_gate::{
     GateDecision, GateResolution, GateResolutionResult, HumanGateManager, PausedGate,
 };
 
-pub use project::{Project, ProjectRegistry};
+pub use project::{Project, ProjectHealth, ProjectMetadata, ProjectRegistry, ProjectStats};
 
 // 旧的简化版本（保留用于向后兼容）
 use codepanion_providers::ProviderDefinition;

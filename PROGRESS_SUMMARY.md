@@ -1,7 +1,97 @@
 # CodePanion 开发进度总结
 
 **日期**: 2026-06-01
-**当前阶段**: P2 - Rust Agent Runtime 与安全工具
+**当前阶段**: P4 - 多项目/多任务并行
+
+---
+
+## 最新进展（2026-06-01 更新 #4）
+
+### ✅ 完成 M-02: Project API (CCS 风格)
+
+在 Rust daemon crate 中实现了完整的 Project API，采用 CCS 兼容架构：
+
+**新增模块**:
+- `crates/daemon/src/routes/projects.rs` - 项目管理 API 路由
+- `crates/daemon/src/routes/mod.rs` - 路由模块
+- `crates/daemon/src/lib.rs` - 重写为 axum 框架
+- `crates/daemon/src/main.rs` - 更新为异步 main
+
+**核心功能**:
+- **HTTP API Server** - 基于 axum 框架
+  - 端口：8318（避免与 CCS 8317 冲突）
+  - API 版本：`/api/v1`
+  - RESTful + OpenAI 兼容格式
+
+- **7 个 API 端点**:
+  - `POST /api/v1/projects` - 创建项目
+  - `GET /api/v1/projects` - 列出所有项目（支持 `?tag=rust&sort=lastActiveAt`）
+  - `GET /api/v1/projects/:id` - 获取单个项目
+  - `PUT /api/v1/projects/:id` - 更新项目
+  - `DELETE /api/v1/projects/:id` - 删除项目
+  - `POST /api/v1/projects/:id/activate` - 激活项目（更新 lastActiveAt）
+  - `GET /api/v1/projects/:id/status` - 项目健康状态和统计
+
+- **数据结构扩展**:
+  - `ProjectMetadata` - runtime、model、custom 字段
+  - `ProjectHealth` - 路径存在性、Git 仓库检查
+  - `ProjectStats` - 运行统计（totalRuns、successfulRuns、failedRuns）
+
+- **OpenAI 风格错误响应**:
+  ```json
+  {
+    "error": {
+      "message": "Project not found",
+      "type": "not_found_error",
+      "code": "project_not_found",
+      "param": "id"
+    }
+  }
+  ```
+
+- **CORS 配置**:
+  - 允许来源：`http://localhost:3000`, `http://localhost:8318`
+  - 允许方法：GET, POST, PUT, DELETE, OPTIONS
+  - 允许头部：content-type, authorization, x-request-id
+
+- **查询参数支持**:
+  - `?tag=rust` - 按标签过滤
+  - `?sort=name|createdAt|lastActiveAt` - 排序选项
+
+**技术栈**:
+- `axum 0.7` - HTTP 框架
+- `tower-http` - CORS 中间件
+- `tokio` - 异步运行时
+- `serde/serde_json` - JSON 序列化
+- `dirs` - 跨平台目录路径
+
+**代码质量**:
+- ✅ Clippy 无警告（-D warnings）
+- ✅ Rustfmt 格式化
+- ✅ 所有测试通过（50/50）
+- ✅ Release 构建成功
+
+**启动命令**:
+```bash
+codepanion-daemon --serve [port]
+```
+
+**API 示例**:
+```bash
+# 健康检查
+curl http://localhost:8318/health
+
+# 创建项目
+curl -X POST http://localhost:8318/api/v1/projects \
+  -H "Content-Type: application/json" \
+  -d '{"name":"My Project","path":"/path/to/project","tags":["rust"]}'
+
+# 列出项目
+curl http://localhost:8318/api/v1/projects?tag=rust&sort=lastActiveAt
+
+# 获取项目状态
+curl http://localhost:8318/api/v1/projects/{id}/status
+```
 
 ---
 

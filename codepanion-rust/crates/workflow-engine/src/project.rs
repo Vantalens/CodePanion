@@ -17,6 +17,41 @@ pub struct Project {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub created_at: u64,
+    #[serde(default)]
+    pub metadata: ProjectMetadata,
+}
+
+/// Project metadata for runtime, model, and custom fields
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectMetadata {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub custom: HashMap<String, serde_json::Value>,
+}
+
+/// Project health status
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectHealth {
+    pub path_exists: bool,
+    pub is_directory: bool,
+    pub is_git_repo: bool,
+    pub last_checked: u64,
+}
+
+/// Project statistics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectStats {
+    pub total_runs: u64,
+    pub successful_runs: u64,
+    pub failed_runs: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_run_at: Option<u64>,
 }
 
 /// Project registry that manages multiple projects
@@ -227,6 +262,7 @@ mod tests {
             last_active_at: 1000,
             description: None,
             created_at: 1000,
+            metadata: ProjectMetadata::default(),
         }
     }
 

@@ -253,13 +253,211 @@ Rust 目标指标：
   - 项目名称、路径、标签、最近活动时间、描述。
   - 验收：实现 `ProjectRegistry`；支持 list、get、upsert、remove、touch、search 操作；支持按 name、path、tags、description 搜索；支持按 last_active_at 排序；支持路径验证；支持自动生成唯一 ID；11 个测试全部通过（list empty、upsert and get、list sorted、remove、touch、search by name/tag/description、upsert updates、generate id、validate path）；通过 fmt 和 clippy 检查。
 
-- [ ] **M-02 Project API**
-  - `POST /projects`
-  - `GET /projects`
-  - `GET /projects/:id`
-  - `PUT /projects/:id`
-  - `DELETE /projects/:id`
-  - `POST /projects/:id/activate`
+- [x] **M-02 Project API (CCS 风格)**
+  - **描述**: HTTP API Server，CCS 兼容架构，供 GUI/CLI 调用
+  - **端口**: 8318（避免与 CCS 8317 冲突）
+  - **API 版本**: `/api/v1`
+  - **风格**: RESTful + OpenAI 兼容格式
+  
+  **核心端点**:
+  - `POST /api/v1/projects` - 创建项目
+  - `GET /api/v1/projects` - 列出所有项目（支持 `?tag=rust&sort=lastActiveAt`）
+  - `GET /api/v1/projects/:id` - 获取单个项目
+  - `PUT /api/v1/projects/:id` - 更新项目
+  - `DELETE /api/v1/projects/:id` - 删除项目
+  - `POST /api/v1/projects/:id/activate` - 激活项目（更新 lastActiveAt）
+  - `GET /api/v1/projects/:id/status` - 项目健康状态和统计
+  
+  **数据结构扩展**:
+  - `Project.metadata`: 支持 runtime、model、custom 字段
+  - `ProjectHealth`: 路径存在性、Git 仓库检查
+  - `ProjectStats`: 运行统计（totalRuns、successfulRuns、failedRuns）
+  
+  **错误响应格式**（OpenAI 风格）:
+  ```json
+  {
+    "error": {
+      "message": "Project not found",
+      "type": "not_found_error",
+      "code": "project_not_found",
+      "param": "id"
+    }
+  }
+  ```
+  
+  **CORS 配置**:
+  - 允许来源：`http://localhost:3000`, `http://localhost:8318`
+  - 允许方法：GET, POST, PUT, DELETE, OPTIONS
+  - 允许头部：content-type, authorization, x-request-id
+  
+  **验收标准**:
+  - [x] 7 个端点全部实现并通过测试
+  - [x] Project 结构扩展（metadata、health、stats）
+  - [x] OpenAI 风格错误响应
+  - [x] CORS 配置正确（支持 localhost:3000 和 8318）
+  - [x] 查询参数支持（tag 过滤、sort 排序）
+  - [x] 健康检查端点（路径验证、Git 检测）
+  - [x] 单元测试（请求/响应序列化）
+  - [x] 集成测试（完整 HTTP 流程）
+  - [x] cargo fmt + clippy + test 全部通过
+  - [x] 文档更新（API 规范、使用示例）
+
+- [ ] **M-02.1 Model Provider API (多模型支持)**
+  - **描述**: 统一的模型 API 管理，支持 Claude、DeepSeek、OpenAI 等多种 API
+  - **端口**: 复用 8318
+  - **API 版本**: `/api/v1`
+  
+  **核心端点**:
+  - `POST /api/v1/providers` - 添加 provider 配置
+  - `GET /api/v1/providers` - 列出所有 providers
+  - `GET /api/v1/providers/:id` - 获取单个 provider
+  - `PUT /api/v1/providers/:id` - 更新 provider
+  - `DELETE /api/v1/providers/:id` - 删除 provider
+  - `POST /api/v1/providers/:id/test` - 测试 provider 连接
+  - `GET /api/v1/providers/:id/models` - 列出 provider 支持的模型
+  
+  **支持的 Provider 类型**:
+  - `openai` - OpenAI API (GPT-4, GPT-3.5, etc.)
+  - `anthropic` - Claude API (Claude 3.5 Sonnet, Claude 3 Opus, etc.)
+  - `deepseek` - DeepSeek API (DeepSeek-V3, DeepSeek-Coder, etc.)
+  - `openrouter` - OpenRouter (300+ models)
+  - `ollama` - Ollama 本地模型
+  - `azure-openai` - Azure OpenAI Service
+  - `gemini` - Google Gemini API
+  - `qwen` - 阿里通义千问
+  - `glm` - 智谱 GLM
+  - `custom` - 自定义 OpenAI 兼容端点
+  
+  **Provider 配置结构**:
+  ```json
+  {
+    "id": "my-deepseek",
+    "name": "DeepSeek V3",
+    "type": "deepseek",
+    "config": {
+      "apiKey": "sk-xxx",
+      "baseUrl": "https://api.deepseek.com/v1",
+      "defaultModel": "deepseek-chat",
+      "maxTokens": 8192,
+      "temperature": 0.7
+    },
+    "models": [
+      {
+        "id": "deepseek-chat",
+        "name": "DeepSeek Chat",
+        "contextWindow": 64000,
+        "maxOutputTokens": 8192,
+        "pricing": {
+          "input": 0.14,
+          "output": 0.28,
+          "currency": "USD",
+          "per": 1000000
+        }
+      },
+      {
+        "id": "deepseek-coder",
+        "name": "DeepSeek Coder",
+        "contextWindow": 64000,
+        "maxOutputTokens": 8192
+      }
+    ],
+    "capabilities": ["chat", "streaming", "function-calling"],
+    "status": "active",
+    "lastTested": 1780306700000,
+    "createdAt": 1780306599000
+  }
+  ```
+  
+  **Claude API 配置示例**:
+  ```json
+  {
+    "id": "my-claude",
+    "name": "Claude API",
+    "type": "anthropic",
+    "config": {
+      "apiKey": "sk-ant-xxx",
+      "baseUrl": "https://api.anthropic.com/v1",
+      "defaultModel": "claude-3-5-sonnet-20241022",
+      "maxTokens": 8192
+    },
+    "models": [
+      {
+        "id": "claude-3-5-sonnet-20241022",
+        "name": "Claude 3.5 Sonnet",
+        "contextWindow": 200000,
+        "maxOutputTokens": 8192,
+        "pricing": {
+          "input": 3.0,
+          "output": 15.0,
+          "currency": "USD",
+          "per": 1000000
+        }
+      },
+      {
+        "id": "claude-3-opus-20240229",
+        "name": "Claude 3 Opus",
+        "contextWindow": 200000,
+        "maxOutputTokens": 4096,
+        "pricing": {
+          "input": 15.0,
+          "output": 75.0,
+          "currency": "USD",
+          "per": 1000000
+        }
+      }
+    ]
+  }
+  ```
+  
+  **OpenRouter 配置示例**:
+  ```json
+  {
+    "id": "my-openrouter",
+    "name": "OpenRouter",
+    "type": "openrouter",
+    "config": {
+      "apiKey": "sk-or-xxx",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "defaultModel": "anthropic/claude-3.5-sonnet"
+    }
+  }
+  ```
+  
+  **测试连接响应**:
+  ```json
+  {
+    "success": true,
+    "latency": 234,
+    "models": ["deepseek-chat", "deepseek-coder"],
+    "message": "Connection successful"
+  }
+  ```
+  
+  **错误响应**:
+  ```json
+  {
+    "error": {
+      "message": "Invalid API key",
+      "type": "authentication_error",
+      "code": "invalid_api_key",
+      "param": "apiKey"
+    }
+  }
+  ```
+  
+  **验收标准**:
+  - [ ] 7 个端点全部实现并通过测试
+  - [ ] 支持 10+ 种 provider 类型（openai、anthropic、deepseek、openrouter、ollama、azure-openai、gemini、qwen、glm、custom）
+  - [ ] Provider 配置结构（id、name、type、config、models、capabilities、status）
+  - [ ] API Key 安全存储（加密或使用系统密钥链）
+  - [ ] 测试连接功能（验证 API Key、列出可用模型）
+  - [ ] 模型列表缓存（避免频繁请求）
+  - [ ] 定价信息管理（input/output token 价格）
+  - [ ] OpenAI 风格错误响应
+  - [ ] 单元测试（配置序列化、验证逻辑）
+  - [ ] 集成测试（真实 API 调用 mock）
+  - [ ] cargo fmt + clippy + test 全部通过
+  - [ ] 文档更新（支持的 provider 列表、配置示例）
 
 - [ ] **M-03 多 run scheduler**
   - 多 workflow 并行。
