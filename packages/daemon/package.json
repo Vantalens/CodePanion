@@ -1,7 +1,17 @@
 {
   "name": "codepanion",
   "version": "0.1.0",
-  "description": "Daemon and CLI for the CodePanion local AI workflow console",
+  "description": "Transition daemon and CLI baseline for CodePanion, a local-first AI IDE and coding workflow workspace",
+  "keywords": [
+    "ai-ide",
+    "ai-coding",
+    "ai-development",
+    "coding-agents",
+    "workflow-automation",
+    "agentic-workflow",
+    "local-first",
+    "developer-tools"
+  ],
   "bin": {
     "codepanion": "./dist/index.js"
   },

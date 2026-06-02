@@ -2,7 +2,25 @@
   "name": "codepanion-monorepo",
   "version": "0.1.0",
   "private": true,
-  "description": "Local-first personal AI workflow console",
+  "description": "Local-first AI IDE and multi-agent coding workspace for autonomous development workflows",
+  "keywords": [
+    "ai-ide",
+    "ai-coding",
+    "ai-development",
+    "ai-agents",
+    "coding-agents",
+    "multi-agent",
+    "agentic-workflow",
+    "workflow-automation",
+    "autonomous-agents",
+    "local-first",
+    "developer-tools",
+    "openai-api",
+    "claude-code",
+    "rust",
+    "wpf",
+    "websocket"
+  ],
   "workspaces": [
     "packages/daemon"
   ],
