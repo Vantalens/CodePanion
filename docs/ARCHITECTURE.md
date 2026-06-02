@@ -4,7 +4,7 @@
 
 CodePanion 是一个本地优先、供应商中立、面向个人开发者的轻量 AI IDE，用于把产品目标拆成可执行任务，让不同 AI 角色和模型协作完成规划、实现、测试、审查、文档和交付归档。最终架构以 Rust daemon 为核心，支撑本地全自动开发 workflow、多 AI 角色分工、高危行为审核门和多项目/多任务并行调度。
 
-当前 Node daemon、HTTP/WebSocket、WPF/WebView2 GUI、`workflow` / `event` 语义模型不作为最终性能架构，但作为 Rust 迁移的行为基线保留。Rust 重构必须兼容现有 GUI 所需的 workflow board、run detail、artifact、delivery、gate resolve 和 WS `workflow-run-event` 契约。既有 `source` / `session` 语义只作为历史兼容或清理对象，不作为新路线的产品对象。
+当前默认运行时是 Rust daemon。旧 Node daemon 仅作为行为兼容基线保留，不再是 GUI 启动、打包或新增能力的默认路径。Rust daemon 必须持续兼容 GUI 所需的 workflow board、run detail、artifact、delivery、gate resolve 和 WS `workflow-run-event` 契约。既有 `source` / `session` 语义只作为历史兼容或清理对象，不作为新路线的产品对象。
 
 产品路线分为四个阶段：
 
@@ -17,7 +17,7 @@ CodePanion 是一个本地优先、供应商中立、面向个人开发者的轻
 
 ## 架构契约
 
-- **Rust 优先**：新增 daemon 核心能力优先在 Rust 实现；Node 实现只作为过渡基线和迁移参照。
+- **Rust 优先**：新增 daemon 核心能力在 Rust 实现；Node 实现只作为旧行为基线和迁移参照。
 - **本地优先**：daemon 默认监听 `127.0.0.1`，除健康检查外请求需要本地 token；运行权限保持在当前用户范围内。
 - **最小采集**：默认只采集完成本地 workflow 所需的会话状态、事件、必要上下文、角色执行记录和用户明确选择的数据。
 - **全自动执行 + 高危门控**：低危读写、测试、审查和文档动作可自动推进；删除、关键配置修改、危险命令、网络请求、git 历史修改等高危行为必须进入人工门。
@@ -248,21 +248,21 @@ class PromptDetector {
 #### HTTP REST API
 
 ```
-POST /notify
-  发送通知
-  Body: { message: string, sessionId?: string }
-
-POST /sessions/:id/reply
-  发送响应到会话
-  Body: { sessionId: string, input: string }
-
-GET /sessions
-  获取所有活动会话
-  Response: { sessions: Session[] }
-
 GET /health
   获取守护进程状态
-  Response: { running: boolean, uptime: number, sessions: number }
+  Response: { ok: boolean, pid: number, version: string }
+
+GET /api/v1/projects
+POST /api/v1/projects
+  项目注册与管理
+
+GET /api/v1/providers
+POST /api/v1/providers
+  Provider 注册与管理
+
+GET /workflow/runs
+GET /workflow/gates
+  Workflow run、artifact、delivery 和 human gate 查询
 ```
 
 #### WebSocket 协议
@@ -376,56 +376,44 @@ enum NotificationType {
 
 CLI 在 daemon 在线时注入 hooks，把每个步骤映射为 workflow event，GUI 因此能实时看到工作流进度而无需轮询历史文件。hooks 失败被 catch 后只打印 warning，不影响真实执行——事件总线不可用永远不应让本地命令半途夭折。
 
-**预置示例**：[`packages/daemon/examples/workflows/`](../packages/daemon/examples/workflows/) 提供 `codex-then-claude-review`、`build-test-audit` 两个开箱模板；`codepanion workflow import --file <json>` 把它们加载到本地。
+**预置示例**：workflow 示例由 Rust workflow engine 和 GUI 工作台消费；历史 TypeScript 示例只作为迁移参考，不再是默认导入路径。
 
 ## 数据流详解
 
-### 场景 1：检测到输入提示
+### 场景 1：执行本地 workflow
 
 ```
-1. 用户执行: codepanion run -- claude code
+1. 用户在 GUI 或 CLI 中启动 workflow
    ↓
-2. PTY Runner 启动子进程
+2. Rust daemon 写入 run history 并调度 step
    ↓
-3. Claude 输出: "Modify file.ts? (y/n)"
+3. step 调用 API provider、CLI provider、harness 或本地命令
    ↓
-4. Prompt Detector 检测到 "(y/n)" 模式
+4. 低风险步骤自动推进，高风险步骤进入 human gate
    ↓
-5. Session Manager 记录等待状态
+5. artifacts、delivery note 和 gate history 写入本地存储
    ↓
-6. Notifier 发送桌面通知
+6. WebSocket 推送 workflow-run-event 到 GUI
    ↓
-7. Daemon Server 通过 WebSocket 推送到 GUI
-   ↓
-8. GUI 显示提示对话框
-   ↓
-9. 用户在 GUI 中点击 "Yes"
-   ↓
-10. GUI 通过 WebSocket 发送响应
-    ↓
-11. Session Manager 接收响应
-    ↓
-12. PTY Runner 将 "y\n" 写入子进程 stdin
-    ↓
-13. Claude 继续执行
+7. GUI 更新 run 时间线、artifact 预览和 gate 面板
 ```
 
-### 场景 2：命令执行完成
+### 场景 2：Human gate 决策
 
 ```
-1. 子进程退出
+1. workflow step 标记 requires_human_gate
    ↓
-2. PTY Runner 捕获退出码
+2. Rust daemon 写入 pending gate
    ↓
-3. Session Manager 更新会话状态
+3. GUI 展示 approve / reject / retry 和 constraints 输入
    ↓
-4. Notifier 发送完成通知
+4. 用户提交决策
    ↓
-5. Daemon Server 通过 WebSocket 通知 GUI
+5. /workflow/gates/:runId/:stepId/resolve 持久化决策
    ↓
-6. GUI 显示完成消息
+6. workflow 按决策继续、重试或失败
    ↓
-7. Session Manager 清理会话资源
+7. gate history 在 GUI 中可复查
 ```
 
 ## 进程管理
@@ -544,33 +532,30 @@ interface Config {
 
 ## 错误处理
 
-daemon 不引入自定义错误类型层级——`zod` 校验失败回 400、token / Origin / subprotocol 失败回 401/403、未知资源回 404、内部异常通过 [logger.ts](../packages/daemon/src/logger.ts) 的 `maskString` 脱敏后返回 500。客户端按 HTTP 状态码做差异化处理：
+Rust daemon 使用统一错误响应：输入校验失败回 400，未知资源回 404，内部异常回 500。客户端按 HTTP 状态码做差异化处理：
 
-- daemon HTTP 失败：`packages/daemon/src/shared/client.ts` 抛 `DaemonHttpError`（包含 method/path/status），CLI 通过 `CODEPANION_DEBUG=1` / `LOG_LEVEL=debug` 暴露细节，PTY stdout 不污染。
-- 旧 Adapter SDK 失败：`packages/adapter-sdk/src/index.js` 抛 `CodePanionAdapterError`（包含 status/method/route/cause），仅作为兼容层维护。
+- Rust CLI 失败：命令向 stderr 输出错误并返回非零退出码。
+- 旧 Adapter SDK 失败：仅作为兼容层维护，不作为新路线扩展入口。
 - GUI 失败：WPF 端 `async void` 全部包 try/catch（[MainWindow.xaml.cs:95-107](../packages/gui/MainWindow.xaml.cs#L95-L107)），WebSocket 断开走指数退避重连（2s → 30s 上限）。
 
 ### 错误恢复策略
 
 | 错误类型 | 恢复策略 |
 |---------|---------|
-| PTY 启动失败 | runner 立刻退出码 2，把可读原因写到 stderr |
+| CLI provider 启动失败 | executor 返回可读 stderr、退出码和风险上下文 |
 | daemon HTTP 不可达 | CLI/GUI/SDK 各自重试或退避；GUI 显示"未连接"并触发后台重连 |
-| WebSocket 断开 | GUI 端 2s → 30s 指数退避；observer 重连后从 hello + sessions/sources/workflow snapshot 完整恢复视图 |
-| daemon 进程崩溃 | 由 `DaemonProcessManager.EnsureStartedAsync` 重启 bundle/dist 路径；retention 窗口内的 workflow snapshot 自动回放 |
-| 配置文件损坏 | `loadConfig` 报错并退出；新建默认配置由 `codepanion install` 重新生成 |
+| WebSocket 断开 | GUI 端 2s → 30s 指数退避；重连后重新拉取 workflow/project/provider 状态 |
+| daemon 进程崩溃 | 由 `DaemonProcessManager.EnsureStartedAsync` 重启 Rust daemon |
+| 配置文件损坏 | Rust config manager 报错；用户可备份后删除对应 `.codepanion` 配置文件重新生成 |
 
 ## 资源监管
 
 详细 retention 策略见 [docs/RETENTION.md](RETENTION.md)。简述：
 
-- **PromptDetector**：滑动窗口缓冲，由 `cfg.promptIdleMs` 控制 idle 检测节流。
-- **SessionManager**：限制每个会话保留的 output chunks 与总字符数；exited 会话超出窗口自动裁剪。
-- **SourceManager**：旧来源兼容层，限制总事件数、每事件回复数、offline 来源数；超额按时间戳裁掉最老的。
-- **WorkflowManager**：限制 thread 数、每 thread item 数、单条 item 内容长度；snapshot 写盘 200ms 去抖。
-- **server 输出合并**：高频 PTY 输出 50ms 合并为一条 workflow item，避免计数器爆炸（P2-D）。
-- **GUI 端**：`_sessions` 仅裁剪 exited，活跃会话永不丢；`gui.log` 走 `Channel<string>` 异步 + 大小滚动。
-- **WebSocket**：observer 接入后立即下发 sessions/sources/workflow 三份 snapshot，避免增量丢失；断线由 GUI 端 2s → 30s 指数退避自动重连。
+- **WorkflowRunHistory**：持久化 run history，支持 GUI run 列表和详情恢复。
+- **WorkflowArtifactStore**：持久化 artifacts、delivery note 和 gate 决策记录。
+- **RunScheduler**：维护 queued/running/completed 状态，支持全局视图 API。
+- **GUI 端**：WebSocket 断开后指数退避重连，并通过 HTTP API 恢复项目、run、gate 和 provider 状态。
 
 ## 安全考虑
 
@@ -581,7 +566,7 @@ daemon 不引入自定义错误类型层级——`zod` 校验失败回 400、tok
 
 ### 2. 输入验证
 
-- 验证所有 API 输入（使用 Zod）
+- 验证所有 API 输入（Rust serde 类型和 route-level 校验）
 - 防止命令注入
 
 ### 3. 权限控制
@@ -593,35 +578,25 @@ daemon 不引入自定义错误类型层级——`zod` 校验失败回 400、tok
 
 ### 接入新的 AI 编程工具
 
-按能力分层选择最低需要的入口：
+按能力选择 provider 类型：
 
-- **L1（进程存在识别）**：在 [aiToolProcessAdapter.ts](../packages/daemon/src/adapters/aiToolProcessAdapter.ts) `TOOL_PROFILES` 加 profile（参考 `qoder` / `trae`）；不读取私有数据。
-- **L2（状态事件）**：用 [packages/adapter-sdk/](../packages/adapter-sdk/) 写一个 bridge 脚本（`local-tool-bridge.mjs` 是最短模板），把工具自己的日志 / 状态文件升级成 `error` / `prompt` / `done` / `activity` 事件。
-- **L3（回复 / 继续执行）**：在工具有公开 CLI / 扩展 API 后，复用 `replyToEvent` 与 `inject-input` 路径；不接入插件私有 DB / cookie。
-
-### 添加新的提示检测模式
-
-修改 [packages/daemon/src/pty/promptDetector.ts](../packages/daemon/src/pty/promptDetector.ts) 与配套测试 [test/promptDetector.test.mjs](../packages/daemon/test/promptDetector.test.mjs)，添加新正则并在测试中固化匹配 / 不匹配样本。
-
-### 添加新的通知渠道
-
-[packages/daemon/src/daemon/notifier.ts](../packages/daemon/src/daemon/notifier.ts) 当前覆盖 Windows Toast / macOS osascript / Linux notify-send。不引入聊天聚合（Slack / 邮箱 / IM）通道——这与 [POSITIONING.md](POSITIONING.md) "不做通用个人 Agent" 边界冲突。
+- **API provider**：OpenAI-compatible HTTP API，适合模型服务和网关。
+- **CLI provider**：显式命令、受控 cwd、清空继承环境、stdin prompt、timeout/cancel 和输出捕获。
+- **Harness provider**：进程内 agent runtime，用于本地工具循环和 delegated task。
 
 ## 测试策略
 
-仓库使用 Node 内置 `node:test` + `node:assert`，没有 Jest / Mocha / Supertest 依赖。完整套件入口：根目录 `npm test`（顺序跑 daemon + adapter-sdk + DTO 一致性校验）。
+当前主测试入口是 Rust workspace；根目录 `npm test` 作为旧 TypeScript 兼容基线保留。
 
 | 维度 | 位置 | 代表用例 |
 |------|------|----------|
-| 单元 | `packages/daemon/test/promptDetector.test.mjs`、`sessionManager.test.mjs`、`sourceManager.test.mjs` | 状态机迁移、retention 裁剪 |
-| 集成（真 daemon） | `packages/daemon/test/server.integration.test.mjs` | HTTP/WS 鉴权、observer 重连 snapshot、并行任务 |
-| 兼容适配器 | `packages/daemon/test/codexDesktopAdapter.test.mjs`、`aiToolProcessAdapter.test.mjs` | 旧来源兼容层，不作为新路线扩展入口 |
-| 工作流 | `packages/daemon/test/workflowDefinitionManager.test.mjs`、`workflowExamples.test.mjs` | runWorkflow hooks、示例 JSON 与 CLI 解析等价 |
-| SDK | `packages/adapter-sdk/test/adapter.test.mjs`、`localToolBridge.test.mjs` | SDK 注册/事件/回复闭环、bridge classify 规则 |
-| 协议契约 | `packages/daemon/test/generateCsharpDtos.test.mjs` + `npm run validate:dtos` | C# DTO 与 TS protocol.ts 一致 |
-| GUI snapshot | `packages/daemon/test/chatWorkflowSnapshot.test.mjs` | 并行任务、中文 + emoji、failure 复制 |
+| 单元 | `codepanion-rust/crates/*/src/*.rs` | config、provider、workflow、runtime 纯逻辑 |
+| Daemon 集成 | `codepanion-rust/crates/daemon/tests/*_test.rs` | HTTP API、WebSocket、provider、scheduler、workflow execution |
+| CLI 集成 | `codepanion-rust/crates/daemon/tests/cli_test.rs` | CLI 命令真实调用 test daemon |
+| GUI | `dotnet build packages/gui/CodePanion.Gui.csproj -c Release` + `scripts/verify-gui-cli.ps1` | GUI 编译、Rust daemon API/CLI smoke |
+| 兼容基线 | `npm test` | 旧 TypeScript 行为仍未破坏 |
 
-新增功能时优先在已有同名 test 文件追加用例；新协议字段必须同步 `npm run validate:dtos`。
+新增 Rust daemon/CLI 功能时优先在 `codepanion-rust/crates/daemon/tests/` 或对应 crate 单元测试中追加用例。
 
 ## 部署
 
@@ -638,7 +613,7 @@ npm test                    # daemon + adapter-sdk + DTO 一致性
 
 Windows Alpha 阶段以 `CodePanion.Gui.exe` 双击运行为唯一普通用户路径，不强制 CLI / NSSM / 服务化部署：
 
-- GUI 启动时由 `DaemonProcessManager` 自动 spawn daemon（优先 `packages/daemon/bundle/daemon.cjs`，回退 `dist/daemon-entry.js`）。
+- GUI 启动时由 `DaemonProcessManager` 自动 spawn Rust daemon（优先便携包内 `daemon/codepanion-daemon.exe`，开发环境回退 `codepanion-rust/target/release/codepanion-daemon.exe` 或 debug 构建）。旧 Node daemon 仅在 `CODEPANION_ENABLE_LEGACY_NODE_DAEMON=1` 时回退。
 - daemon 监听 `127.0.0.1`，token 写入 `~/.codepanion/config.json`（权限 0o600）。
 - 退出 GUI 时 daemon 进程随之结束；无需 systemd / launchd / NSSM。
 - 打包流程参考 [scripts/package-windows.ps1](../scripts/package-windows.ps1)。

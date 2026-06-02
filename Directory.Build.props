@@ -1,0 +1,11 @@
+<Project>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'CodePanion.Gui' and '$(BaseIntermediateOutputPath)' == ''">
+    <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory).artifacts\gui-build\default\obj\</BaseIntermediateOutputPath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'CodePanion.Gui' and '$(BaseOutputPath)' == ''">
+    <BaseOutputPath>$(MSBuildThisFileDirectory).artifacts\gui-build\default\bin\</BaseOutputPath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'CodePanion.Gui' and '$(MSBuildProjectExtensionsPath)' == ''">
+    <MSBuildProjectExtensionsPath>$(BaseIntermediateOutputPath)</MSBuildProjectExtensionsPath>
+  </PropertyGroup>
+</Project>

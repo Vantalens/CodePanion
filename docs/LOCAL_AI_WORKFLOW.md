@@ -40,7 +40,7 @@ Role 是一个可复用的 AI 工作角色。每个角色至少声明：
 - `model`：可选模型绑定，例如同一模型多角色或不同 provider 分工
 - `permissions`：读、写、命令、网络、任务委派等权限
 - `contextPolicy`：上下文预算和可读取范围
-- `handoffContract`：输出格式、必须回传的结果和失败时需要的诊断信息
+- `deliveryContract`：输出格式、必须回传的结果和失败时需要的诊断信息
 
 首批内置角色：
 

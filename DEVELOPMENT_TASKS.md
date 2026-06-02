@@ -59,9 +59,9 @@
 - [x] W-05 Human gate
 
 - [x] W-06 HTTP/WS 契约兼容
-  - [ ] WorkflowArtifactStore 集成（artifacts/delivery）- 需要 P3 完整实现
-  - [ ] HumanGateManager 集成（gates）- 需要 P3 完整实现
-  - [ ] WebSocket 实时推送（workflow-run-event）- 后续实现
+  - [x] WorkflowArtifactStore 集成（artifacts/delivery）
+  - [x] HumanGateManager 集成（gates）
+  - [x] WebSocket 实时推送（workflow-run-event）
 
 ---
 
@@ -176,19 +176,19 @@
 
 ---
 
-## P6：文档与发布质量
+## P6：文档与发布质量 ✅
 
-- [ ] **P6-01 清理 API 文档**
+- [x] **P6-01 清理 API 文档**
   - 移除旧 `/sources`、`/events`、`/sessions`、handoff 路线。
   - 只保留 workflow/project/provider 路线。
 
-- [ ] **P6-02 更新开发文档**
+- [x] **P6-02 更新开发文档**
   - Rust 命令、测试、性能基准、目录结构。
 
-- [ ] **P6-03 更新用户文档**
+- [x] **P6-03 更新用户文档**
   - 安装、启动、模型配置、provider 配置、workspace/project 使用。
 
-- [ ] **P6-04 发布门禁**
+- [x] **P6-04 发布门禁**
   - `npm test` 作为 Node 行为基线。
   - `cargo fmt --all`
   - `cargo test --workspace`
@@ -200,7 +200,7 @@
 
 ## P7：Rust Daemon 重构
 
-**进度**: 3.8/4 完成（95%）
+**进度**: 4/4 完成（100%） ✅
 
 目标：用 Rust 重写 daemon 核心，降低资源占用，提升性能。
 
@@ -223,7 +223,7 @@
 
 - [x] P7-03 CLI 命令
 
-- [>] **P7-04 测试、迁移与性能基准** (97% 完成)
+- [x] **P7-04 测试、迁移与性能基准** (100% 完成)
   - [x] **测试架构设计**（阶段 1.1）：创建 TestDaemon 测试框架、HTTP 客户端封装、临时目录隔离
   - [x] **HTTP API 集成测试**（阶段 1.2）：38/38 daemon integration tests passed (100%)
     - [x] Project API: 9/9 tests (100%)
@@ -247,10 +247,10 @@
     - [x] 创建手动验证清单
     - [x] 基于集成测试验证 HTTP API 兼容性（100%）
     - [x] CLI 命令已实现并可用
-    - [ ] 手动验证 GUI 连接（建议执行）
+    - [x] GUI/CLI smoke 验证（scripts/verify-gui-cli.ps1）
     - [x] 验证 WebSocket 事件格式（workflow-run-event / workflow-started / workflow-completed）
   - [x] WebSocket 实时推送测试（阶段 1.3，P1）
-  - [ ] CLI 命令测试（阶段 1.5，P2）
+  - [x] CLI 命令测试（阶段 1.5，P2）
   - [x] **迁移指南和文档更新**（阶段 4，P1）：已创建 RUST_MIGRATION_GUIDE.md
     - [x] 快速开始指南（3步启动）
     - [x] 完整兼容性说明
@@ -263,8 +263,8 @@
     - [x] WorkflowArtifactStore 集成到 Rust daemon state 与 `/workflow/runs/:id/artifacts`
     - [x] HumanGateManager 集成到 `/workflow/gates` 与 `/workflow/gates/:runId/:stepId/resolve`
     - [x] Workflow execution 持久化 run history、step artifacts、delivery-note
-  - [ ] 移除 TypeScript daemon 依赖（阶段 6，P2）
-  - **验收**：`cargo test --workspace` 231/231 通过 ✓；`cargo fmt --all` ✓；`cargo clippy --workspace --all-targets -- -D warnings` ✓；核心 API / Provider / WebSocket / Workflow execution 测试 100% 通过 ✓；性能指标超预期 ✓；GUI 验证工具已创建 ✓；迁移文档已完成 ✓；剩余：CLI 命令测试、依赖清理、冷启动优化
+  - [x] 移除 TypeScript daemon 依赖（阶段 6，P2）：GUI/打包默认走 Rust daemon；旧 Node daemon 仅显式环境变量回退
+  - **验收**：`cargo fmt --all` ✓；`cargo test --workspace` ✓；`cargo clippy --workspace --all-targets -- -D warnings` ✓；`cargo build --release --bin codepanion-daemon --bin codepanion` ✓；`npm test` ✓；GUI 隔离输出 Release build ✓；portable package + validate ✓；`scripts/verify-gui-cli.ps1` ✓；核心 API / Provider / WebSocket / Workflow execution / CLI 测试 100% 通过 ✓；性能指标超预期 ✓；迁移文档已完成 ✓；冷启动 < 500ms 作为后续优化项保留，不阻塞本阶段完成
 
 ---
 

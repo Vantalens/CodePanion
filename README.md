@@ -37,7 +37,7 @@ A workflow can assign different roles to different models or tools. For example,
 
 ## Current Status
 
-CodePanion is moving from an early TypeScript daemon to a Rust daemon. The Rust daemon is the current product direction and is designed for lower memory usage, faster startup, safer execution, and better multi-task scheduling.
+CodePanion now uses the Rust daemon as the default local runtime. The Rust daemon is designed for lower memory usage, faster startup, safer execution, and better multi-task scheduling.
 
 Current Rust daemon validation:
 
@@ -48,7 +48,7 @@ Current Rust daemon validation:
 | Core HTTP API tests | 100% passing |
 | Workflow execution end-to-end tests | 100% passing |
 
-The Windows desktop UI uses WPF + WebView2. The TypeScript daemon remains as a transition baseline for behavior compatibility; the target runtime is Rust.
+The Windows desktop UI uses WPF + WebView2 and starts the Rust daemon automatically. The TypeScript daemon remains only as a legacy behavior baseline.
 
 ## Use CodePanion
 
@@ -131,7 +131,6 @@ CodePanion is not:
 
 ```bash
 npm install
-npm run build
 npm run package:windows
 ```
 

@@ -15,7 +15,7 @@ This documentation entry focuses on the current local AI workflow direction: tas
 - [Architecture](ARCHITECTURE.md)
 - [Development Guide](DEVELOPMENT.md)
 - [API Documentation](API.md)
-- [Installation and Build](INSTALL.md)
+- [Installation and Build](../docs/INSTALL.md)
 - [Current Development Tasks](../DEVELOPMENT_TASKS.md)
 
 ## Recommended Reading Order

@@ -591,7 +591,12 @@ async fn handle_model_command(
                 alias: alias.clone(),
                 model_id: model_id.clone(),
             };
-            client.post(&url).json(&req).send().await?.error_for_status()?;
+            client
+                .post(&url)
+                .json(&req)
+                .send()
+                .await?
+                .error_for_status()?;
             println!("✓ Set alias '{}' -> '{}'", alias, model_id);
         }
     }
@@ -611,7 +616,12 @@ async fn handle_config_command(
             let req = SetDefaultModelRequest {
                 model_id: model.clone(),
             };
-            client.post(&url).json(&req).send().await?.error_for_status()?;
+            client
+                .post(&url)
+                .json(&req)
+                .send()
+                .await?
+                .error_for_status()?;
             println!("✓ Set default model to '{}'", model);
         }
         ConfigCommands::SetEffort { level } => {
@@ -619,7 +629,12 @@ async fn handle_config_command(
             let req = SetEffortLevelRequest {
                 level: level.clone(),
             };
-            client.post(&url).json(&req).send().await?.error_for_status()?;
+            client
+                .post(&url)
+                .json(&req)
+                .send()
+                .await?
+                .error_for_status()?;
             println!("✓ Set effort level to '{}'", level);
         }
     }

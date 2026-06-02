@@ -4,7 +4,7 @@
 
 CodePanion 是一个本地优先、供应商中立、面向个人开发者的 **Rust 轻量 AI IDE**。它服务于需要把产品目标自动推进到代码、测试、审查、文档和交付记录的用户：CodePanion 自身就是本地全自动开发系统，通过多 AI 角色分工、多模型协作、高危行为审核门和多项目/多任务调度，把开发目标组织成可复盘的本地 workflow。仓库内具体措辞以 [产品定位契约](POSITIONING.md)、[本地 AI 工作流设计](LOCAL_AI_WORKFLOW.md) 和 [Rust 重构计划](RUST_REWRITE_PLAN.md) 为准。
 
-现有产品不是最终性能架构。当前 Windows GUI、本地 Node daemon 和 workflow 模型作为过渡实现与行为基线保留；下一步开发主线是 Rust daemon 技术验证、核心 agent/workflow 引擎迁移、高危行为检测、多任务并行调度和多项目管理。监听外部工具状态不再进入路线；外部 agentic coding tool 调用能力是必须保留的一等能力源，但要接入本地 workflow，而不是把产品退回外部工具面板。
+当前 Windows GUI 默认启动 Rust daemon，workflow 模型、artifact、gate 和 provider API 是当前行为契约。旧 Node daemon 只作为兼容基线保留；后续开发主线继续围绕 Rust agent/workflow 引擎、高危行为检测、多任务并行调度和多项目管理。监听外部工具状态不再进入路线；外部 agentic coding tool 调用能力是必须保留的一等能力源，但要接入本地 workflow，而不是把产品退回外部工具面板。
 
 ## 市场判断与差异化
 
@@ -31,7 +31,7 @@ CodePanion 更接近“个人本地 Devin + 多 agent 调度器 + Rust 高性能
 ## 产品保留决策
 
 - **保留当前入口**：Windows Alpha 继续以 `CodePanion.Gui.exe` 双击运行为普通用户路径。
-- **Rust daemon 优先**：Node daemon 作为过渡实现保留；新开发优先落到 Rust 技术验证和核心模块重构。
+- **Rust daemon 默认**：GUI、CLI、打包和新开发默认走 Rust daemon；Node daemon 只作为旧行为基线保留。
 - **保留当前行为基线**：HTTP/WebSocket 契约、workflow 定义、run history、artifact、人工门和 GUI 工作台作为迁移验收标准。
 - **重排当前主线**：先 Rust 化本地全自动 workflow，再做多项目/多任务调度和外部能力源接入；监听、识别和外部来源不再进入新路线。
 - **后置评估**：Tauri/Avalonia 跨平台 GUI、provider adapter、Enterprise 治理能力和规则跨生态同步进入后续路线，不作为 Alpha 阻塞项。

@@ -37,7 +37,7 @@ CodePanion 适合这些开发者：
 
 ## 当前状态
 
-CodePanion 正在从早期 TypeScript daemon 迁移到 Rust daemon。Rust daemon 是当前产品主线，目标是降低内存占用、提升启动速度、强化执行安全，并提供更稳定的多任务调度能力。
+CodePanion 当前默认使用 Rust daemon 作为本地运行时，目标是降低内存占用、提升启动速度、强化执行安全，并提供更稳定的多任务调度能力。
 
 当前 Rust daemon 验证结果：
 
@@ -48,7 +48,7 @@ CodePanion 正在从早期 TypeScript daemon 迁移到 Rust daemon。Rust daemon
 | 核心 HTTP API 测试 | 100% 通过 |
 | Workflow 执行端到端测试 | 100% 通过 |
 
-Windows 桌面界面使用 WPF + WebView2。TypeScript daemon 仍作为过渡实现和行为兼容基线保留；目标运行时是 Rust。
+Windows 桌面界面使用 WPF + WebView2，并会自动启动 Rust daemon。TypeScript daemon 仅作为旧行为兼容基线保留。
 
 ## 使用 CodePanion
 
@@ -131,7 +131,6 @@ CodePanion 不是：
 
 ```bash
 npm install
-npm run build
 npm run package:windows
 ```
 

@@ -1,240 +1,154 @@
-#!/usr/bin/env pwsh
-# GUI/CLI 适配验证脚本
+param(
+    [int]$DaemonPort = 0
+)
 
 $ErrorActionPreference = "Stop"
 
-Write-Host "=== CodePanion GUI/CLI 适配验证 ===" -ForegroundColor Cyan
-Write-Host ""
+$root = Split-Path -Parent $PSScriptRoot
+$daemon = $null
+$verifyDir = Join-Path $root ".artifacts\verify-gui-cli"
 
-$DAEMON_PORT = 7777
-$DAEMON_URL = "http://127.0.0.1:$DAEMON_PORT"
+Set-Location -LiteralPath $root
+New-Item -ItemType Directory -Path $verifyDir -Force | Out-Null
 
-# Step 1: 启动 daemon
-Write-Host "[1/5] 启动 Rust daemon..." -ForegroundColor Yellow
-Set-Location codepanion-rust
-$daemonPath = "target\release\codepanion-daemon.exe"
-
-if (-not (Test-Path $daemonPath)) {
-    Write-Host "Daemon 未编译，正在编译..." -ForegroundColor Yellow
-    cargo build --release --bin codepanion-daemon | Out-Null
-}
-
-$daemon = Start-Process -FilePath $daemonPath -ArgumentList "--serve", $DAEMON_PORT -PassThru -WindowStyle Hidden
-
-Write-Host "  Daemon PID: $($daemon.Id)" -ForegroundColor Gray
-
-# 等待 daemon 启动
-Start-Sleep -Seconds 2
-$ready = $false
-for ($i = 1; $i -le 20; $i++) {
+if ($DaemonPort -eq 0) {
+    $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Parse("127.0.0.1"), 0)
+    $listener.Start()
     try {
-        $response = Invoke-WebRequest -Uri "$DAEMON_URL/health" -TimeoutSec 1 -ErrorAction SilentlyContinue
-        if ($response.StatusCode -eq 200) {
-            $ready = $true
-            break
-        }
-    } catch {
-        Start-Sleep -Milliseconds 200
+        $DaemonPort = $listener.LocalEndpoint.Port
+    } finally {
+        $listener.Stop()
     }
 }
+$daemonUrl = "http://127.0.0.1:$DaemonPort"
 
-if (-not $ready) {
-    Write-Host "  ✗ Daemon 启动失败" -ForegroundColor Red
-    Stop-Process -Id $daemon.Id -Force -ErrorAction SilentlyContinue
-    exit 1
-}
+Write-Host "=== CodePanion GUI/CLI verification ===" -ForegroundColor Cyan
 
-Write-Host "  ✓ Daemon 启动成功" -ForegroundColor Green
-Write-Host ""
-
-# Step 2: 验证 HTTP API
-Write-Host "[2/5] 验证 HTTP API..." -ForegroundColor Yellow
-
-$apiTests = @(
-    @{ Name = "Health"; Url = "/health" },
-    @{ Name = "Projects"; Url = "/api/v1/projects" },
-    @{ Name = "Providers"; Url = "/api/v1/providers" },
-    @{ Name = "Scheduler"; Url = "/api/v1/scheduler/runs" },
-    @{ Name = "Workflow Board"; Url = "/workflow/board" },
-    @{ Name = "Models"; Url = "/v1/models" }
-)
-
-$passed = 0
-$failed = 0
-
-foreach ($test in $apiTests) {
+try {
+    Write-Host "[1/5] Build Rust daemon and CLI..." -ForegroundColor Yellow
+    Push-Location -LiteralPath (Join-Path $root "codepanion-rust")
     try {
-        $response = Invoke-WebRequest -Uri "$DAEMON_URL$($test.Url)" -TimeoutSec 2 -ErrorAction Stop
-        if ($response.StatusCode -eq 200) {
-            Write-Host "  ✓ $($test.Name)" -ForegroundColor Green
-            $passed++
-        } else {
-            Write-Host "  ✗ $($test.Name) (HTTP $($response.StatusCode))" -ForegroundColor Red
-            $failed++
-        }
-    } catch {
-        Write-Host "  ✗ $($test.Name) (Error: $($_.Exception.Message))" -ForegroundColor Red
-        $failed++
-    }
-}
-
-Write-Host "  API 测试: $passed/$($apiTests.Count) 通过" -ForegroundColor $(if ($failed -eq 0) {"Green"} else {"Yellow"})
-Write-Host ""
-
-# Step 3: 验证 CLI 命令
-Write-Host "[3/5] 验证 CLI 命令..." -ForegroundColor Yellow
-
-$cliPath = "target\release\codepanion.exe"
-if (-not (Test-Path $cliPath)) {
-    Write-Host "  ⚠ CLI 未编译，跳过" -ForegroundColor Yellow
-    $cliSkipped = $true
-} else {
-    $cliSkipped = $false
-
-    # 测试 provider list
-    try {
-        $output = & $cliPath --api-url $DAEMON_URL provider list 2>&1
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "  ✓ provider list" -ForegroundColor Green
-        } else {
-            Write-Host "  ✗ provider list (exit code: $LASTEXITCODE)" -ForegroundColor Red
-        }
-    } catch {
-        Write-Host "  ✗ provider list (Error)" -ForegroundColor Red
+        cargo build --release --bin codepanion-daemon --bin codepanion | Out-Host
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    } finally {
+        Pop-Location
     }
 
-    # 测试 model list
-    try {
-        $output = & $cliPath --api-url $DAEMON_URL model list 2>&1
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "  ✓ model list" -ForegroundColor Green
-        } else {
-            Write-Host "  ✗ model list (exit code: $LASTEXITCODE)" -ForegroundColor Red
-        }
-    } catch {
-        Write-Host "  ✗ model list (Error)" -ForegroundColor Red
+    $daemonPath = Join-Path $root "codepanion-rust\target\release\codepanion-daemon.exe"
+    $cliPath = Join-Path $root "codepanion-rust\target\release\codepanion.exe"
+    if (-not (Test-Path -LiteralPath $daemonPath)) {
+        throw "Missing Rust daemon binary: $daemonPath"
     }
-}
-Write-Host ""
-
-# Step 4: 检查 GUI
-Write-Host "[4/5] 检查 GUI..." -ForegroundColor Yellow
-Set-Location ..
-
-$guiProject = "packages\gui\CodePanion.Gui.csproj"
-if (Test-Path $guiProject) {
-    Write-Host "  ✓ GUI 项目存在: $guiProject" -ForegroundColor Green
-
-    # 尝试编译 GUI
-    try {
-        $buildOutput = dotnet build $guiProject -c Release 2>&1
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "  ✓ GUI 编译成功" -ForegroundColor Green
-        } else {
-            Write-Host "  ✗ GUI 编译失败" -ForegroundColor Red
-        }
-    } catch {
-        Write-Host "  ✗ GUI 编译出错" -ForegroundColor Red
+    if (-not (Test-Path -LiteralPath $cliPath)) {
+        throw "Missing Rust CLI binary: $cliPath"
     }
-} else {
-    Write-Host "  ⚠ GUI 项目未找到" -ForegroundColor Yellow
-}
-Write-Host ""
 
-# Step 5: 生成报告
-Write-Host "[5/5] 生成验证报告..." -ForegroundColor Yellow
+    Write-Host "[2/5] Start Rust daemon..." -ForegroundColor Yellow
+    $daemonOut = Join-Path $verifyDir "daemon.stdout.log"
+    $daemonErr = Join-Path $verifyDir "daemon.stderr.log"
+    Remove-Item -LiteralPath $daemonOut,$daemonErr -Force -ErrorAction SilentlyContinue
+    $daemon = Start-Process -FilePath $daemonPath -ArgumentList "--serve $DaemonPort" -PassThru -WindowStyle Hidden -RedirectStandardOutput $daemonOut -RedirectStandardError $daemonErr
+    Write-Host "Daemon PID: $($daemon.Id)"
 
-$report = @"
-# GUI/CLI 适配验证报告
+    $ready = $false
+    for ($i = 1; $i -le 30; $i++) {
+        try {
+            $response = Invoke-WebRequest -UseBasicParsing -Uri "$daemonUrl/health" -TimeoutSec 1 -ErrorAction Stop
+            if ($response.StatusCode -eq 200) {
+                $ready = $true
+                break
+            }
+        } catch {
+            Start-Sleep -Milliseconds 250
+        }
+    }
+    if (-not $ready) {
+        if ($daemon.HasExited) {
+            Write-Host "Daemon exited with code $($daemon.ExitCode)" -ForegroundColor Red
+        }
+        if (Test-Path -LiteralPath $daemonOut) {
+            Write-Host "--- daemon stdout ---"
+            Get-Content -LiteralPath $daemonOut | Out-Host
+        }
+        if (Test-Path -LiteralPath $daemonErr) {
+            Write-Host "--- daemon stderr ---"
+            Get-Content -LiteralPath $daemonErr | Out-Host
+        }
+        throw "Rust daemon did not become healthy at $daemonUrl"
+    }
 
-**日期**: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
-**Daemon 版本**: Rust daemon
-**验证结果**: $(if ($failed -eq 0 -and -not $cliSkipped) {"✓ 通过"} else {"⚠ 部分通过"})
+    Write-Host "[3/5] Verify HTTP API..." -ForegroundColor Yellow
+    $apiTests = @(
+        @{ Name = "Health"; Url = "/health" },
+        @{ Name = "Projects"; Url = "/api/v1/projects" },
+        @{ Name = "Providers"; Url = "/api/v1/providers" },
+        @{ Name = "Scheduler"; Url = "/api/v1/scheduler/runs" },
+        @{ Name = "Workflow Board"; Url = "/workflow/board" },
+        @{ Name = "Models"; Url = "/v1/models" }
+    )
 
----
+    $passed = 0
+    $apiLines = @()
+    foreach ($test in $apiTests) {
+        try {
+            $response = Invoke-WebRequest -UseBasicParsing -Uri "$daemonUrl$($test.Url)" -TimeoutSec 2 -ErrorAction Stop
+            if ($response.StatusCode -eq 200) {
+                Write-Host "  PASS $($test.Name)" -ForegroundColor Green
+                $passed++
+                $apiLines += "- $($test.Name): HTTP 200 $($test.Url)"
+            } else {
+                Write-Host "  FAIL $($test.Name) HTTP $($response.StatusCode)" -ForegroundColor Red
+                $apiLines += "- $($test.Name): HTTP $($response.StatusCode) $($test.Url)"
+            }
+        } catch {
+            Write-Host "  FAIL $($test.Name): $($_.Exception.Message)" -ForegroundColor Red
+            $apiLines += "- $($test.Name): FAILED $($test.Url)"
+        }
+    }
+    if ($passed -ne $apiTests.Count) {
+        throw "HTTP API verification failed: $passed/$($apiTests.Count)"
+    }
 
-## Daemon 启动
+    Write-Host "[4/5] Verify CLI commands..." -ForegroundColor Yellow
+    & $cliPath --api-url $daemonUrl provider list | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw "provider list failed" }
+    & $cliPath --api-url $daemonUrl model list | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw "model list failed" }
+    & $cliPath --api-url $daemonUrl status | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw "status failed" }
 
-- **状态**: ✓ 成功
-- **端口**: $DAEMON_PORT
-- **PID**: $($daemon.Id)
-- **启动时间**: < 2 秒
+    Write-Host "[5/5] Build GUI..." -ForegroundColor Yellow
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root "scripts\build-gui.ps1") -Configuration Release | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw "GUI build failed" }
 
----
+    New-Item -ItemType Directory -Path (Join-Path $root ".claude") -Force | Out-Null
+    $report = @(
+        "# GUI/CLI verification report",
+        "",
+        "Date: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')",
+        "Daemon: Rust daemon",
+        "Result: PASS",
+        "Port: $DaemonPort",
+        "PID: $($daemon.Id)",
+        "",
+        "## HTTP API"
+    ) + $apiLines + @(
+        "",
+        "## CLI",
+        "- provider list: PASS",
+        "- model list: PASS",
+        "- status: PASS",
+        "",
+        "## GUI",
+        "- Release build: PASS"
+    )
+    $report | Out-File -FilePath (Join-Path $root ".claude\GUI_VERIFICATION_REPORT.md") -Encoding UTF8
 
-## HTTP API 验证
-
-- **通过**: $passed/$($apiTests.Count)
-- **失败**: $failed
-
-### API 端点状态
-$(foreach ($test in $apiTests) {
-    $status = if ((Invoke-WebRequest -Uri "$DAEMON_URL$($test.Url)" -TimeoutSec 2 -ErrorAction SilentlyContinue).StatusCode -eq 200) {"✓"} else {"✗"}
-    "- $status $($test.Name): $($test.Url)"
-})
-
----
-
-## CLI 命令验证
-
-$(if ($cliSkipped) {
-"- **状态**: ⚠ 跳过（CLI 未编译）"
-} else {
-"- **provider list**: 验证
-- **model list**: 验证"
-})
-
----
-
-## GUI 编译
-
-- **GUI 项目**: $(if (Test-Path $guiProject) {"✓ 存在"} else {"✗ 未找到"})
-- **编译状态**: $(if (Test-Path $guiProject) {"验证"} else {"N/A"})
-
----
-
-## 结论
-
-核心验证项：
-- ✓ Daemon 启动成功
-- ✓ HTTP API 全部可访问
-- $(if ($cliSkipped) {"⚠ CLI 跳过"} else {"✓ CLI 命令工作正常"})
-- $(if (Test-Path $guiProject) {"✓ GUI 项目存在"} else {"⚠ GUI 项目未找到"})
-
-**建议**：
-1. Daemon HTTP API 完全可用
-2. $(if (-not $cliSkipped) {"CLI 命令工作正常"} else {"需要编译 CLI"})
-3. $(if (Test-Path $guiProject) {"GUI 可以手动测试连接"} else {"需要检查 GUI 项目路径"})
-
----
-
-**下一步**：
-- 手动启动 GUI 并验证连接
-- 验证 WebSocket 实时推送
-- 验证端到端场景
-"@
-
-$report | Out-File -FilePath ".claude\GUI_VERIFICATION_REPORT.md" -Encoding UTF8
-Write-Host "  ✓ 报告已生成: .claude\GUI_VERIFICATION_REPORT.md" -ForegroundColor Green
-Write-Host ""
-
-# 清理
-Write-Host "清理..." -ForegroundColor Yellow
-Stop-Process -Id $daemon.Id -Force -ErrorAction SilentlyContinue
-Write-Host "  ✓ Daemon 已停止" -ForegroundColor Green
-Write-Host ""
-
-# 总结
-Write-Host "=== 验证总结 ===" -ForegroundColor Cyan
-Write-Host "API 测试: $passed/$($apiTests.Count) 通过" -ForegroundColor $(if ($failed -eq 0) {"Green"} else {"Yellow"})
-Write-Host "CLI 测试: $(if ($cliSkipped) {"跳过"} else {"完成"})" -ForegroundColor $(if ($cliSkipped) {"Yellow"} else {"Green"})
-Write-Host "GUI 检查: $(if (Test-Path $guiProject) {"完成"} else {"跳过"})" -ForegroundColor $(if (Test-Path $guiProject) {"Green"} else {"Yellow"})
-Write-Host ""
-
-if ($failed -eq 0) {
-    Write-Host "✓ 核心验证通过！Daemon 可以与 GUI/CLI 配合使用" -ForegroundColor Green
+    Write-Host "Verification passed." -ForegroundColor Green
     exit 0
-} else {
-    Write-Host "⚠ 部分测试失败，请查看报告" -ForegroundColor Yellow
-    exit 1
+} finally {
+    if ($daemon -ne $null) {
+        Stop-Process -Id $daemon.Id -Force -ErrorAction SilentlyContinue
+        Wait-Process -Id $daemon.Id -Timeout 5 -ErrorAction SilentlyContinue
+    }
 }

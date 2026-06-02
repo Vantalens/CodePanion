@@ -74,7 +74,15 @@ async fn cli_workspace_commands_use_project_api() {
 
     let list = run_cli(&daemon.base_url, &["workspace", "list"]).await;
     assert_success(&list);
-    assert!(stdout(&list).contains(Path::new(&workspace_arg).file_name().unwrap().to_str().unwrap()));
+    assert!(
+        stdout(&list).contains(
+            Path::new(&workspace_arg)
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+        )
+    );
 
     let remove = run_cli(&daemon.base_url, &["workspace", "remove", &workspace_arg]).await;
     assert_success(&remove);
@@ -167,9 +175,10 @@ async fn cli_model_and_config_commands_persist_settings() {
     assert_success(&effort);
     assert!(stdout(&effort).contains("Set effort level"));
 
-    let config: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(daemon.temp_dir.join("config.json")).unwrap())
-            .unwrap();
+    let config: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(daemon.temp_dir.join("config.json")).unwrap(),
+    )
+    .unwrap();
     assert_eq!(config["modelAliases"]["fast"], "gpt-test");
     assert_eq!(config["defaultModel"], "gpt-test");
     assert_eq!(config["effortLevel"], "high");
