@@ -106,6 +106,8 @@
                         <button id="gate-approve" class="btn primary" type="button">通过</button>
                         <button id="gate-retry" class="btn" type="button">重试</button>
                         <button id="gate-reject" class="btn danger" type="button">拒绝</button>
+                        <!-- G-05: 决策历史按钮 -->
+                        <button id="gate-history" class="btn" type="button">历史</button>
                     </div>
                 </section>
 
@@ -248,6 +250,19 @@
                         <button type="button" id="provider-form-cancel" class="btn">取消</button>
                     </div>
                 </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- G-05: Gate 决策历史对话框 -->
+    <div id="gate-history-dialog" class="dialog-overlay" hidden>
+        <div class="dialog-box dialog-medium">
+            <header class="dialog-header">
+                <h3>Gate 决策历史</h3>
+                <button id="gate-history-dialog-close" class="dialog-close" type="button">×</button>
+            </header>
+            <div class="dialog-body">
+                <div id="gate-history-list" class="gate-history-list"></div>
             </div>
         </div>
     </div>

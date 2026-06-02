@@ -722,3 +722,118 @@ button { border: 0; }
 .role-binding-row .model-config-select {
     flex: 1;
 }
+
+/* ── G-04: Artifact 格式化 ── */
+.artifact-preview {
+    margin-top: 8px;
+    padding: 8px;
+    background: var(--panel-soft);
+    border-radius: var(--radius);
+    font-size: 11px;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.artifact-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+}
+
+.artifact-table th,
+.artifact-table td {
+    padding: 4px 8px;
+    text-align: left;
+    border: 1px solid var(--line);
+}
+
+.artifact-table th {
+    background: var(--panel-strong);
+    color: var(--muted);
+    font-weight: 600;
+}
+
+.artifact-table .status-passed,
+.artifact-table .status-success {
+    color: var(--green);
+}
+
+.artifact-table .status-failed,
+.artifact-table .status-error {
+    color: var(--red);
+}
+
+.artifact-markdown {
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--muted);
+}
+
+/* ── G-05: Gate 决策历史 ── */
+.dialog-medium {
+    width: 700px;
+}
+
+.gate-history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.gate-history-item {
+    background: var(--panel-soft);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 12px;
+}
+
+.gate-history-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.gate-history-decision {
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: var(--radius);
+    font-size: 11px;
+}
+
+.gate-history-decision.approve {
+    background: var(--green);
+    color: var(--bg);
+}
+
+.gate-history-decision.reject {
+    background: var(--red);
+    color: var(--bg);
+}
+
+.gate-history-decision.retry {
+    background: var(--orange);
+    color: var(--bg);
+}
+
+.gate-history-time {
+    color: var(--muted-2);
+    font-size: 11px;
+}
+
+.gate-history-constraints {
+    margin-top: 6px;
+    padding: 6px 8px;
+    background: var(--panel-strong);
+    border-radius: var(--radius);
+    font-size: 11px;
+    color: var(--muted);
+    white-space: pre-wrap;
+}
+
+.gate-history-message {
+    margin-top: 6px;
+    color: var(--muted-2);
+    font-size: 11px;
+    font-style: italic;
+}

@@ -327,9 +327,22 @@ function renderStepRow(run, step) {
     head.appendChild(id);
     const meta = document.createElement('span');
     meta.className = 'step-meta';
+    // G-03: 增强显示 - role, model, provider, permissions
     const bits = [step.status || 'pending'];
-    if (step.provider && step.provider !== 'local') bits.push(step.provider);
-    if (step.role) bits.push(step.role);
+    if (step.role) bits.push(`role:${step.role}`);
+    if (step.model) bits.push(`model:${step.model}`);
+    if (step.provider && step.provider !== 'local') bits.push(`provider:${step.provider}`);
+    // G-03: 显示 permissions 图标
+    if (step.permissions && Array.isArray(step.permissions) && step.permissions.length > 0) {
+        const permStr = step.permissions.map(p => {
+            if (p.includes('read')) return '📖';
+            if (p.includes('write')) return '✏️';
+            if (p.includes('execute')) return '⚙️';
+            if (p.includes('network')) return '🌐';
+            return '🔧';
+        }).join('');
+        bits.push(permStr);
+    }
     if (typeof step.exitCode === 'number') bits.push(`exit ${step.exitCode}`);
     meta.textContent = bits.join(' · ');
     head.appendChild(meta);
@@ -549,6 +562,45 @@ function applyArtifacts(runId, artifacts) {
         meta.className = 'board-card-meta';
         meta.textContent = `${a.stepId ? `@${a.stepId}` : '@run'}${a.role ? ` · ${a.role}` : ''}`;
         card.appendChild(meta);
+
+        // G-04: 特殊格式化
+        if (a.content) {
+            const preview = document.createElement('div');
+            preview.className = 'artifact-preview';
+
+            // 测试结果表格化
+            if (a.type === 'test-results' || (a.path && a.path.includes('test-results.json'))) {
+                try {
+                    const data = JSON.parse(a.content);
+                    const table = document.createElement('table');
+                    table.className = 'artifact-table';
+                    table.innerHTML = '<tr><th>Test</th><th>Status</th></tr>';
+                    if (data.tests && Array.isArray(data.tests)) {
+                        data.tests.forEach(t => {
+                            const row = table.insertRow();
+                            row.innerHTML = `<td>${t.name || 'N/A'}</td><td class="status-${t.status}">${t.status || 'unknown'}</td>`;
+                        });
+                    }
+                    preview.appendChild(table);
+                } catch (e) {
+                    preview.textContent = a.content.substring(0, 100) + '...';
+                }
+            }
+            // Markdown 渲染（简单处理）
+            else if ((a.path && a.path.endsWith('.md')) || a.type === 'code-review' || a.type === 'patch-summary') {
+                const md = document.createElement('div');
+                md.className = 'artifact-markdown';
+                md.textContent = a.content.substring(0, 200) + (a.content.length > 200 ? '...' : '');
+                preview.appendChild(md);
+            }
+            // 其他文本
+            else {
+                preview.textContent = a.content.substring(0, 100) + (a.content.length > 100 ? '...' : '');
+            }
+
+            card.appendChild(preview);
+        }
+
         if (a.title) {
             const detail = document.createElement('p');
             detail.className = 'board-card-detail';
@@ -631,6 +683,10 @@ function handleMessage(message) {
         case 'global-workflows':
             applyGlobalWorkflows(message.workflows);
             break;
+        // G-05: Gate 历史消息
+        case 'gate-history':
+            applyGateHistory(message.history);
+            break;
         default:
             // 重建后控制台不再处理监听态消息；未知类型静默忽略。
             break;
@@ -680,6 +736,24 @@ function bindControls() {
             setFilterStatus(section, status);
         });
     });
+
+    // G-05: 绑定 Gate 历史按钮
+    const gateHistoryBtn = document.getElementById('gate-history');
+    if (gateHistoryBtn) {
+        gateHistoryBtn.addEventListener('click', openGateHistoryDialog);
+    }
+
+    const gateHistoryClose = document.getElementById('gate-history-dialog-close');
+    if (gateHistoryClose) {
+        gateHistoryClose.addEventListener('click', closeGateHistoryDialog);
+    }
+
+    const gateHistoryDialog = document.getElementById('gate-history-dialog');
+    if (gateHistoryDialog) {
+        gateHistoryDialog.addEventListener('click', (e) => {
+            if (e.target === gateHistoryDialog) closeGateHistoryDialog();
+        });
+    }
 }
 
 // G-02: 视图模式切换

@@ -59,6 +59,8 @@ namespace CodePanion.Gui
             "request-global-runs",
             "request-global-gates",
             "request-global-workflows",
+            // G-05: Gate 历史
+            "request-gate-history",
         };
 
         private readonly DaemonClient _daemonClient;
@@ -476,6 +478,17 @@ namespace CodePanion.Gui
                     case "request-global-workflows":
                         _ = HandleRequestGlobalWorkflowsAsync();
                         break;
+
+                    // G-05: Gate 历史
+                    case "request-gate-history":
+                    {
+                        var runId = message["runId"]?.Value<string>();
+                        var stepId = message["stepId"]?.Value<string>();
+                        if (string.IsNullOrWhiteSpace(runId) || string.IsNullOrWhiteSpace(stepId))
+                        { AddLog("丢弃 request-gate-history：runId/stepId 缺失"); break; }
+                        _ = HandleRequestGateHistoryAsync(runId!, stepId!);
+                        break;
+                    }
                 }
             }
             catch (Exception ex)
@@ -1720,6 +1733,35 @@ namespace CodePanion.Gui
             {
                 AddLog($"请求全局 workflow 异常：{ex.Message}");
                 SendMessageToWeb(new { type = "global-workflows", workflows = new JArray() });
+            }
+        }
+
+        // G-05: Gate 历史处理函数
+        private async System.Threading.Tasks.Task HandleRequestGateHistoryAsync(string runId, string stepId)
+        {
+            try
+            {
+                var url = $"{_daemonClient.DaemonUrl}/api/v1/workflow/gates/{runId}/{stepId}/history";
+                var response = await _daemonClient.HttpClient.GetAsync(url);
+                var content = await response.Content.ReadAsStringAsync();
+
+                if (response.IsSuccessStatusCode)
+                {
+                    var data = JObject.Parse(content);
+                    var history = data["history"];
+                    SendMessageToWeb(new { type = "gate-history", history });
+                    AddLog($"已加载 gate 历史：{runId}/{stepId}");
+                }
+                else
+                {
+                    AddLog($"获取 gate 历史失败：{response.StatusCode}");
+                    SendMessageToWeb(new { type = "gate-history", history = new JArray() });
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"请求 gate 历史异常：{ex.Message}");
+                SendMessageToWeb(new { type = "gate-history", history = new JArray() });
             }
         }
 
