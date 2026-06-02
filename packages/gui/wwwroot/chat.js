@@ -584,6 +584,12 @@ function handleMessage(message) {
         case 'workflow-action-result':
             applyWorkflowActionResult(message);
             break;
+        // G-01: 项目管理消息
+        case 'projects':
+            if (typeof window.applyProjects === 'function') {
+                window.applyProjects(message.projects);
+            }
+            break;
         default:
             // 重建后控制台不再处理监听态消息；未知类型静默忽略。
             break;
