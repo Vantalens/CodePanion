@@ -94,7 +94,7 @@
 
 ## P5：GUI 工作台
 
-**进度**: 1/6 完成（16.7%）
+**进度**: 6/6 完成（100%） ✅
 
 目标：GUI 从过渡 workflow board 升级为多项目 AI 开发工作台。
 
@@ -107,34 +107,72 @@
     - 后端：MainWindow.xaml.cs (5个消息处理器)
     - API：Rust daemon Projects API 完全集成
     - UI：Tokyo Night 配色，模态对话框
-    - 提交：bb1ad22 feat: implement G-01 project sidebar
+    - 提交：bb1ad22, 6a47364
 
-- [ ] **G-02 全局任务视图**
-  - 全局 runs。
-  - 全局 gates。
-  - 全局队列。
-  - 状态筛选：运行中、等待我、失败、完成。
+- [x] **G-06 模型与 provider 配置** (已完成 2026-06-02)
+  - [x] Provider CRUD (列表、添加、编辑、删除、测试连接)
+  - [x] Provider 激活/切换
+  - [x] 模型配置 (默认模型、角色绑定)
+  - [x] 设置对话框 (标签页切换)
+  - **实现细节**：
+    - 前端：settings.js (475行)，chat.html/css 扩展
+    - 后端：8个消息处理器
+    - API：9个 daemon 端点集成
+    - UI：设置按钮(⚙️)，900px 模态对话框
+    - 提交：2f981a2
 
-- [ ] **G-03 当前 run 时间线**
-  - step 状态。
-  - 实时 stdout/stderr。
-  - role/model/provider/permissions 展示。
+- [x] **G-02 全局任务视图** (已完成 2026-06-02)
+  - [x] 全局 runs（跨项目）
+  - [x] 全局 gates（跨项目）
+  - [x] 全局 workflows（跨项目）
+  - [x] 标签切换（项目/全局）- 三个区域独立
+  - [x] 状态筛选（全部/运行中/队列/失败/完成）
+  - **实现细节**：
+    - 前端：标签按钮 + 筛选按钮 + 逻辑 (150+ 行)
+    - 后端：3个全局 API 处理器
+    - UI：内联标签头，颜色编码筛选按钮
+    - 提交：4b6ef7c
 
-- [ ] **G-04 Artifact 与 delivery**
-  - artifacts 列表。
-  - delivery markdown / handoff 复制。
-  - 测试结果、审查报告、patch summary 展示。
+- [x] **G-03 当前 run 时间线** (已完成 2026-06-02)
+  - [x] step 状态（pending/running/success/failed/cancelled）
+  - [x] 实时 stdout/stderr（已有）
+  - [x] role/model/provider 展示
+  - [x] permissions 图标展示（📖✏️⚙️🌐🔧）
+  - **实现细节**：
+    - 增强 renderStepRow() 显示 meta 信息
+    - Permissions 映射为图标
+    - 提交：52f48ad
 
-- [ ] **G-05 Human gate 决策面板**
-  - approve / reject / retry。
-  - constraints 输入。
-  - message 输入。
-  - 决策历史。
+- [x] **G-04 Artifact 与 delivery** (已完成 2026-06-02)
+  - [x] artifacts 列表（已有）
+  - [x] delivery markdown / handoff 复制（已有）
+  - [x] 测试结果表格化（test-results.json）
+  - [x] 审查报告 markdown 渲染（code-review.md）
+  - [x] patch summary 展示（patch-summary.md）
+  - **实现细节**：
+    - applyArtifacts() 特殊格式化逻辑
+    - .artifact-table CSS
+    - .artifact-preview 预览区
+    - 提交：52f48ad
 
-- [ ] **G-06 模型与 provider 配置**
-  - 模型 API 配置编辑。
-  - provider 列表和连接测试。
-  - 默认模型、默认 provider、角色绑定。
+- [x] **G-05 Human gate 决策面板** (已完成 2026-06-02)
+  - [x] approve / reject / retry（已有）
+  - [x] constraints 输入（已有）
+  - [x] message 输入（已有）
+  - [x] 决策历史对话框
+  - [x] 历史记录显示（时间、决策、约束、备注）
+  - **实现细节**：
+    - gate 历史对话框 (700px)
+    - 历史按钮 + 3个函数 (90+ 行)
+    - 后端：gate-history API 处理器
+    - UI：颜色编码决策类型（绿/红/橙）
+    - 提交：52f48ad
+
+**P5 总结**：
+- 代码量：~2200 行（前端 + 后端）
+- 提交数：6 次
+- 功能：6 个主要功能全部完成
+- 架构：纯 JS + WPF/WebView2 + Rust daemon API
 
 ---
 
