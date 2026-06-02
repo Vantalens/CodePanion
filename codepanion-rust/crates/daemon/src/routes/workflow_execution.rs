@@ -174,18 +174,17 @@ fn convert_to_ws_event(
     match event {
         WorkflowRunnerEvent::WorkflowStarted {
             run_id,
+            project_id,
             workflow_id,
             timestamp,
-        } => {
-            Some(codepanion_workflow_engine::WorkflowRunEvent {
-                event_type: "workflow-started".to_string(),
-                run_id: run_id.clone(),
-                project_id: "".to_string(), // TODO: 从 context 获取
-                workflow_id: workflow_id.clone(),
-                status: "running".to_string(),
-                timestamp: *timestamp,
-            })
-        }
+        } => Some(codepanion_workflow_engine::WorkflowRunEvent {
+            event_type: "workflow-started".to_string(),
+            run_id: run_id.clone(),
+            project_id: project_id.clone(),
+            workflow_id: workflow_id.clone(),
+            status: "running".to_string(),
+            timestamp: *timestamp,
+        }),
         WorkflowRunnerEvent::StepStarted {
             run_id,
             step_id,
@@ -214,26 +213,30 @@ fn convert_to_ws_event(
         }),
         WorkflowRunnerEvent::WorkflowCompleted {
             run_id,
+            project_id,
+            workflow_id,
             status,
             timestamp,
         } => Some(codepanion_workflow_engine::WorkflowRunEvent {
             event_type: "workflow-completed".to_string(),
             run_id: run_id.clone(),
-            project_id: "".to_string(),
-            workflow_id: "".to_string(),
+            project_id: project_id.clone(),
+            workflow_id: workflow_id.clone(),
             status: status.clone(),
             timestamp: *timestamp,
         }),
-        WorkflowRunnerEvent::WorkflowCancelled { run_id, timestamp } => {
-            Some(codepanion_workflow_engine::WorkflowRunEvent {
-                event_type: "workflow-cancelled".to_string(),
-                run_id: run_id.clone(),
-                project_id: "".to_string(),
-                workflow_id: "".to_string(),
-                status: "cancelled".to_string(),
-                timestamp: *timestamp,
-            })
-        }
+        WorkflowRunnerEvent::WorkflowCancelled {
+            run_id,
+            project_id,
+            timestamp,
+        } => Some(codepanion_workflow_engine::WorkflowRunEvent {
+            event_type: "workflow-cancelled".to_string(),
+            run_id: run_id.clone(),
+            project_id: project_id.clone(),
+            workflow_id: "".to_string(),
+            status: "cancelled".to_string(),
+            timestamp: *timestamp,
+        }),
         WorkflowRunnerEvent::WorkflowPaused {
             run_id,
             step_id,

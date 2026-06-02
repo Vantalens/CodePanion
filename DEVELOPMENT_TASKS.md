@@ -200,7 +200,7 @@
 
 ## P7：Rust Daemon 重构
 
-**进度**: 3.5/4 完成（87.5%）
+**进度**: 3.8/4 完成（95%）
 
 目标：用 Rust 重写 daemon 核心，降低资源占用，提升性能。
 
@@ -223,12 +223,13 @@
 
 - [x] P7-03 CLI 命令
 
-- [>] **P7-04 测试、迁移与性能基准** (93% 完成)
+- [>] **P7-04 测试、迁移与性能基准** (97% 完成)
   - [x] **测试架构设计**（阶段 1.1）：创建 TestDaemon 测试框架、HTTP 客户端封装、临时目录隔离
-  - [x] **HTTP API 集成测试**（阶段 1.2）：24/29 tests passed (82.8%)
+  - [x] **HTTP API 集成测试**（阶段 1.2）：38/38 daemon integration tests passed (100%)
     - [x] Project API: 9/9 tests (100%)
     - [x] Workflow/Scheduler API: 12/12 tests (100%)
-    - [ ] Provider API: 3/8 tests (需修复格式)
+    - [x] Provider API: 14/14 tests (100%)
+    - [x] WebSocket API: 3/3 tests (100%)
   - [x] **性能基准测试**（阶段 2.1-2.2）：二进制 3.98MB、内存 11.82MB、冷启动 ~823ms
     - [x] 创建 benchmark-daemon.ps1 自动化脚本
     - [x] 二进制大小：3.98 MB ✓ (目标 < 20 MB，超预期 5x)
@@ -247,8 +248,8 @@
     - [x] 基于集成测试验证 HTTP API 兼容性（100%）
     - [x] CLI 命令已实现并可用
     - [ ] 手动验证 GUI 连接（建议执行）
-    - [ ] 验证 WebSocket 事件格式（建议执行）
-  - [ ] WebSocket 实时推送测试（阶段 1.3，P1）
+    - [x] 验证 WebSocket 事件格式（workflow-run-event / workflow-started / workflow-completed）
+  - [x] WebSocket 实时推送测试（阶段 1.3，P1）
   - [ ] CLI 命令测试（阶段 1.5，P2）
   - [x] **迁移指南和文档更新**（阶段 4，P1）：已创建 RUST_MIGRATION_GUIDE.md
     - [x] 快速开始指南（3步启动）
@@ -258,9 +259,12 @@
     - [x] 配置迁移说明
     - [x] 故障排查指南
     - [x] 命令对照表
-  - [ ] P3 未完成集成（阶段 5：Artifacts/Gates/WebSocket，P1）
+  - [x] P3 未完成集成（阶段 5：Artifacts/Gates/WebSocket，P1）
+    - [x] WorkflowArtifactStore 集成到 Rust daemon state 与 `/workflow/runs/:id/artifacts`
+    - [x] HumanGateManager 集成到 `/workflow/gates` 与 `/workflow/gates/:runId/:stepId/resolve`
+    - [x] Workflow execution 持久化 run history、step artifacts、delivery-note
   - [ ] 移除 TypeScript daemon 依赖（阶段 6，P2）
-  - **验收**：核心 API 测试 100% 通过 ✓；Workflow 执行测试 100% 通过 ✓；性能指标超预期 ✓；GUI 验证工具已创建 ✓；迁移文档已完成 ✓；剩余：WebSocket 测试（P1）、P3 集成（P1）
+  - **验收**：`cargo test --workspace` 231/231 通过 ✓；`cargo fmt --all` ✓；`cargo clippy --workspace --all-targets -- -D warnings` ✓；核心 API / Provider / WebSocket / Workflow execution 测试 100% 通过 ✓；性能指标超预期 ✓；GUI 验证工具已创建 ✓；迁移文档已完成 ✓；剩余：CLI 命令测试、依赖清理、冷启动优化
 
 ---
 

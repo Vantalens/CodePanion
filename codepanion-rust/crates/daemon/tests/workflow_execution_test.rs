@@ -70,39 +70,67 @@ async fn test_execute_simple_shell_workflow() {
 async fn test_workflow_with_artifacts() {
     let daemon = TestDaemon::start().await;
 
-    // Create a project
-    let project_path = daemon.temp_dir.join("test-project");
-    std::fs::create_dir_all(&project_path).unwrap();
+    #[cfg(target_os = "windows")]
+    let (command, args) = ("cmd", vec!["/C", "echo artifact-ready"]);
+    #[cfg(not(target_os = "windows"))]
+    let (command, args) = ("echo", vec!["artifact-ready"]);
 
-    let project = json!({
-        "name": "test-project",
-        "path": project_path.to_str().unwrap()
-    });
-    let create_response = daemon.post("/api/v1/projects", project).await.unwrap();
-    let project_data: serde_json::Value = create_response.json().await.unwrap();
-    let project_id = project_data["id"].as_str().unwrap();
-
-    // Submit workflow that produces artifacts
-    let enqueue_request = json!({
-        "runId": "test-run-002",
-        "projectId": project_id,
-        "workflowId": "test-artifact-workflow",
-        "priority": "normal"
+    let execute_request = json!({
+        "projectId": "test-project",
+        "workflow": {
+            "name": "test-artifact-workflow",
+            "description": "artifact workflow",
+            "params": {},
+            "steps": [
+                {
+                    "id": "build",
+                    "architecture": "shell",
+                    "command": command,
+                    "args": args,
+                    "artifacts": ["patch-summary"]
+                }
+            ],
+            "createdAt": 0,
+            "updatedAt": 0
+        }
     });
 
     let response = daemon
-        .post("/api/v1/scheduler/enqueue", enqueue_request)
+        .post("/api/v1/workflows/execute", execute_request)
         .await
         .unwrap();
     assert_eq!(response.status(), 200);
+    let body: serde_json::Value = response.json().await.unwrap();
+    let run_id = body["runId"].as_str().unwrap();
 
-    // Wait for execution
-    sleep(Duration::from_secs(2)).await;
+    wait_for_run_detail(&daemon, run_id).await;
 
-    // Check for artifacts (if artifacts endpoint exists)
-    let artifacts_response = daemon.get("/workflow/artifacts").await.unwrap();
-    // Should return 200 or 404 depending on implementation
-    assert!(artifacts_response.status().is_success() || artifacts_response.status() == 404);
+    let artifacts_response = daemon
+        .get(&format!("/workflow/runs/{}/artifacts", run_id))
+        .await
+        .unwrap();
+    assert_eq!(artifacts_response.status(), 200);
+    let artifacts: serde_json::Value = artifacts_response.json().await.unwrap();
+    let items = artifacts["artifacts"].as_array().unwrap();
+    assert!(items.iter().any(|item| item["type"] == "patch-summary"));
+    assert!(items.iter().any(|item| item["type"] == "delivery-note"));
+
+    let delivery_response = daemon
+        .get(&format!(
+            "/workflow/runs/{}/delivery?format=handoff",
+            run_id
+        ))
+        .await
+        .unwrap();
+    assert_eq!(delivery_response.status(), 200);
+    let delivery: serde_json::Value = delivery_response.json().await.unwrap();
+    assert_eq!(delivery["format"], "handoff");
+    assert!(
+        delivery["content"]
+            .as_str()
+            .unwrap()
+            .contains("Please continue this workflow")
+    );
 }
 
 /// Test workflow gate resolution
@@ -110,13 +138,75 @@ async fn test_workflow_with_artifacts() {
 async fn test_workflow_gate_resolution() {
     let daemon = TestDaemon::start().await;
 
-    // Get current gates
+    let execute_request = json!({
+        "projectId": "test-project",
+        "workflow": {
+            "name": "test-gate-workflow",
+            "description": "gate workflow",
+            "params": {},
+            "steps": [
+                {
+                    "id": "review",
+                    "architecture": "shell",
+                    "command": "echo",
+                    "args": ["review"],
+                    "checkpoint": true
+                }
+            ],
+            "createdAt": 0,
+            "updatedAt": 0
+        }
+    });
+
+    let response = daemon
+        .post("/api/v1/workflows/execute", execute_request)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let body: serde_json::Value = response.json().await.unwrap();
+    let run_id = body["runId"].as_str().unwrap();
+
+    wait_for_run_detail(&daemon, run_id).await;
+
     let gates_response = daemon.get("/workflow/gates").await.unwrap();
     assert_eq!(gates_response.status(), 200);
-
     let gates_data: serde_json::Value = gates_response.json().await.unwrap();
-    // Gates should be array or object
-    assert!(gates_data.is_array() || gates_data.is_object());
+    let gates = gates_data["gates"].as_array().unwrap();
+    assert!(gates.iter().any(|gate| gate["runId"] == run_id));
+
+    let resolve_response = daemon
+        .post(
+            &format!("/workflow/gates/{}/review/resolve", run_id),
+            json!({
+                "decision": "approve",
+                "message": "Looks good",
+                "constraints": ["keep docs updated"]
+            }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resolve_response.status(), 200);
+    let resolved: serde_json::Value = resolve_response.json().await.unwrap();
+    assert_eq!(resolved["shouldResume"], true);
+
+    let artifacts_response = daemon
+        .get(&format!("/workflow/runs/{}/artifacts", run_id))
+        .await
+        .unwrap();
+    let artifacts: serde_json::Value = artifacts_response.json().await.unwrap();
+    assert!(
+        artifacts["artifacts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| {
+                item["type"] == "human-decision"
+                    && item["content"]
+                        .as_str()
+                        .unwrap()
+                        .contains("decision=approve")
+            })
+    );
 }
 
 /// Test workflow board listing
@@ -154,4 +244,19 @@ async fn test_scheduler_stats_integration() {
 
     let stats: serde_json::Value = response.json().await.unwrap();
     assert!(stats.is_object());
+}
+
+async fn wait_for_run_detail(daemon: &TestDaemon, run_id: &str) -> serde_json::Value {
+    for _ in 0..30 {
+        let response = daemon
+            .get(&format!("/workflow/runs/{}", run_id))
+            .await
+            .unwrap();
+        if response.status() == 200 {
+            return response.json().await.unwrap();
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    panic!("run detail did not become available for {}", run_id);
 }

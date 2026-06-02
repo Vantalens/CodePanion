@@ -23,6 +23,8 @@ impl TestDaemon {
         let projects_path = temp_dir.join("projects.json");
         let providers_path = temp_dir.join("providers.json");
         let global_config_path = temp_dir.join("config.json");
+        let workflow_history_path = temp_dir.join("workflow-runs.ndjson");
+        let workflow_artifacts_path = temp_dir.join("workflow-artifacts.ndjson");
 
         let config = DaemonConfig {
             bind: "127.0.0.1".to_string(),
@@ -30,6 +32,8 @@ impl TestDaemon {
             projects_path,
             providers_path,
             global_config_path,
+            workflow_history_path,
+            workflow_artifacts_path,
         };
 
         let handle = tokio::spawn(async move {

@@ -1,7 +1,31 @@
 # P7-04 实施进度报告
 
 **日期**: 2026-06-02
-**状态**: 进行中
+**状态**: P1 收尾完成，P2 优化待做
+
+## 最新更新（2026-06-02）
+
+本轮继续开发完成了此前进度报告中列出的 P1 剩余项：
+
+- Provider API 测试修复：14/14 passed
+- WebSocket 实时推送测试：3/3 passed
+- WorkflowArtifactStore / HumanGateManager 接入 Rust daemon legacy `/workflow/*` API
+- Workflow execution 完成 run history、step artifact、delivery-note 持久化
+
+验证：
+
+- `cargo test --workspace`：231/231 passed
+- `cargo fmt --all`：passed
+- `cargo clippy --workspace --all-targets -- -D warnings`：passed
+
+当前剩余建议：
+
+- CLI 命令测试
+- GUI 手动连接验证
+- TypeScript daemon 依赖清理
+- 冷启动优化
+
+---
 
 ## 已完成
 

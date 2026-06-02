@@ -10,7 +10,7 @@ use axum::{
 };
 use codepanion_workflow_engine::{
     CrossProjectOrchestrator, GlobalConfigManager, ProjectRegistry, ProviderRegistry, RunScheduler,
-    SchedulerConfig,
+    SchedulerConfig, WorkflowArtifactStore, WorkflowRunHistory,
 };
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -25,6 +25,8 @@ pub struct DaemonConfig {
     pub projects_path: PathBuf,
     pub providers_path: PathBuf,
     pub global_config_path: PathBuf,
+    pub workflow_history_path: PathBuf,
+    pub workflow_artifacts_path: PathBuf,
 }
 
 impl Default for DaemonConfig {
@@ -39,6 +41,8 @@ impl Default for DaemonConfig {
             projects_path: codepanion_dir.join("projects.json"),
             providers_path: codepanion_dir.join("providers.json"),
             global_config_path: codepanion_dir.join("config.json"),
+            workflow_history_path: codepanion_dir.join("workflow-runs.ndjson"),
+            workflow_artifacts_path: codepanion_dir.join("workflow-artifacts.ndjson"),
         }
     }
 }
@@ -52,6 +56,8 @@ pub struct AppState {
     pub orchestrator: Arc<std::sync::Mutex<CrossProjectOrchestrator>>,
     pub event_broadcaster: Arc<EventBroadcaster>,
     pub workflow_runner: Arc<tokio::sync::Mutex<workflow_runner::WorkflowRunner>>,
+    pub workflow_history: Arc<WorkflowRunHistory>,
+    pub workflow_artifacts: Arc<WorkflowArtifactStore>,
 }
 
 pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::Error>> {
@@ -69,8 +75,15 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::
     let project_registry = Arc::new(ProjectRegistry::new(config.projects_path));
     let provider_registry = Arc::new(ProviderRegistry::new(config.providers_path));
     let global_config = Arc::new(GlobalConfigManager::new(config.global_config_path));
+    let workflow_history = Arc::new(WorkflowRunHistory::new(config.workflow_history_path));
+    let workflow_artifacts = Arc::new(WorkflowArtifactStore::new(config.workflow_artifacts_path));
     let workflow_runner = Arc::new(tokio::sync::Mutex::new(
-        workflow_runner::WorkflowRunner::new(provider_registry.clone(), global_config.clone()),
+        workflow_runner::WorkflowRunner::new(
+            provider_registry.clone(),
+            global_config.clone(),
+            workflow_history.clone(),
+            workflow_artifacts.clone(),
+        ),
     ));
 
     let state = AppState {
@@ -81,6 +94,8 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::
         orchestrator: Arc::new(std::sync::Mutex::new(CrossProjectOrchestrator::new())),
         event_broadcaster,
         workflow_runner,
+        workflow_history,
+        workflow_artifacts,
     };
 
     // Configure CORS

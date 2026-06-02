@@ -7,8 +7,10 @@
 use codepanion_agent_runtime::{AgentLoopEvent, AgentLoopRequest, run_agent_loop};
 use codepanion_shared::{CodePanionError, Result};
 use codepanion_workflow_engine::{
-    DefaultShellExecutor, GlobalConfigManager, ModelProvider, ProviderRegistry,
-    StepExecutionResult, StepExecutor, WorkflowDefinition, WorkflowExecutor, WorkflowStep,
+    ArtifactInput, ArtifactType, DefaultShellExecutor, GlobalConfigManager, ModelProvider,
+    ProviderRegistry, StepExecutionResult, StepExecutor, WorkflowArtifactStore,
+    WorkflowArtifactType, WorkflowDefinition, WorkflowExecutor, WorkflowRun, WorkflowRunHistory,
+    WorkflowRunStatus, WorkflowStep,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -34,6 +36,7 @@ pub struct WorkflowRunContext {
 pub enum WorkflowRunnerEvent {
     WorkflowStarted {
         run_id: String,
+        project_id: String,
         workflow_id: String,
         timestamp: u64,
     },
@@ -57,11 +60,14 @@ pub enum WorkflowRunnerEvent {
     },
     WorkflowCompleted {
         run_id: String,
+        project_id: String,
+        workflow_id: String,
         status: String,
         timestamp: u64,
     },
     WorkflowCancelled {
         run_id: String,
+        project_id: String,
         timestamp: u64,
     },
     WorkflowPaused {
@@ -295,6 +301,8 @@ impl StepExecutor for AgentStepExecutor {
 pub struct WorkflowRunner {
     provider_registry: Arc<ProviderRegistry>,
     global_config: Arc<GlobalConfigManager>,
+    history: Arc<WorkflowRunHistory>,
+    artifacts: Arc<WorkflowArtifactStore>,
     active_runs: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
 }
 
@@ -302,10 +310,14 @@ impl WorkflowRunner {
     pub fn new(
         provider_registry: Arc<ProviderRegistry>,
         global_config: Arc<GlobalConfigManager>,
+        history: Arc<WorkflowRunHistory>,
+        artifacts: Arc<WorkflowArtifactStore>,
     ) -> Self {
         Self {
             provider_registry,
             global_config,
+            history,
+            artifacts,
             active_runs: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -353,21 +365,33 @@ impl WorkflowRunner {
         // 发送启动事件
         let _ = event_tx.send(WorkflowRunnerEvent::WorkflowStarted {
             run_id: run_id.clone(),
+            project_id: project_id.clone(),
             workflow_id: workflow.name.clone(),
             timestamp: WorkflowRunnerEvent::timestamp(),
         });
 
         // Spawn 后台任务执行 workflow
         let active_runs = self.active_runs.clone();
+        let history = self.history.clone();
+        let artifacts = self.artifacts.clone();
         tokio::spawn(async move {
             let result = workflow_executor.run(&workflow, values, false).await;
 
             // 发送完成事件
             match result {
-                Ok(run) => {
+                Ok(mut run) => {
+                    run.id = run_id.clone();
+                    if let Err(err) =
+                        persist_workflow_outputs(&history, &artifacts, &workflow, &run)
+                    {
+                        eprintln!("Failed to persist workflow outputs: {}", err);
+                    }
+
                     let status = format!("{:?}", run.status);
                     let _ = event_tx.send(WorkflowRunnerEvent::WorkflowCompleted {
                         run_id: run_id.clone(),
+                        project_id: project_id.clone(),
+                        workflow_id: workflow.name.clone(),
                         status,
                         timestamp: WorkflowRunnerEvent::timestamp(),
                     });
@@ -375,6 +399,8 @@ impl WorkflowRunner {
                 Err(e) => {
                     let _ = event_tx.send(WorkflowRunnerEvent::WorkflowCompleted {
                         run_id: run_id.clone(),
+                        project_id: project_id.clone(),
+                        workflow_id: workflow.name.clone(),
                         status: format!("Failed: {}", e),
                         timestamp: WorkflowRunnerEvent::timestamp(),
                     });
@@ -425,6 +451,160 @@ impl WorkflowRunner {
     }
 }
 
+fn persist_workflow_outputs(
+    history: &WorkflowRunHistory,
+    artifacts: &WorkflowArtifactStore,
+    workflow: &WorkflowDefinition,
+    run: &WorkflowRun,
+) -> Result<()> {
+    history.append(run)?;
+
+    for step_run in &run.steps {
+        if let Some(step) = workflow.steps.iter().find(|step| step.id == step_run.id) {
+            for artifact_type in &step.artifacts {
+                artifacts.append(ArtifactInput {
+                    id: None,
+                    run_id: run.id.clone(),
+                    workflow_name: run.workflow_name.clone(),
+                    step_id: Some(step.id.clone()),
+                    role: step.role.clone(),
+                    artifact_type: map_artifact_type(*artifact_type),
+                    title: format!(
+                        "{}/{}: {}",
+                        run.workflow_name,
+                        step.id,
+                        artifact_type_title(*artifact_type)
+                    ),
+                    content: artifact_content_for_step(run, step, step_run, *artifact_type),
+                    files: Vec::new(),
+                    created_at: None,
+                })?;
+            }
+        }
+    }
+
+    artifacts.append(ArtifactInput {
+        id: None,
+        run_id: run.id.clone(),
+        workflow_name: run.workflow_name.clone(),
+        step_id: None,
+        role: None,
+        artifact_type: ArtifactType::DeliveryNote,
+        title: format!(
+            "{} {}",
+            run.workflow_name,
+            workflow_status_label(run.status)
+        ),
+        content: build_delivery_note(run),
+        files: Vec::new(),
+        created_at: None,
+    })?;
+
+    Ok(())
+}
+
+fn artifact_type_title(artifact_type: WorkflowArtifactType) -> &'static str {
+    match artifact_type {
+        WorkflowArtifactType::Plan => "plan",
+        WorkflowArtifactType::PatchSummary => "patch summary",
+        WorkflowArtifactType::TestResult => "test result",
+        WorkflowArtifactType::ReviewReport => "review report",
+        WorkflowArtifactType::HumanDecision => "human decision",
+        WorkflowArtifactType::DeliveryNote => "delivery note",
+    }
+}
+
+fn map_artifact_type(artifact_type: WorkflowArtifactType) -> ArtifactType {
+    match artifact_type {
+        WorkflowArtifactType::Plan => ArtifactType::Plan,
+        WorkflowArtifactType::PatchSummary => ArtifactType::PatchSummary,
+        WorkflowArtifactType::TestResult => ArtifactType::TestResult,
+        WorkflowArtifactType::ReviewReport => ArtifactType::ReviewReport,
+        WorkflowArtifactType::HumanDecision => ArtifactType::HumanDecision,
+        WorkflowArtifactType::DeliveryNote => ArtifactType::DeliveryNote,
+    }
+}
+
+fn artifact_content_for_step(
+    run: &WorkflowRun,
+    step: &WorkflowStep,
+    step_run: &codepanion_workflow_engine::StepRun,
+    artifact_type: WorkflowArtifactType,
+) -> String {
+    let mut lines = vec![
+        format!("workflow={}", run.workflow_name),
+        format!("runId={}", run.id),
+        format!("stepId={}", step.id),
+        format!("type={}", artifact_type_title(artifact_type)),
+        format!("status={:?}", step_run.status),
+    ];
+
+    if let Some(role) = &step.role {
+        lines.push(format!("role={}", role));
+    }
+    if let Some(command) = &step_run.command {
+        lines.push(format!("command={}", command));
+    }
+    if !step_run.args.is_empty() {
+        lines.push(format!("args={}", step_run.args.join(" ")));
+    }
+    if let Some(stdout) = step_run
+        .stdout
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        lines.push(String::new());
+        lines.push("## stdout".to_string());
+        lines.push(stdout.to_string());
+    }
+    if let Some(stderr) = step_run
+        .stderr
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        lines.push(String::new());
+        lines.push("## stderr".to_string());
+        lines.push(stderr.to_string());
+    }
+
+    lines.join("\n")
+}
+
+fn build_delivery_note(run: &WorkflowRun) -> String {
+    let mut lines = vec![
+        format!("workflow={}", run.workflow_name),
+        format!("runId={}", run.id),
+        format!("status={}", workflow_status_label(run.status)),
+        format!("steps={}", run.steps.len()),
+        String::new(),
+        "## Steps".to_string(),
+    ];
+
+    for step in &run.steps {
+        let mut suffix = String::new();
+        if let Some(command) = &step.command {
+            suffix.push_str(&format!(" command={}", command));
+        }
+        if let Some(exit_code) = step.exit_code {
+            suffix.push_str(&format!(" exitCode={}", exit_code));
+        }
+        lines.push(format!("- {} {:?}{}", step.id, step.status, suffix));
+    }
+
+    lines.join("\n")
+}
+
+fn workflow_status_label(status: WorkflowRunStatus) -> &'static str {
+    match status {
+        WorkflowRunStatus::Success => "success",
+        WorkflowRunStatus::Failed => "failed",
+        WorkflowRunStatus::Paused => "paused",
+        WorkflowRunStatus::DryRun => "dry-run",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -443,12 +623,18 @@ mod tests {
         _dir: TempDir,
         provider_registry: Arc<ProviderRegistry>,
         global_config: Arc<GlobalConfigManager>,
+        history: Arc<WorkflowRunHistory>,
+        artifacts: Arc<WorkflowArtifactStore>,
     }
 
     fn test_registries() -> TestRegistries {
         let dir = TempDir::new().unwrap();
         let provider_registry = Arc::new(ProviderRegistry::new(dir.path().join("providers.json")));
         let global_config = Arc::new(GlobalConfigManager::new(dir.path().join("config.json")));
+        let history = Arc::new(WorkflowRunHistory::new(dir.path().join("history.ndjson")));
+        let artifacts = Arc::new(WorkflowArtifactStore::new(
+            dir.path().join("artifacts.ndjson"),
+        ));
 
         provider_registry
             .upsert(ModelProvider {
@@ -502,6 +688,8 @@ mod tests {
             _dir: dir,
             provider_registry,
             global_config,
+            history,
+            artifacts,
         }
     }
 
@@ -595,6 +783,8 @@ mod tests {
         let runner = WorkflowRunner::new(
             registries.provider_registry.clone(),
             registries.global_config.clone(),
+            registries.history.clone(),
+            registries.artifacts.clone(),
         );
 
         // 启动 workflow
@@ -659,6 +849,8 @@ mod tests {
         let runner = WorkflowRunner::new(
             registries.provider_registry.clone(),
             registries.global_config.clone(),
+            registries.history.clone(),
+            registries.artifacts.clone(),
         );
         let run_id = "test-run-2".to_string();
 
