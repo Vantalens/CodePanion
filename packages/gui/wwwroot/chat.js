@@ -54,7 +54,11 @@ window.codexApp = {
 window.sendToHost = sendToHost;
 
 function generateId() {
-    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    const timestamp = Date.now().toString(36);
+    const randomBytes = new Uint8Array(6);
+    crypto.getRandomValues(randomBytes);
+    const randomStr = Array.from(randomBytes, b => b.toString(36).padStart(2, '0')).join('');
+    return `${timestamp}-${randomStr}`;
 }
 
 // J-09：拦截助手内容里的外链，交给宿主用系统浏览器打开；应用内锚点放行。

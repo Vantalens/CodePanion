@@ -547,7 +547,11 @@
 
     // === 工具函数 ===
     function generateId() {
-        return Date.now().toString(36) + Math.random().toString(36).substr(2);
+        const timestamp = Date.now().toString(36);
+        const randomBytes = new Uint8Array(6);
+        crypto.getRandomValues(randomBytes);
+        const randomStr = Array.from(randomBytes, b => b.toString(36).padStart(2, '0')).join('');
+        return timestamp + randomStr;
     }
 
     // === 初始化 ===
