@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::time::Duration;
 
 #[derive(Parser)]
 #[command(name = "codepanion")]
@@ -165,12 +166,24 @@ struct Provider {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct ListProvidersResponse {
+    providers: Vec<Provider>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
 struct Project {
     id: String,
     path: PathBuf,
     name: String,
-    is_active: bool,
+    last_active_at: u64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ListProjectsResponse {
+    projects: Vec<Project>,
 }
 
 #[derive(Debug, Serialize)]
@@ -248,6 +261,32 @@ struct ImportResult {
     active_provider: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SetModelAliasRequest {
+    alias: String,
+    model_id: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SetDefaultModelRequest {
+    model_id: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SetEffortLevelRequest {
+    level: String,
+}
+
+fn api_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .expect("failed to build HTTP client")
+}
+
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
@@ -292,7 +331,7 @@ async fn handle_status_command(api_url: &str) -> Result<(), Box<dyn std::error::
         status,
         codepanion_daemon::daemon_manager::DaemonStatus::Running { .. }
     ) {
-        let client = reqwest::Client::new();
+        let client = api_client();
         let url = format!("{}/health", api_url);
 
         match client.get(&url).send().await {
@@ -315,7 +354,7 @@ async fn handle_workflows_command(
     api_url: &str,
     active: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let client = reqwest::Client::new();
+    let client = api_client();
 
     if active {
         // 列出活跃的 workflow runs
@@ -360,28 +399,24 @@ async fn handle_workspace_command(
     command: WorkspaceCommands,
     api_url: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let client = reqwest::Client::new();
+    let client = api_client();
 
     match command {
         WorkspaceCommands::List => {
             let url = format!("{}/api/v1/projects", api_url);
-            let response: Vec<Project> = client.get(&url).send().await?.json().await?;
+            let response: ListProjectsResponse = client.get(&url).send().await?.json().await?;
 
-            if response.is_empty() {
+            if response.projects.is_empty() {
                 println!("No workspaces configured.");
             } else {
                 println!("{:<40} {:<50} {:<15}", "ID", "PATH", "STATUS");
                 println!("{}", "-".repeat(105));
-                for project in response {
+                for project in response.projects {
                     println!(
                         "{:<40} {:<50} {:<15}",
                         project.id,
                         project.path.display(),
-                        if project.is_active {
-                            "active"
-                        } else {
-                            "inactive"
-                        }
+                        "configured"
                     );
                 }
             }
@@ -402,9 +437,10 @@ async fn handle_workspace_command(
         WorkspaceCommands::Remove { path } => {
             // 先查找项目 ID
             let url = format!("{}/api/v1/projects", api_url);
-            let projects: Vec<Project> = client.get(&url).send().await?.json().await?;
+            let projects: ListProjectsResponse = client.get(&url).send().await?.json().await?;
 
             let project = projects
+                .projects
                 .iter()
                 .find(|p| p.path == path)
                 .ok_or_else(|| format!("Workspace not found: {}", path.display()))?;
@@ -422,14 +458,14 @@ async fn handle_provider_command(
     command: ProviderCommands,
     api_url: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let client = reqwest::Client::new();
+    let client = api_client();
 
     match command {
         ProviderCommands::List => {
             let url = format!("{}/api/v1/providers", api_url);
-            let response: Vec<Provider> = client.get(&url).send().await?.json().await?;
+            let response: ListProvidersResponse = client.get(&url).send().await?.json().await?;
 
-            if response.is_empty() {
+            if response.providers.is_empty() {
                 println!("No providers configured.");
             } else {
                 println!(
@@ -437,7 +473,7 @@ async fn handle_provider_command(
                     "ID", "NAME", "TYPE", "STATUS"
                 );
                 println!("{}", "-".repeat(75));
-                for provider in response {
+                for provider in response.providers {
                     println!(
                         "{:<20} {:<30} {:<15} {:<10}",
                         provider.id, provider.name, provider.provider_type, provider.status
@@ -538,7 +574,7 @@ async fn handle_model_command(
     command: ModelCommands,
     api_url: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let client = reqwest::Client::new();
+    let client = api_client();
 
     match command {
         ModelCommands::List => {
@@ -556,9 +592,13 @@ async fn handle_model_command(
             }
         }
         ModelCommands::Alias { alias, model_id } => {
-            println!("✓ Would set alias '{}' -> '{}'", alias, model_id);
-            println!("Note: Alias management API endpoint not yet implemented.");
-            println!("You can manually edit ~/.codepanion/config.json to add aliases.");
+            let url = format!("{}/api/v1/models/aliases", api_url);
+            let req = SetModelAliasRequest {
+                alias: alias.clone(),
+                model_id: model_id.clone(),
+            };
+            client.post(&url).json(&req).send().await?.error_for_status()?;
+            println!("✓ Set alias '{}' -> '{}'", alias, model_id);
         }
     }
 
@@ -567,18 +607,26 @@ async fn handle_model_command(
 
 async fn handle_config_command(
     command: ConfigCommands,
-    _api_url: &str,
+    api_url: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let client = api_client();
+
     match command {
         ConfigCommands::SetModel { model } => {
-            println!("✓ Would set default model to '{}'", model);
-            println!("Note: Config management API endpoint not yet implemented.");
-            println!("You can manually edit ~/.codepanion/config.json to set defaultModel.");
+            let url = format!("{}/api/v1/models/default", api_url);
+            let req = SetDefaultModelRequest {
+                model_id: model.clone(),
+            };
+            client.post(&url).json(&req).send().await?.error_for_status()?;
+            println!("✓ Set default model to '{}'", model);
         }
         ConfigCommands::SetEffort { level } => {
-            println!("✓ Would set effort level to '{}'", level);
-            println!("Note: Config management API endpoint not yet implemented.");
-            println!("You can manually edit ~/.codepanion/config.json to set effortLevel.");
+            let url = format!("{}/api/v1/config/effort", api_url);
+            let req = SetEffortLevelRequest {
+                level: level.clone(),
+            };
+            client.post(&url).json(&req).send().await?.error_for_status()?;
+            println!("✓ Set effort level to '{}'", level);
         }
     }
 

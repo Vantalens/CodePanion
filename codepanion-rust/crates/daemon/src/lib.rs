@@ -186,10 +186,22 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::
             "/api/v1/models/role-binding",
             post(routes::providers::set_role_binding),
         )
+        .route(
+            "/api/v1/models/aliases",
+            post(routes::providers::set_model_alias),
+        )
+        .route(
+            "/api/v1/models/aliases/:alias",
+            delete(routes::providers::delete_model_alias),
+        )
         // Configuration import
         .route(
             "/api/v1/config/import",
             post(routes::providers::import_config),
+        )
+        .route(
+            "/api/v1/config/effort",
+            post(routes::providers::set_effort_level),
         )
         // Scheduler API endpoints
         .route(

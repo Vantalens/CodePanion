@@ -168,6 +168,20 @@ pub struct SetRoleBindingRequest {
     pub model_id: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetModelAliasRequest {
+    pub alias: String,
+    #[serde(alias = "model_id")]
+    pub model_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetEffortLevelRequest {
+    pub level: String,
+}
+
 // ============================================================================
 // Error Response (OpenAI style)
 // ============================================================================
@@ -857,6 +871,86 @@ pub async fn set_role_binding(
         "success": true,
         "role": req.role,
         "modelId": req.model_id,
+    })))
+}
+
+/// POST /api/v1/models/aliases - Persist a user model alias.
+pub async fn set_model_alias(
+    State(state): State<AppState>,
+    Json(req): Json<SetModelAliasRequest>,
+) -> Result<Json<serde_json::Value>, ErrorResponse> {
+    let alias = req.alias.trim();
+    let model_id = req.model_id.trim();
+    if alias.is_empty() {
+        return Err(ErrorResponse::invalid_request(
+            "Alias is required".to_string(),
+            Some("alias".to_string()),
+        ));
+    }
+    if model_id.is_empty() {
+        return Err(ErrorResponse::invalid_request(
+            "Model ID is required".to_string(),
+            Some("modelId".to_string()),
+        ));
+    }
+
+    state
+        .global_config
+        .set_model_alias(alias, model_id)
+        .map_err(|e| ErrorResponse::internal_error(format!("Failed to set model alias: {}", e)))?;
+
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "alias": alias,
+        "modelId": model_id,
+    })))
+}
+
+/// DELETE /api/v1/models/aliases/:alias - Remove a user model alias.
+pub async fn delete_model_alias(
+    State(state): State<AppState>,
+    Path(alias): Path<String>,
+) -> Result<Json<serde_json::Value>, ErrorResponse> {
+    let alias = alias.trim();
+    if alias.is_empty() {
+        return Err(ErrorResponse::invalid_request(
+            "Alias is required".to_string(),
+            Some("alias".to_string()),
+        ));
+    }
+
+    let removed = state.global_config.remove_model_alias(alias).map_err(|e| {
+        ErrorResponse::internal_error(format!("Failed to remove model alias: {}", e))
+    })?;
+
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "alias": alias,
+        "removed": removed,
+    })))
+}
+
+/// POST /api/v1/config/effort - Persist the default effort level.
+pub async fn set_effort_level(
+    State(state): State<AppState>,
+    Json(req): Json<SetEffortLevelRequest>,
+) -> Result<Json<serde_json::Value>, ErrorResponse> {
+    let level = req.level.trim();
+    if !matches!(level, "low" | "medium" | "high" | "xhigh" | "max") {
+        return Err(ErrorResponse::invalid_request(
+            "Effort level must be one of: low, medium, high, xhigh, max".to_string(),
+            Some("level".to_string()),
+        ));
+    }
+
+    state
+        .global_config
+        .set_effort_level(level)
+        .map_err(|e| ErrorResponse::internal_error(format!("Failed to set effort level: {}", e)))?;
+
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "level": level,
     })))
 }
 

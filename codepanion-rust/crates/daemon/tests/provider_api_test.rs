@@ -442,3 +442,84 @@ async fn test_rejects_provider_scoped_model_reference_for_missing_provider_model
         .unwrap();
     assert_eq!(response.status(), 400);
 }
+
+#[tokio::test]
+async fn test_model_alias_endpoint_persists_alias() {
+    let daemon = TestDaemon::start().await;
+
+    let response = daemon
+        .post(
+            "/api/v1/models/aliases",
+            json!({ "alias": "fast", "modelId": "gpt-4o-mini" }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+
+    let config_path = daemon.temp_dir.join("config.json");
+    let config: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(config_path).unwrap()).unwrap();
+    assert_eq!(config["modelAliases"]["fast"], "gpt-4o-mini");
+}
+
+#[tokio::test]
+async fn test_model_alias_endpoint_rejects_empty_alias() {
+    let daemon = TestDaemon::start().await;
+
+    let response = daemon
+        .post(
+            "/api/v1/models/aliases",
+            json!({ "alias": " ", "modelId": "gpt-4o-mini" }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 400);
+}
+
+#[tokio::test]
+async fn test_delete_model_alias_endpoint_removes_alias() {
+    let daemon = TestDaemon::start().await;
+
+    daemon
+        .post(
+            "/api/v1/models/aliases",
+            json!({ "alias": "fast", "modelId": "gpt-4o-mini" }),
+        )
+        .await
+        .unwrap();
+
+    let response = daemon.delete("/api/v1/models/aliases/fast").await.unwrap();
+    assert_eq!(response.status(), 200);
+
+    let config_path = daemon.temp_dir.join("config.json");
+    let config: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(config_path).unwrap()).unwrap();
+    assert!(config["modelAliases"]["fast"].is_null());
+}
+
+#[tokio::test]
+async fn test_effort_endpoint_persists_supported_level() {
+    let daemon = TestDaemon::start().await;
+
+    let response = daemon
+        .post("/api/v1/config/effort", json!({ "level": "high" }))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+
+    let config_path = daemon.temp_dir.join("config.json");
+    let config: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(config_path).unwrap()).unwrap();
+    assert_eq!(config["effortLevel"], "high");
+}
+
+#[tokio::test]
+async fn test_effort_endpoint_rejects_unknown_level() {
+    let daemon = TestDaemon::start().await;
+
+    let response = daemon
+        .post("/api/v1/config/effort", json!({ "level": "extreme" }))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 400);
+}
