@@ -164,9 +164,9 @@ if (dialogClose) {
 ```javascript
 (function() {
     'use strict';
-    
+
     function sendToHost(message) { ... }
-    
+
     // 暴露给外部
     window.sendToHost = sendToHost;
 })();

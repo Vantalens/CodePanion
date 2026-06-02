@@ -217,14 +217,14 @@
 ```javascript
 function handleProjects(projects) {
   elements.projectsList.innerHTML = '';
-  
+
   projects.forEach(project => {
     const item = document.createElement('div');
     item.className = 'project-item';
     if (project.active) {
       item.classList.add('active');
     }
-    
+
     item.innerHTML = `
       <div class="project-icon">📁</div>
       <div class="project-info">
@@ -232,11 +232,11 @@ function handleProjects(projects) {
         <div class="project-path">${project.path}</div>
       </div>
     `;
-    
+
     item.addEventListener('click', () => {
       sendToHost({ type: 'activate-project', projectId: project.id });
     });
-    
+
     elements.projectsList.appendChild(item);
   });
 }
@@ -249,7 +249,7 @@ document.querySelectorAll('.section-toggle').forEach(toggle => {
     const button = e.currentTarget;
     const section = button.dataset.section;
     const sectionEl = button.closest(`.${section}-section`);
-    
+
     button.classList.toggle('active');
     sectionEl.classList.toggle('expanded');
   });

@@ -296,20 +296,19 @@ fn normalize_model_selection_for_gui(
     }
 
     let mut matches = models.iter().filter(|model| model.model_id == trimmed);
-    if let Some(active_provider_id) = active_provider_id {
-        if let Some(model) = matches
+    if let Some(active_provider_id) = active_provider_id
+        && let Some(model) = matches
             .clone()
             .find(|model| model.provider_id == active_provider_id)
-        {
-            return model.id.clone();
-        }
+    {
+        return model.id.clone();
     }
 
     let first = matches.next();
-    if let Some(model) = first {
-        if matches.next().is_none() {
-            return model.id.clone();
-        }
+    if let Some(model) = first
+        && matches.next().is_none()
+    {
+        return model.id.clone();
     }
 
     selection.to_string()

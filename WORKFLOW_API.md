@@ -53,7 +53,7 @@
 ## Workflow 架构
 
 ```
-主会话 (你) 
+主会话 (你)
   └─> Workflow 工具
        └─> agent() 函数
             └─> 创建 subagent
