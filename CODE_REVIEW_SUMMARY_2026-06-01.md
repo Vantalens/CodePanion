@@ -1,8 +1,8 @@
 # CodePanion 代码审核总结
 
-**审核日期**: 2026-06-01  
-**审核范围**: Rust 6个 crates + TypeScript daemon + 整体架构  
-**代码规模**: Rust 470KB (39文件) + TypeScript 190KB (29文件)  
+**审核日期**: 2026-06-01
+**审核范围**: Rust 6个 crates + TypeScript daemon + 整体架构
+**代码规模**: Rust 470KB (39文件) + TypeScript 190KB (29文件)
 **测试状态**: ✅ Rust 92/92 通过 | ✅ TypeScript 161/163 通过 | ✅ Clippy 0 warnings
 
 ---
@@ -36,7 +36,7 @@
 ## 1. 严重问题（需立即修复）
 
 ### 🔴 CRITICAL-1: CancellationToken 并发不安全
-**位置**: `model-client/src/lib.rs:44-57`  
+**位置**: `model-client/src/lib.rs:44-57`
 **问题**: 使用普通 bool 字段，多线程读写存在数据竞争
 ```rust
 pub struct CancellationToken {
@@ -52,7 +52,7 @@ pub struct CancellationToken {
 ```
 
 ### 🔴 CRITICAL-2: JSON 注入风险
-**位置**: `model-client/src/lib.rs:189-212`  
+**位置**: `model-client/src/lib.rs:189-212`
 **问题**: 手动构建 JSON 字符串，json_escape 可能有漏洞
 ```rust
 let body = format!(r#"{{"model":"{}","messages":[...]}}"#, model);
@@ -259,5 +259,5 @@ CodePanion 展现出良好的工程实践和清晰的架构设计。Rust 重构�
 
 ---
 
-**审核完成**: 2026-06-01  
+**审核完成**: 2026-06-01
 **下次审核建议**: P7-04 完成后，或 3个月后
