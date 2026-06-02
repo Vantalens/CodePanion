@@ -2,11 +2,17 @@
 // W-20 重建：CodePanion 工作流控制台前端。监听式（会话流 / 来源 / 接力 / 收件箱）逻辑已整体移除。
 // 数据全部来自 daemon 的工作流控制台 API（board / run 详情 / artifacts / delivery / gate）+ 实时 WS run 事件。
 // 与宿主（WebView2）通过 postMessage 双向通信；宿主再代理 daemon HTTP / WS。
+// G-01 扩展：项目管理（替换 workspace 输入框）
 
 const state = {
     connected: false,
-    workspace: '',              // 当前 workspace 绝对路径，空 = daemon 全局 fallback
-    recentWorkspaces: [],       // 最近用过的 workspace（localStorage 持久化）
+    // G-01: 项目管理
+    projects: [],               // 所有项目列表 { id, name, path, description, lastActiveAt, createdAt }
+    currentProjectId: '',       // 当前选中项目 ID，空 = 全局
+    projectStates: new Map(),   // 每个项目的状态快照 { selectedRunId, scrollPos }
+    // 原有状态
+    workspace: '',              // 当前 workspace 绝对路径，空 = daemon 全局 fallback（兼容）
+    recentWorkspaces: [],       // 最近用过的 workspace（localStorage 持久化）（兼容）
     board: null,                // 最近一次 /workflow/board 结果 { workflows, runs, gates }
     boardError: '',
     selectedRunId: '',          // 中栏时间线当前展示的 run
@@ -615,6 +621,10 @@ function initApp() {
     loadRecentWorkspaces();
     bindControls();
     updateConnectionStatus(false);
+    // G-01: 初始化项目管理
+    if (typeof initProjectManagement === 'function') {
+        initProjectManagement();
+    }
     renderTimeline();
     renderGatePanel();
     renderDeliveryControls();

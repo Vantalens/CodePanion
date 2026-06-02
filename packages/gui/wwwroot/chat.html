@@ -14,13 +14,14 @@
     <div id="app-shell">
         <header id="topbar">
             <div class="brand">CodePanion</div>
-            <div class="workspace-bar">
-                <label for="workspace-input">workspace</label>
-                <input id="workspace-input" type="text" list="workspace-recents" autocomplete="off"
-                       placeholder="项目绝对路径（留空=全局）">
-                <datalist id="workspace-recents"></datalist>
-                <button id="workspace-apply" class="btn" type="button">应用</button>
-                <button id="workspace-clear" class="btn" type="button">全局</button>
+            <!-- G-01: 项目选择器（替换原 workspace 输入框） -->
+            <div class="project-bar">
+                <label for="project-select">项目</label>
+                <select id="project-select" class="project-selector">
+                    <option value="">全局</option>
+                </select>
+                <button id="project-manage" class="btn" type="button" title="管理项目">📁</button>
+                <button id="project-refresh" class="btn" type="button" title="刷新项目列表">🔄</button>
             </div>
             <div class="conn" title="本地 daemon 连接状态">
                 <span class="status-dot"></span>
@@ -100,6 +101,56 @@
             <span id="board-status">尚未拉取数据。</span>
         </footer>
     </div>
+
+    <!-- G-01: 项目管理对话框 -->
+    <div id="project-dialog" class="dialog-overlay" hidden>
+        <div class="dialog-box">
+            <header class="dialog-header">
+                <h3>项目管理</h3>
+                <button id="project-dialog-close" class="dialog-close" type="button">×</button>
+            </header>
+            <div class="dialog-body">
+                <div class="dialog-toolbar">
+                    <input id="project-search" type="text" placeholder="搜索项目名称或路径..." class="search-input">
+                    <button id="project-add" class="btn primary" type="button">+ 添加项目</button>
+                </div>
+                <div id="project-list" class="project-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- G-01: 项目表单对话框 -->
+    <div id="project-form-dialog" class="dialog-overlay" hidden>
+        <div class="dialog-box dialog-small">
+            <header class="dialog-header">
+                <h3 id="project-form-title">添加项目</h3>
+                <button id="project-form-close" class="dialog-close" type="button">×</button>
+            </header>
+            <div class="dialog-body">
+                <form id="project-form">
+                    <input type="hidden" id="project-form-id" value="">
+                    <div class="form-field">
+                        <label for="project-form-name">项目名称 *</label>
+                        <input id="project-form-name" type="text" required placeholder="例如：我的项目">
+                    </div>
+                    <div class="form-field">
+                        <label for="project-form-path">项目路径 *</label>
+                        <input id="project-form-path" type="text" required placeholder="D:\Projects\MyApp">
+                    </div>
+                    <div class="form-field">
+                        <label for="project-form-description">描述（可选）</label>
+                        <textarea id="project-form-description" rows="2" placeholder="项目简介"></textarea>
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn primary">保存</button>
+                        <button type="button" id="project-form-cancel" class="btn">取消</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://codepanion.local/projects.js"></script>
     <script src="https://codepanion.local/chat.js"></script>
 </body>
 </html>

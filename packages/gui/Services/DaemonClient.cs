@@ -47,6 +47,9 @@ namespace CodePanion.Gui.Services
 
         public string DaemonUrl => _daemonUrl;
 
+        // G-01: 暴露 HttpClient 供项目管理使用
+        public HttpClient HttpClient => _httpClient;
+
         public void ReloadConfig() => LoadConfig();
 
         private void LoadConfig()

@@ -38,6 +38,12 @@ namespace CodePanion.Gui
             "request-run-cancel",
             "request-delivery",
             "set-workspace",
+            // G-01: 项目管理
+            "request-projects",
+            "create-project",
+            "update-project",
+            "delete-project",
+            "activate-project",
         };
 
         private readonly DaemonClient _daemonClient;
@@ -309,6 +315,54 @@ namespace CodePanion.Gui
                     {
                         var workspace = message["workspace"]?.Value<string>();
                         AddLog($"workspace 切换为：{(string.IsNullOrWhiteSpace(workspace) ? "<全局>" : workspace)}");
+                        break;
+                    }
+
+                    // G-01: 项目管理
+                    case "request-projects":
+                    {
+                        _ = HandleRequestProjectsAsync();
+                        break;
+                    }
+
+                    case "create-project":
+                    {
+                        var name = message["name"]?.Value<string>();
+                        var path = message["path"]?.Value<string>();
+                        var description = message["description"]?.Value<string>();
+                        if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(path))
+                        { AddLog("丢弃 create-project：name 或 path 缺失"); break; }
+                        _ = HandleCreateProjectAsync(name!, path!, description);
+                        break;
+                    }
+
+                    case "update-project":
+                    {
+                        var projectId = message["projectId"]?.Value<string>();
+                        var name = message["name"]?.Value<string>();
+                        var path = message["path"]?.Value<string>();
+                        var description = message["description"]?.Value<string>();
+                        if (string.IsNullOrWhiteSpace(projectId) || string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(path))
+                        { AddLog("丢弃 update-project：projectId/name/path 缺失"); break; }
+                        _ = HandleUpdateProjectAsync(projectId!, name!, path!, description);
+                        break;
+                    }
+
+                    case "delete-project":
+                    {
+                        var projectId = message["projectId"]?.Value<string>();
+                        if (string.IsNullOrWhiteSpace(projectId))
+                        { AddLog("丢弃 delete-project：projectId 缺失"); break; }
+                        _ = HandleDeleteProjectAsync(projectId!);
+                        break;
+                    }
+
+                    case "activate-project":
+                    {
+                        var projectId = message["projectId"]?.Value<string>();
+                        if (string.IsNullOrWhiteSpace(projectId))
+                        { AddLog("丢弃 activate-project：projectId 缺失"); break; }
+                        _ = HandleActivateProjectAsync(projectId!);
                         break;
                     }
                 }
@@ -1094,6 +1148,137 @@ namespace CodePanion.Gui
         {
             e.Cancel = true;
             Hide();
+        }
+
+        // G-01: 项目管理处理函数
+        private async System.Threading.Tasks.Task HandleRequestProjectsAsync()
+        {
+            try
+            {
+                var url = $"{_daemonClient.DaemonUrl}/api/v1/projects";
+                var response = await _daemonClient.HttpClient.GetAsync(url);
+                var content = await response.Content.ReadAsStringAsync();
+
+                if (response.IsSuccessStatusCode)
+                {
+                    var data = JObject.Parse(content);
+                    var projects = data["projects"];
+                    SendMessageToWeb(new { type = "projects", projects });
+                    AddLog($"已加载 {projects?.Count() ?? 0} 个项目");
+                }
+                else
+                {
+                    AddLog($"获取项目列表失败：{response.StatusCode}");
+                    SendMessageToWeb(new { type = "projects", projects = new JArray() });
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"请求项目列表异常：{ex.Message}");
+                SendMessageToWeb(new { type = "projects", projects = new JArray() });
+            }
+        }
+
+        private async System.Threading.Tasks.Task HandleCreateProjectAsync(string name, string path, string? description)
+        {
+            try
+            {
+                var url = $"{_daemonClient.DaemonUrl}/api/v1/projects";
+                var payload = new { name, path, description = description ?? "" };
+                var json = JsonConvert.SerializeObject(payload);
+                var httpContent = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
+
+                var response = await _daemonClient.HttpClient.PostAsync(url, httpContent);
+                var content = await response.Content.ReadAsStringAsync();
+
+                if (response.IsSuccessStatusCode)
+                {
+                    AddLog($"项目已创建：{name}");
+                    await HandleRequestProjectsAsync(); // 刷新项目列表
+                }
+                else
+                {
+                    AddLog($"创建项目失败：{response.StatusCode} - {content}");
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"创建项目异常：{ex.Message}");
+            }
+        }
+
+        private async System.Threading.Tasks.Task HandleUpdateProjectAsync(string projectId, string name, string path, string? description)
+        {
+            try
+            {
+                var url = $"{_daemonClient.DaemonUrl}/api/v1/projects/{projectId}";
+                var payload = new { name, path, description = description ?? "" };
+                var json = JsonConvert.SerializeObject(payload);
+                var httpContent = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
+
+                var response = await _daemonClient.HttpClient.PutAsync(url, httpContent);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    AddLog($"项目已更新：{name}");
+                    await HandleRequestProjectsAsync(); // 刷新项目列表
+                }
+                else
+                {
+                    var content = await response.Content.ReadAsStringAsync();
+                    AddLog($"更新项目失败：{response.StatusCode} - {content}");
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"更新项目异常：{ex.Message}");
+            }
+        }
+
+        private async System.Threading.Tasks.Task HandleDeleteProjectAsync(string projectId)
+        {
+            try
+            {
+                var url = $"{_daemonClient.DaemonUrl}/api/v1/projects/{projectId}";
+                var response = await _daemonClient.HttpClient.DeleteAsync(url);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    AddLog($"项目已删除：{projectId}");
+                    await HandleRequestProjectsAsync(); // 刷新项目列表
+                }
+                else
+                {
+                    var content = await response.Content.ReadAsStringAsync();
+                    AddLog($"删除项目失败：{response.StatusCode} - {content}");
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"删除项目异常：{ex.Message}");
+            }
+        }
+
+        private async System.Threading.Tasks.Task HandleActivateProjectAsync(string projectId)
+        {
+            try
+            {
+                var url = $"{_daemonClient.DaemonUrl}/api/v1/projects/{projectId}/activate";
+                var response = await _daemonClient.HttpClient.PostAsync(url, null);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    AddLog($"项目已激活：{projectId}");
+                }
+                else
+                {
+                    AddLog($"激活项目失败：{response.StatusCode}");
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"激活项目异常：{ex.Message}");
+            }
         }
 
         protected override void OnClosed(EventArgs e)
