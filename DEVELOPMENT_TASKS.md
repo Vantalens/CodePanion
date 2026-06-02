@@ -177,7 +177,7 @@
 
 - [x] P7-03 CLI 命令
 
-- [>] **P7-04 测试、迁移与性能基准** (87.5% 完成)
+- [>] **P7-04 测试、迁移与性能基准** (90% 完成)
   - [x] **测试架构设计**（阶段 1.1）：创建 TestDaemon 测试框架、HTTP 客户端封装、临时目录隔离
   - [x] **HTTP API 集成测试**（阶段 1.2）：24/29 tests passed (82.8%)
     - [x] Project API: 9/9 tests (100%)
@@ -188,14 +188,20 @@
     - [x] 二进制大小：3.98 MB ✓ (目标 < 20 MB，超预期 5x)
     - [x] 空闲内存：11.82 MB ✓ (目标 < 50 MB，超预期 4x)
     - [x] 冷启动：~823 ms (目标 < 500 ms，可优化)
+  - [x] **Workflow 执行端到端测试**（阶段 1.4）：7/7 tests passed (100%)
+    - [x] Shell workflow 执行
+    - [x] Workflow artifacts 生成
+    - [x] Workflow gate 决策
+    - [x] Workflow board 列表
+    - [x] Workflow runs 历史
+    - [x] Scheduler stats 集成
   - [ ] WebSocket 实时推送测试（阶段 1.3，P1）
-  - [ ] Workflow 执行端到端测试（阶段 1.4，P0）
   - [ ] CLI 命令测试（阶段 1.5，P2）
   - [ ] GUI/CLI 适配验证（阶段 3，P0）
   - [ ] 迁移指南和文档更新（阶段 4，P1）
   - [ ] P3 未完成集成（阶段 5：Artifacts/Gates/WebSocket，P1）
   - [ ] 移除 TypeScript daemon 依赖（阶段 6，P2）
-  - **验收**：核心 API 测试 100% 通过 ✓；性能指标超预期（内存、二进制）✓；剩余：Workflow 执行测试、GUI 适配、文档
+  - **验收**：核心 API 测试 100% 通过 ✓；Workflow 执行测试 100% 通过 ✓；性能指标超预期 ✓；剩余：GUI 适配、文档
 
 ---
 
