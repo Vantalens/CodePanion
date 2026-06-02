@@ -1,11 +1,10 @@
-use std::io::{Read, Write};
-use std::net::TcpStream;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use codepanion_config::ModelBackendConfig;
 use codepanion_shared::{CodePanionError, Result};
+use reqwest::header::CONTENT_TYPE;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChatMessage {
@@ -53,6 +52,10 @@ impl CancellationToken {
         Self {
             cancelled: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    pub fn from_flag(cancelled: Arc<AtomicBool>) -> Self {
+        Self { cancelled }
     }
 
     pub fn cancelled() -> Self {
@@ -115,13 +118,6 @@ impl ChatTool {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ParsedUrl {
-    host: String,
-    port: u16,
-    path: String,
-}
-
 pub fn chat_completion(request: &ChatRequest) -> Result<ChatCompletionResult> {
     request.validate()?;
     if request.cancel.is_cancelled() {
@@ -130,74 +126,47 @@ pub fn chat_completion(request: &ChatRequest) -> Result<ChatCompletionResult> {
         ));
     }
 
-    let url = parse_http_url(&request.backend.base_url)?;
+    let url = chat_url(&request.backend.base_url)?;
     let body = build_chat_body(request)?;
-    let mut headers = vec![
-        format!(
-            "POST {} HTTP/1.1",
-            join_path(&url.path, "/chat/completions")
-        ),
-        format!("Host: {}:{}", url.host, url.port),
-        "Content-Type: application/json".to_string(),
-        format!("Content-Length: {}", body.len()),
-        "Connection: close".to_string(),
-    ];
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|err| CodePanionError::Runtime(format!("model API client failed: {err}")))?;
+
+    let mut request_builder = client
+        .post(url)
+        .header(CONTENT_TYPE, "application/json")
+        .body(body);
     if let Some(api_key) = request.api_key.as_deref().filter(|key| !key.is_empty()) {
-        headers.push(format!("Authorization: Bearer {api_key}"));
+        request_builder = request_builder.bearer_auth(api_key);
     }
 
-    let mut stream = TcpStream::connect((url.host.as_str(), url.port))
-        .map_err(|err| CodePanionError::Runtime(format!("model API connection failed: {err}")))?;
-    stream
-        .set_read_timeout(Some(Duration::from_secs(30)))
-        .map_err(|err| CodePanionError::Runtime(format!("failed to set read timeout: {err}")))?;
-    let request_bytes = format!("{}\r\n\r\n{body}", headers.join("\r\n"));
-    stream
-        .write_all(request_bytes.as_bytes())
+    let response = request_builder
+        .send()
         .map_err(|err| CodePanionError::Runtime(format!("model API request failed: {err}")))?;
-
-    let mut response = String::new();
-    stream
-        .read_to_string(&mut response)
+    let status = response.status().as_u16();
+    let body = response
+        .text()
         .map_err(|err| CodePanionError::Runtime(format!("model API response failed: {err}")))?;
-    parse_chat_response(&response)
+
+    parse_chat_body(status, &body)
 }
 
-fn parse_http_url(raw: &str) -> Result<ParsedUrl> {
-    let without_scheme = raw.strip_prefix("http://").ok_or_else(|| {
-        CodePanionError::InvalidInput(
-            "only http:// model base_url is supported in bootstrap client".to_string(),
-        )
-    })?;
-    let (authority, path) = without_scheme
-        .split_once('/')
-        .map_or((without_scheme, "/"), |(host, rest)| (host, rest));
-    if authority.is_empty() {
+fn chat_url(base_url: &str) -> Result<String> {
+    let trimmed = base_url.trim();
+    if !(trimmed.starts_with("http://") || trimmed.starts_with("https://")) {
+        return Err(CodePanionError::InvalidInput(
+            "model base_url must start with http:// or https://".to_string(),
+        ));
+    }
+    if trimmed == "http://" || trimmed == "https://" {
         return Err(CodePanionError::InvalidInput(
             "model base_url host is required".to_string(),
         ));
     }
-    let (host, port) = authority
-        .rsplit_once(':')
-        .and_then(|(host, port)| Some((host, port.parse::<u16>().ok()?)))
-        .unwrap_or((authority, 80));
-    Ok(ParsedUrl {
-        host: host.to_string(),
-        port,
-        path: if path == "/" {
-            "/".to_string()
-        } else {
-            format!("/{path}")
-        },
-    })
-}
-
-fn join_path(base: &str, suffix: &str) -> String {
-    format!(
-        "{}/{}",
-        base.trim_end_matches('/'),
-        suffix.trim_start_matches('/')
-    )
+    reqwest::Url::parse(trimmed)
+        .map_err(|err| CodePanionError::InvalidInput(format!("model base_url is invalid: {err}")))
+        .map(|_| format!("{}/chat/completions", trimmed.trim_end_matches('/')))
 }
 
 fn build_chat_body(request: &ChatRequest) -> Result<String> {
@@ -227,16 +196,7 @@ fn build_chat_body(request: &ChatRequest) -> Result<String> {
         .map_err(|e| CodePanionError::InvalidInput(format!("Failed to serialize request: {}", e)))
 }
 
-fn parse_chat_response(response: &str) -> Result<ChatCompletionResult> {
-    let (head, body) = response.split_once("\r\n\r\n").ok_or_else(|| {
-        CodePanionError::Runtime("model API returned malformed HTTP response".to_string())
-    })?;
-    let status = head
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .and_then(|code| code.parse::<u16>().ok())
-        .ok_or_else(|| CodePanionError::Runtime("model API response missing status".to_string()))?;
+fn parse_chat_body(status: u16, body: &str) -> Result<ChatCompletionResult> {
     if !(200..300).contains(&status) {
         return Err(CodePanionError::Runtime(format!(
             "model API {status}: {}",
@@ -376,6 +336,7 @@ mod tests {
                 id: "default".to_string(),
                 base_url: "http://localhost:11434/v1".to_string(),
                 model: "qwen".to_string(),
+                api_key: None,
             },
             messages: vec![],
             api_key: None,
@@ -393,15 +354,26 @@ mod tests {
     }
 
     #[test]
-    fn chat_completion_posts_openai_compatible_request() {
-        let (base_url, handle) = spawn_mock_server(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 92\r\n\r\n{\"choices\":[{\"message\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}],\"usage\":{\"total_tokens\":3}}",
+    fn chat_url_accepts_https_base_urls() {
+        assert_eq!(
+            chat_url("https://api.openai.com/v1").unwrap(),
+            "https://api.openai.com/v1/chat/completions"
         );
+    }
+
+    #[test]
+    fn chat_completion_posts_openai_compatible_request() {
+        let (base_url, handle) = spawn_mock_server(json_response(
+            200,
+            "OK",
+            r#"{"choices":[{"message":{"content":"done"},"finish_reason":"stop"}],"usage":{"total_tokens":3}}"#,
+        ));
         let result = chat_completion(&ChatRequest {
             backend: ModelBackendConfig {
                 id: "mock".to_string(),
                 base_url,
                 model: "gpt-test".to_string(),
+                api_key: None,
             },
             messages: vec![ChatMessage {
                 role: "user".to_string(),
@@ -417,21 +389,25 @@ mod tests {
         assert_eq!(result.text, "done");
         assert_eq!(result.finish_reason.as_deref(), Some("stop"));
         assert!(request.contains("POST /v1/chat/completions HTTP/1.1"));
-        assert!(request.contains("Authorization: Bearer secret"));
+        assert!(
+            request
+                .to_ascii_lowercase()
+                .contains("authorization: bearer secret")
+        );
         assert!(request.contains(r#""model":"gpt-test""#));
         assert!(request.contains(r#""content":"hello""#));
     }
 
     #[test]
     fn chat_completion_reports_non_success_status() {
-        let (base_url, handle) = spawn_mock_server(
-            "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 12\r\n\r\nserver broke",
-        );
+        let (base_url, handle) =
+            spawn_mock_server(text_response(500, "Internal Server Error", "server broke"));
         let err = chat_completion(&ChatRequest {
             backend: ModelBackendConfig {
                 id: "mock".to_string(),
                 base_url,
                 model: "gpt-test".to_string(),
+                api_key: None,
             },
             messages: vec![ChatMessage {
                 role: "user".to_string(),
@@ -455,6 +431,7 @@ mod tests {
                 id: "mock".to_string(),
                 base_url: "http://127.0.0.1:1/v1".to_string(),
                 model: "gpt-test".to_string(),
+                api_key: None,
             },
             messages: vec![ChatMessage {
                 role: "user".to_string(),
@@ -470,15 +447,28 @@ mod tests {
     }
 
     #[test]
+    fn cancellation_token_observes_shared_flag() {
+        let flag = Arc::new(AtomicBool::new(false));
+        let token = CancellationToken::from_flag(flag.clone());
+
+        assert!(!token.is_cancelled());
+        flag.store(true, Ordering::SeqCst);
+        assert!(token.is_cancelled());
+    }
+
+    #[test]
     fn chat_completion_parses_tool_calls() {
-        let (base_url, handle) = spawn_mock_server(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 173\r\n\r\n{\"choices\":[{\"message\":{\"content\":\"\",\"tool_calls\":[{\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"README.md\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}",
-        );
+        let (base_url, handle) = spawn_mock_server(json_response(
+            200,
+            "OK",
+            r#"{"choices":[{"message":{"content":"","tool_calls":[{"id":"call_1","type":"function","function":{"name":"read_file","arguments":"{\"path\":\"README.md\"}"}}]},"finish_reason":"tool_calls"}]}"#,
+        ));
         let result = chat_completion(&ChatRequest {
             backend: ModelBackendConfig {
                 id: "mock".to_string(),
                 base_url,
                 model: "gpt-test".to_string(),
+                api_key: None,
             },
             messages: vec![ChatMessage {
                 role: "user".to_string(),
@@ -503,18 +493,13 @@ mod tests {
         let response_body = "data: {\"choices\":[{\"delta\":{\"content\":\"hel\"}}]}\n\
 data: {\"choices\":[{\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}]}\n\
 data: [DONE]\n";
-        let response = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",
-            response_body.len(),
-            response_body
-        );
-        let leaked_response: &'static str = Box::leak(response.into_boxed_str());
-        let (base_url, handle) = spawn_mock_server(leaked_response);
+        let (base_url, handle) = spawn_mock_server(event_stream_response(200, "OK", response_body));
         let result = chat_completion(&ChatRequest {
             backend: ModelBackendConfig {
                 id: "mock".to_string(),
                 base_url,
                 model: "gpt-test".to_string(),
+                api_key: None,
             },
             messages: vec![ChatMessage {
                 role: "user".to_string(),
@@ -532,7 +517,26 @@ data: [DONE]\n";
         assert!(request.contains(r#""stream":true"#));
     }
 
-    fn spawn_mock_server(response: &'static str) -> (String, thread::JoinHandle<String>) {
+    fn json_response(status: u16, reason: &str, body: &str) -> String {
+        response(status, reason, "application/json", body)
+    }
+
+    fn text_response(status: u16, reason: &str, body: &str) -> String {
+        response(status, reason, "text/plain", body)
+    }
+
+    fn event_stream_response(status: u16, reason: &str, body: &str) -> String {
+        response(status, reason, "text/event-stream", body)
+    }
+
+    fn response(status: u16, reason: &str, content_type: &str, body: &str) -> String {
+        format!(
+            "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        )
+    }
+
+    fn spawn_mock_server(response: String) -> (String, thread::JoinHandle<String>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let handle = thread::spawn(move || {

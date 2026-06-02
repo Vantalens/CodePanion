@@ -3,20 +3,30 @@
 
 // ── Provider 数据管理 ──
 function requestProviders() {
-    sendToHost({ type: 'request-providers' });
+    window.codexApp?.sendToHost({ type: 'request-providers' });
 }
 
 function applyProviders(providers) {
+    const state = window.codexApp?.state;
+    if (!state) return;
     state.providers = Array.isArray(providers) ? providers : [];
     renderProviderList();
 }
 
 function requestModels() {
-    sendToHost({ type: 'request-models' });
+    window.codexApp?.sendToHost({ type: 'request-models' });
 }
 
-function applyModels(models) {
+function applyModels(models, defaultModel = undefined, roleBindings = undefined) {
+    const state = window.codexApp?.state;
+    if (!state) return;
     state.models = Array.isArray(models) ? models : [];
+    if (defaultModel !== undefined) {
+        state.defaultModel = defaultModel || '';
+    }
+    if (roleBindings && typeof roleBindings === 'object') {
+        state.roleBindings = roleBindings;
+    }
     renderModelConfiguration();
 }
 
@@ -56,6 +66,8 @@ function switchSettingsTab(tab) {
 }
 
 function renderProviderList() {
+    const state = window.codexApp?.state;
+    if (!state) return;
     const list = document.getElementById('provider-list');
     if (!list) return;
 
@@ -96,7 +108,8 @@ function renderProviderList() {
 
         const type = document.createElement('div');
         type.className = 'provider-meta';
-        type.textContent = `类型：${provider.type || 'unknown'} | API: ${provider.apiBase || 'N/A'}`;
+        const apiBase = provider.apiBase || provider.config?.baseUrl || provider.config?.base_url || 'N/A';
+        type.textContent = `类型：${provider.type || 'unknown'} | API: ${apiBase}`;
         info.appendChild(type);
 
         if (provider.lastUsedAt) {
@@ -160,19 +173,25 @@ function openProviderForm(provider = null) {
     if (!dialog || !form) return;
 
     if (provider) {
-        title.textContent = '编辑 Provider';
+        if (title) title.textContent = '编辑 Provider';
         idInput.value = provider.id || '';
         nameInput.value = provider.name || '';
         typeInput.value = provider.type || 'openai';
-        apiKeyInput.value = provider.apiKey || '';
-        apiBaseInput.value = provider.apiBase || '';
+        apiKeyInput.value = provider.apiKey || provider.config?.apiKey || provider.config?.api_key || '';
+        apiBaseInput.value = provider.apiBase || provider.config?.baseUrl || provider.config?.base_url || '';
+        form.dataset.originalType = typeInput.value;
+        form.dataset.originalApiKey = apiKeyInput.value;
+        form.dataset.originalApiBase = apiBaseInput.value;
     } else {
-        title.textContent = '添加 Provider';
+        if (title) title.textContent = '添加 Provider';
         idInput.value = '';
         nameInput.value = '';
         typeInput.value = 'openai';
         apiKeyInput.value = '';
         apiBaseInput.value = 'https://api.openai.com/v1';
+        delete form.dataset.originalType;
+        delete form.dataset.originalApiKey;
+        delete form.dataset.originalApiBase;
     }
 
     dialog.hidden = false;
@@ -204,18 +223,25 @@ function submitProviderForm(event) {
     }
 
     if (id) {
-        // 更新 provider
-        sendToHost({
+        const payload = {
             type: 'update-provider',
             providerId: id,
             name,
-            providerType: type,
-            apiKey,
-            apiBase,
-        });
+        };
+        if (type !== (event.currentTarget.dataset.originalType || '')) {
+            payload.providerType = type;
+        }
+        if (apiKey !== (event.currentTarget.dataset.originalApiKey || '')) {
+            payload.apiKey = apiKey;
+        }
+        if (apiBase !== (event.currentTarget.dataset.originalApiBase || '')) {
+            payload.apiBase = apiBase;
+        }
+        // 更新 provider
+        window.codexApp?.sendToHost(payload);
     } else {
         // 创建 provider
-        sendToHost({
+        window.codexApp?.sendToHost({
             type: 'create-provider',
             name,
             providerType: type,
@@ -232,15 +258,15 @@ function deleteProvider(provider) {
         return;
     }
 
-    sendToHost({ type: 'delete-provider', providerId: provider.id });
+    window.codexApp?.sendToHost({ type: 'delete-provider', providerId: provider.id });
 }
 
 function testProvider(providerId) {
-    sendToHost({ type: 'test-provider', providerId });
+    window.codexApp?.sendToHost({ type: 'test-provider', providerId });
 }
 
 function activateProvider(providerId) {
-    sendToHost({ type: 'activate-provider', providerId });
+    window.codexApp?.sendToHost({ type: 'activate-provider', providerId });
 }
 
 function applyProviderTestResult(providerId, success, message) {
@@ -249,6 +275,8 @@ function applyProviderTestResult(providerId, success, message) {
 
 // ── 模型配置 ──
 function renderModelConfiguration() {
+    const state = window.codexApp?.state;
+    if (!state) return;
     const container = document.getElementById('model-config-container');
     if (!container) return;
 
@@ -279,7 +307,7 @@ function renderModelConfiguration() {
     });
 
     defaultModelSelect.addEventListener('change', (e) => {
-        sendToHost({ type: 'set-default-model', modelId: e.target.value });
+        window.codexApp?.sendToHost({ type: 'set-default-model', modelId: e.target.value });
     });
 
     defaultModelSection.appendChild(defaultModelSelect);
@@ -323,7 +351,13 @@ function renderModelConfiguration() {
         });
 
         roleSelect.addEventListener('change', (e) => {
-            sendToHost({
+            state.roleBindings = state.roleBindings || {};
+            if (e.target.value) {
+                state.roleBindings[e.target.dataset.role] = e.target.value;
+            } else {
+                delete state.roleBindings[e.target.dataset.role];
+            }
+            window.codexApp?.sendToHost({
                 type: 'set-role-binding',
                 role: e.target.dataset.role,
                 modelId: e.target.value
@@ -399,6 +433,8 @@ function initProviderManagement() {
 // 导出给宿主调用的函数
 window.applyProviders = applyProviders;
 window.applyModels = applyModels;
+window.handleProvidersUpdate = applyProviders;
+window.handleModelsUpdate = applyModels;
 window.applyProviderTestResult = applyProviderTestResult;
 window.providerOperationResult = function(success, message) {
     if (success) {

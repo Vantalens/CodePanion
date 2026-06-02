@@ -65,21 +65,18 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::
         broadcaster_clone.broadcast(event);
     }));
 
-    // Initialize workflow runner with default backend
-    let default_backend = codepanion_config::ModelBackendConfig {
-        id: "deepseek".to_string(),
-        base_url: "https://api.deepseek.com".to_string(),
-        model: "deepseek-chat".to_string(),
-    };
+    // Initialize registries
+    let project_registry = Arc::new(ProjectRegistry::new(config.projects_path));
+    let provider_registry = Arc::new(ProviderRegistry::new(config.providers_path));
+    let global_config = Arc::new(GlobalConfigManager::new(config.global_config_path));
     let workflow_runner = Arc::new(tokio::sync::Mutex::new(
-        workflow_runner::WorkflowRunner::new(default_backend),
+        workflow_runner::WorkflowRunner::new(provider_registry.clone(), global_config.clone()),
     ));
 
-    // Initialize registries
     let state = AppState {
-        project_registry: Arc::new(ProjectRegistry::new(config.projects_path)),
-        provider_registry: Arc::new(ProviderRegistry::new(config.providers_path)),
-        global_config: Arc::new(GlobalConfigManager::new(config.global_config_path)),
+        project_registry,
+        provider_registry,
+        global_config,
         scheduler: Arc::new(scheduler),
         orchestrator: Arc::new(std::sync::Mutex::new(CrossProjectOrchestrator::new())),
         event_broadcaster,
@@ -138,6 +135,10 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::
         )
         .route("/api/v1/providers", get(routes::providers::list_providers))
         .route(
+            "/api/v1/providers/active",
+            get(routes::providers::get_active_provider),
+        )
+        .route(
             "/api/v1/providers/:id",
             get(routes::providers::get_provider),
         )
@@ -161,9 +162,14 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::
             "/api/v1/providers/:id/activate",
             post(routes::providers::activate_provider),
         )
+        .route("/api/v1/models", get(routes::providers::list_gui_models))
         .route(
-            "/api/v1/providers/active",
-            get(routes::providers::get_active_provider),
+            "/api/v1/models/default",
+            post(routes::providers::set_default_model),
+        )
+        .route(
+            "/api/v1/models/role-binding",
+            post(routes::providers::set_role_binding),
         )
         // Configuration import
         .route(

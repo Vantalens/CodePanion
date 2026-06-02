@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 #[path = "integration/mod.rs"]
 mod integration;
 
@@ -61,7 +59,7 @@ async fn test_list_projects() {
 
     let body: serde_json::Value = response.json().await.unwrap();
     assert!(body["projects"].is_array());
-    assert!(body["projects"].as_array().unwrap().len() > 0);
+    assert!(!body["projects"].as_array().unwrap().is_empty());
     assert_eq!(body["total"], 1);
 }
 
@@ -82,7 +80,10 @@ async fn test_get_project() {
     let project_id = created["id"].as_str().unwrap();
 
     // Get the project
-    let response = daemon.get(&format!("/api/v1/projects/{}", project_id)).await.unwrap();
+    let response = daemon
+        .get(&format!("/api/v1/projects/{}", project_id))
+        .await
+        .unwrap();
     assert_eq!(response.status(), 200);
 
     let body: serde_json::Value = response.json().await.unwrap();
@@ -111,11 +112,17 @@ async fn test_update_project() {
         "name": "updated-project",
         "description": "Updated description"
     });
-    let response = daemon.put(&format!("/api/v1/projects/{}", project_id), update).await.unwrap();
+    let response = daemon
+        .put(&format!("/api/v1/projects/{}", project_id), update)
+        .await
+        .unwrap();
     assert_eq!(response.status(), 200);
 
     // Verify update
-    let get_response = daemon.get(&format!("/api/v1/projects/{}", project_id)).await.unwrap();
+    let get_response = daemon
+        .get(&format!("/api/v1/projects/{}", project_id))
+        .await
+        .unwrap();
     let body: serde_json::Value = get_response.json().await.unwrap();
     assert_eq!(body["name"], "updated-project");
     assert_eq!(body["description"], "Updated description");
@@ -138,11 +145,17 @@ async fn test_delete_project() {
     let project_id = created["id"].as_str().unwrap();
 
     // Delete the project
-    let response = daemon.delete(&format!("/api/v1/projects/{}", project_id)).await.unwrap();
+    let response = daemon
+        .delete(&format!("/api/v1/projects/{}", project_id))
+        .await
+        .unwrap();
     assert_eq!(response.status(), 200);
 
     // Verify deletion
-    let get_response = daemon.get(&format!("/api/v1/projects/{}", project_id)).await.unwrap();
+    let get_response = daemon
+        .get(&format!("/api/v1/projects/{}", project_id))
+        .await
+        .unwrap();
     assert_eq!(get_response.status(), 404);
 }
 
@@ -163,7 +176,13 @@ async fn test_activate_project() {
     let project_id = created["id"].as_str().unwrap();
 
     // Activate the project
-    let response = daemon.post(&format!("/api/v1/projects/{}/activate", project_id), json!({})).await.unwrap();
+    let response = daemon
+        .post(
+            &format!("/api/v1/projects/{}/activate", project_id),
+            json!({}),
+        )
+        .await
+        .unwrap();
     assert_eq!(response.status(), 200);
 }
 
@@ -184,7 +203,10 @@ async fn test_get_project_status() {
     let project_id = created["id"].as_str().unwrap();
 
     // Get project status
-    let response = daemon.get(&format!("/api/v1/projects/{}/status", project_id)).await.unwrap();
+    let response = daemon
+        .get(&format!("/api/v1/projects/{}/status", project_id))
+        .await
+        .unwrap();
     assert_eq!(response.status(), 200);
 
     let body: serde_json::Value = response.json().await.unwrap();

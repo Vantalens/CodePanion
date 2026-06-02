@@ -131,8 +131,8 @@ where
         let chat_request = ChatRequest {
             backend: request.backend.clone(),
             messages: messages.clone(),
-            api_key: None, // API key 从 backend 配置中获取
-            cancel: codepanion_model_client::CancellationToken::default(),
+            api_key: request.backend.api_key.clone(),
+            cancel: codepanion_model_client::CancellationToken::from_flag(request.cancel.clone()),
             stream: false,
         };
 
@@ -375,6 +375,7 @@ mod tests {
             id: "test".to_string(),
             base_url,
             model: "test-model".to_string(),
+            api_key: None,
         }
     }
 
@@ -461,6 +462,7 @@ mod tests {
             id: "test".to_string(),
             base_url: "http://127.0.0.1:11434/v1".to_string(),
             model: "qwen".to_string(),
+            api_key: None,
         };
 
         let request = AgentLoopRequest::new(backend.clone(), "implement feature")

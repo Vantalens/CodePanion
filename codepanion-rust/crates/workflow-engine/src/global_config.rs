@@ -187,6 +187,17 @@ impl GlobalConfigManager {
         }
     }
 
+    /// Get role-specific model binding (resolved).
+    pub fn get_role_model(&self, role: &str) -> Result<Option<String>> {
+        let config = self.load()?;
+        let alias = format!("role:{}", role.trim());
+        if let Some(model) = config.model_aliases.get(&alias) {
+            Ok(Some(self.resolve_model_alias(model)?))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Load configuration with environment variable overrides applied
     /// Priority: env vars > file config > defaults
     pub fn load_resolved(&self) -> Result<ResolvedConfig> {
@@ -382,6 +393,17 @@ mod tests {
 
         let default = manager.get_default_model().unwrap();
         assert_eq!(default, Some("claude-sonnet-4-20250514".to_string()));
+    }
+
+    #[test]
+    fn test_get_role_model() {
+        let (_dir, manager) = temp_config();
+
+        manager.set_model_alias("role:coder", "sonnet").unwrap();
+
+        let role_model = manager.get_role_model("coder").unwrap();
+        assert_eq!(role_model, Some("claude-sonnet-4-20250514".to_string()));
+        assert_eq!(manager.get_role_model("reviewer").unwrap(), None);
     }
 
     #[test]

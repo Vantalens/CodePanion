@@ -70,3 +70,5 @@ logs/
 # Assets (optional - uncomment if you don't want to commit)
 # packages/gui/Assets/*.wav
 # packages/gui/Assets/*.ico
+.claude/settings.json
+.claude/settings.local.json

@@ -1,10 +1,7 @@
-use std::path::PathBuf;
-
 #[path = "integration/mod.rs"]
 mod integration;
 
 use integration::test_helpers::TestDaemon;
-use serde_json::json;
 
 // ============================================================================
 // Workflow API Tests (Legacy endpoints)
@@ -87,7 +84,10 @@ async fn test_list_running_runs() {
 async fn test_list_completed_runs() {
     let daemon = TestDaemon::start().await;
 
-    let response = daemon.get("/api/v1/scheduler/runs/completed").await.unwrap();
+    let response = daemon
+        .get("/api/v1/scheduler/runs/completed")
+        .await
+        .unwrap();
     assert_eq!(response.status(), 200);
 
     let body: serde_json::Value = response.json().await.unwrap();

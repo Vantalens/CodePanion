@@ -47,6 +47,12 @@ function sendToHost(message) {
     }
 }
 
+window.codexApp = {
+    sendToHost,
+    state,
+};
+window.sendToHost = sendToHost;
+
 function generateId() {
     return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -665,7 +671,7 @@ function handleMessage(message) {
             break;
         case 'models':
             if (typeof window.applyModels === 'function') {
-                window.applyModels(message.models);
+                window.applyModels(message.models, message.defaultModel, message.roleBindings);
             }
             break;
         case 'provider-test-result':

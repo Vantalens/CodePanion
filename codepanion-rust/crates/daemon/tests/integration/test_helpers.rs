@@ -5,11 +5,9 @@ use serde_json::Value;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::time::sleep;
-use std::sync::Arc;
 
 /// Test daemon instance
 pub struct TestDaemon {
-    pub port: u16,
     pub base_url: String,
     pub client: Client,
     pub temp_dir: PathBuf,
@@ -20,7 +18,7 @@ impl TestDaemon {
     /// Start a test daemon instance
     pub async fn start() -> Self {
         let port = Self::find_free_port();
-        let temp_dir = tempfile::tempdir().unwrap().into_path();
+        let temp_dir = tempfile::tempdir().unwrap().keep();
 
         let projects_path = temp_dir.join("projects.json");
         let providers_path = temp_dir.join("providers.json");
@@ -46,14 +44,18 @@ impl TestDaemon {
             .unwrap();
 
         for _ in 0..20 {
-            if client.get(&format!("{}/health", base_url)).send().await.is_ok() {
+            if client
+                .get(format!("{}/health", base_url))
+                .send()
+                .await
+                .is_ok()
+            {
                 break;
             }
             sleep(Duration::from_millis(100)).await;
         }
 
         Self {
-            port,
             base_url,
             client,
             temp_dir,
@@ -69,39 +71,50 @@ impl TestDaemon {
     }
 
     /// GET request
+    #[allow(dead_code)]
     pub async fn get(&self, path: &str) -> reqwest::Result<Response> {
-        self.client.get(&format!("{}{}", self.base_url, path)).send().await
+        self.client
+            .get(format!("{}{}", self.base_url, path))
+            .send()
+            .await
     }
 
     /// POST request with JSON body
+    #[allow(dead_code)]
     pub async fn post(&self, path: &str, body: Value) -> reqwest::Result<Response> {
         self.client
-            .post(&format!("{}{}", self.base_url, path))
+            .post(format!("{}{}", self.base_url, path))
             .json(&body)
             .send()
             .await
     }
 
     /// PUT request with JSON body
+    #[allow(dead_code)]
     pub async fn put(&self, path: &str, body: Value) -> reqwest::Result<Response> {
         self.client
-            .put(&format!("{}{}", self.base_url, path))
+            .put(format!("{}{}", self.base_url, path))
             .json(&body)
             .send()
             .await
     }
 
     /// DELETE request
+    #[allow(dead_code)]
     pub async fn delete(&self, path: &str) -> reqwest::Result<Response> {
         self.client
-            .delete(&format!("{}{}", self.base_url, path))
+            .delete(format!("{}{}", self.base_url, path))
             .send()
             .await
     }
 
     /// Health check
+    #[allow(dead_code)]
     pub async fn health(&self) -> bool {
-        self.get("/health").await.map(|r| r.status().is_success()).unwrap_or(false)
+        self.get("/health")
+            .await
+            .map(|r| r.status().is_success())
+            .unwrap_or(false)
     }
 }
 

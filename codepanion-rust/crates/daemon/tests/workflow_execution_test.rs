@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 #[path = "integration/mod.rs"]
 mod integration;
 
@@ -30,7 +28,7 @@ async fn test_execute_simple_shell_workflow() {
     let project_id = project_data["id"].as_str().unwrap();
 
     // Define a simple shell workflow
-    let workflow_def = json!({
+    let _workflow_def = json!({
         "id": "test-shell-workflow",
         "name": "Test Shell Workflow",
         "steps": [
@@ -50,7 +48,10 @@ async fn test_execute_simple_shell_workflow() {
         "priority": "normal"
     });
 
-    let response = daemon.post("/api/v1/scheduler/enqueue", enqueue_request).await.unwrap();
+    let response = daemon
+        .post("/api/v1/scheduler/enqueue", enqueue_request)
+        .await
+        .unwrap();
     assert_eq!(response.status(), 200);
 
     // Wait for execution to complete
@@ -89,7 +90,10 @@ async fn test_workflow_with_artifacts() {
         "priority": "normal"
     });
 
-    let response = daemon.post("/api/v1/scheduler/enqueue", enqueue_request).await.unwrap();
+    let response = daemon
+        .post("/api/v1/scheduler/enqueue", enqueue_request)
+        .await
+        .unwrap();
     assert_eq!(response.status(), 200);
 
     // Wait for execution

@@ -3,15 +3,19 @@
 
 // ── 项目数据管理 ──
 function requestProjects() {
-    sendToHost({ type: 'request-projects' });
+    window.codexApp?.sendToHost({ type: 'request-projects' });
 }
 
 function applyProjects(projects) {
+    const state = window.codexApp?.state;
+    if (!state) return;
     state.projects = Array.isArray(projects) ? projects : [];
     renderProjectSelector();
 }
 
 function renderProjectSelector() {
+    const state = window.codexApp?.state;
+    if (!state) return;
     const select = document.getElementById('project-select');
     if (!select) return;
 
@@ -36,6 +40,10 @@ function renderProjectSelector() {
 }
 
 function switchProject(projectId) {
+    const state = window.codexApp?.state;
+    if (!state) return;
+    state.projectStates = state.projectStates || new Map();
+    state.runs = state.runs || new Map();
     // 保存当前项目状态
     if (state.currentProjectId) {
         state.projectStates.set(state.currentProjectId, {
@@ -59,14 +67,14 @@ function switchProject(projectId) {
     // 清空当前数据，重新加载
     state.selectedGate = null;
     state.runs.clear();
-    renderTimeline();
-    renderGatePanel();
-    renderDeliveryControls();
-    requestBoard();
+    if (typeof renderTimeline === 'function') renderTimeline();
+    if (typeof renderGatePanel === 'function') renderGatePanel();
+    if (typeof renderDeliveryControls === 'function') renderDeliveryControls();
+    if (typeof requestBoard === 'function') requestBoard();
 
     // 激活项目（更新 lastActiveAt）
     if (projectId) {
-        sendToHost({ type: 'activate-project', projectId });
+        window.codexApp?.sendToHost({ type: 'activate-project', projectId });
     }
 }
 
@@ -88,6 +96,8 @@ function closeProjectDialog() {
 }
 
 function renderProjectList() {
+    const state = window.codexApp?.state;
+    if (!state) return;
     const list = document.getElementById('project-list');
     const searchInput = document.getElementById('project-search');
     if (!list) return;
@@ -234,7 +244,7 @@ function submitProjectForm(event) {
 
     if (id) {
         // 更新项目
-        sendToHost({
+        window.codexApp?.sendToHost({
             type: 'update-project',
             projectId: id,
             name,
@@ -243,7 +253,7 @@ function submitProjectForm(event) {
         });
     } else {
         // 创建项目
-        sendToHost({
+        window.codexApp?.sendToHost({
             type: 'create-project',
             name,
             path,
@@ -259,7 +269,9 @@ function deleteProject(project) {
         return;
     }
 
-    sendToHost({ type: 'delete-project', projectId: project.id });
+    const state = window.codexApp?.state;
+    if (!state) return;
+    window.codexApp?.sendToHost({ type: 'delete-project', projectId: project.id });
 
     // 如果删除的是当前项目，切换到全局
     if (project.id === state.currentProjectId) {
@@ -314,7 +326,7 @@ function initProjectManagement() {
     // 项目表单关闭
     const formClose = document.getElementById('project-form-close');
     if (formClose) {
-        formClose.addEventListener('click', closeProjectForm');
+        formClose.addEventListener('click', closeProjectForm);
     }
 
     // 项目表单取消
@@ -350,6 +362,7 @@ function initProjectManagement() {
 
 // 导出给宿主调用的函数（通过 window）
 window.applyProjects = applyProjects;
+window.openProjectForm = openProjectForm;
 window.projectOperationResult = function(success, message) {
     if (success) {
         // 操作成功，刷新项目列表

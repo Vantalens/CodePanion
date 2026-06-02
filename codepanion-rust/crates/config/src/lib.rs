@@ -5,6 +5,7 @@ pub struct ModelBackendConfig {
     pub id: String,
     pub base_url: String,
     pub model: String,
+    pub api_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -59,6 +60,7 @@ mod tests {
                 id: "default".to_string(),
                 base_url: "http://localhost:11434/v1".to_string(),
                 model: "qwen".to_string(),
+                api_key: None,
             }],
             providers: vec![provider],
         };

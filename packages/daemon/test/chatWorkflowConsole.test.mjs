@@ -11,12 +11,32 @@ import { JSDOM } from 'jsdom';
 // window.CODEPANION.__test 暴露的内部函数断言控制台的核心渲染与消息处理逻辑。
 
 const here = dirname(fileURLToPath(import.meta.url));
+const projectsSource = readFileSync(resolve(here, '../../gui/wwwroot/projects.js'), 'utf8');
+const settingsSource = readFileSync(resolve(here, '../../gui/wwwroot/settings.js'), 'utf8');
 const chatSource = readFileSync(resolve(here, '../../gui/wwwroot/chat.js'), 'utf8');
 
 // 构造一份和重建后 chat.html 对齐的最小 DOM；缺任何 id 都会让对应 render 静默跳过。
 const SHELL = `<!doctype html><html><body>
   <div id="app-shell">
     <span class="status-dot"></span><span class="status-text"></span>
+    <button id="settings-btn"></button>
+    <select id="project-select"></select><div id="project-dialog" hidden><div id="project-list"></div><input id="project-search"></div>
+    <button id="project-manage"></button><button id="project-add"></button><button id="project-refresh"></button>
+    <div id="project-form-dialog" hidden><form id="project-form">
+      <input id="project-form-id"><input id="project-form-name"><input id="project-form-path"><textarea id="project-form-description"></textarea>
+      <button id="project-form-close"></button><button id="project-form-cancel"></button>
+    </form></div>
+    <div id="settings-dialog" hidden>
+      <button class="settings-tab active" data-tab="providers"></button><button class="settings-tab" data-tab="models"></button>
+      <section id="settings-providers"><button id="provider-add"></button><div id="provider-list"></div></section>
+      <section id="settings-models" hidden><div id="model-config-container"></div></section>
+    </div>
+    <div id="provider-form-dialog" hidden><form id="provider-form">
+      <h3 id="provider-form-title"></h3>
+      <input id="provider-form-id"><input id="provider-form-name"><select id="provider-form-type"><option value="openai">OpenAI</option><option value="deepseek">DeepSeek</option></select>
+      <input id="provider-form-apikey"><input id="provider-form-apibase">
+      <button id="provider-form-close"></button><button id="provider-form-cancel"></button>
+    </form></div>
     <input id="workspace-input"><datalist id="workspace-recents"></datalist>
     <button id="workspace-apply"></button><button id="workspace-clear"></button>
     <div id="def-list"></div><div id="runs-list"></div><div id="gates-list"></div>
@@ -38,7 +58,10 @@ function loadConsole() {
   const sent = [];
   // 桩掉 WebView2 bridge：捕获 sendToHost 发出的消息，并提供 addEventListener no-op。
   dom.window.chrome = { webview: { postMessage: (m) => sent.push(m), addEventListener: () => {} } };
+  dom.window.confirm = () => true;
   dom.window.CODEPANION_TEST = true;
+  dom.window.eval(projectsSource);
+  dom.window.eval(settingsSource);
   dom.window.eval(chatSource);
   // jsdom 在 eval 时 readyState 常为 'loading'，chat.js 会挂 DOMContentLoaded 监听而非立即 initApp；
   // 主动派发一次确保 initApp 跑过（若已跑过则无监听，此派发为 no-op）。
@@ -170,4 +193,78 @@ test('handleMessage 路由 connection-status 与 workflow-board', () => {
   assert.equal(document.querySelector('.status-text').textContent, '已连接');
   handleMessage({ type: 'workflow-board', board: { workflows: [], runs: [], gates: [] } });
   assert.match(document.getElementById('board-status').textContent, /workflows=0/);
+});
+
+test('chat console exposes codexApp so shared project and provider modules render', () => {
+  const { handleMessage, document, sent } = loadConsole();
+
+  assert.ok(sent.some((m) => m.type === 'request-projects'), '项目模块初始化应请求项目列表');
+  document.getElementById('settings-btn').click();
+  assert.ok(sent.some((m) => m.type === 'request-providers'), 'Provider 模块初始化应请求 provider 列表');
+  document.querySelector('.settings-tab[data-tab="models"]').click();
+  assert.ok(sent.some((m) => m.type === 'request-models'), 'Provider 模块初始化应请求模型列表');
+
+  handleMessage({
+    type: 'projects',
+    projects: [{ id: 'p1', name: 'Alpha', path: 'D:\\Alpha', active: true }],
+  });
+  assert.match(document.getElementById('project-select').textContent, /Alpha/);
+  document.getElementById('project-manage').click();
+  assert.match(document.getElementById('project-list').textContent, /Alpha/);
+
+  handleMessage({
+    type: 'providers',
+    providers: [{
+      id: 'openai',
+      name: 'OpenAI',
+      type: 'openai',
+      status: 'active',
+      config: { baseUrl: 'https://api.openai.com/v1' },
+    }],
+  });
+  assert.match(document.getElementById('provider-list').textContent, /OpenAI/);
+
+  handleMessage({
+    type: 'models',
+    models: [{
+      id: 'provider:openai:model:gpt-test',
+      modelId: 'gpt-test',
+      providerId: 'openai',
+      name: 'GPT Test',
+      provider: 'openai',
+    }],
+  });
+  assert.match(document.getElementById('model-config-container').textContent, /GPT Test/);
+});
+
+test('provider edit only sends changed fields to avoid resetting default model', () => {
+  const { handleMessage, document, sent } = loadConsole();
+  handleMessage({
+    type: 'providers',
+    providers: [{
+      id: 'deepseek',
+      name: 'DeepSeek',
+      type: 'deepseek',
+      status: 'active',
+      config: {
+        apiKey: 'sk-existing',
+        baseUrl: 'https://api.deepseek.com',
+        defaultModel: 'custom-deepseek-model',
+      },
+    }],
+  });
+
+  const editButton = Array.from(document.querySelectorAll('#provider-list .provider-actions button'))
+    .find((button) => button.textContent.includes('编辑'));
+  editButton.click();
+  document.getElementById('provider-form-name').value = 'DeepSeek Renamed';
+  document.getElementById('provider-form').dispatchEvent(new document.defaultView.Event('submit', { bubbles: true, cancelable: true }));
+
+  const update = sent.findLast((m) => m.type === 'update-provider');
+  assert.ok(update, '应当发 update-provider');
+  assert.equal(update.providerId, 'deepseek');
+  assert.equal(update.name, 'DeepSeek Renamed');
+  assert.equal(Object.hasOwn(update, 'providerType'), false);
+  assert.equal(Object.hasOwn(update, 'apiKey'), false);
+  assert.equal(Object.hasOwn(update, 'apiBase'), false);
 });

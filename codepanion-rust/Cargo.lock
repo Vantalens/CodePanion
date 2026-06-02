@@ -285,6 +285,7 @@ version = "0.1.0"
 dependencies = [
  "codepanion-config",
  "codepanion-shared",
+ "reqwest",
  "serde_json",
 ]
 
@@ -1267,7 +1268,9 @@ dependencies = [
  "base64",
  "bytes",
  "encoding_rs",
+ "futures-channel",
  "futures-core",
+ "futures-util",
  "h2",
  "http",
  "http-body",

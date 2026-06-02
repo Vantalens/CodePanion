@@ -16,6 +16,7 @@ fn current_timestamp() -> u64 {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ProviderType {
+    #[serde(alias = "openai_compatible", alias = "openai-compatible")]
     OpenAI,
     Anthropic,
     DeepSeek,
@@ -65,10 +66,20 @@ pub struct ModelPricing {
 pub struct ModelInfo {
     pub id: String,
     pub name: String,
+    #[serde(default = "default_context_window")]
     pub context_window: u64,
+    #[serde(default = "default_max_output_tokens")]
     pub max_output_tokens: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pricing: Option<ModelPricing>,
+}
+
+fn default_context_window() -> u64 {
+    128_000
+}
+
+fn default_max_output_tokens() -> u64 {
+    4_096
 }
 
 /// Provider configuration

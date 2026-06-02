@@ -28,10 +28,13 @@ namespace CodePanion.Gui
         // W-20 重建：webview 已改为工作流控制台，旧监听态输入（reply/event-reply/task-action/
         // handoff-launch）的发送方已随旧 UI 一并删除，故从白名单移除。保留中性 ready/open-external，
         // 其余全部是工作流控制台请求。
+        // CODEX: 新增 reply 用于对话式界面发送用户消息。
         private static readonly HashSet<string> AllowedWebMessageTypes = new HashSet<string>
         {
             "ready",
             "open-external",
+            "reply",  // Codex 对话界面
+            "create-session",
             "request-workflow-board",
             "request-workflow-run",
             "request-workflow-launch",
@@ -174,6 +177,7 @@ namespace CodePanion.Gui
                     wwwrootPath,
                     CoreWebView2HostResourceAccessKind.Allow
                 );
+                // 默认进入当前可执行的工作流控制台；codex.html 保留为实验性对话界面。
                 ChatWebView.CoreWebView2.Navigate("https://codepanion.local/chat.html");
             }
             catch (Exception ex)
@@ -247,6 +251,39 @@ namespace CodePanion.Gui
                         // 不再调用，控制台自己按需拉 /workflow/board。
                         SendMessageToWeb(new { type = "connection-status", connected = _isConnected });
                         break;
+
+                    // CODEX: 用户在对话界面发送消息
+                    case "reply":
+                    {
+                        var sessionId = message["sessionId"]?.Value<string>();
+                        var value = message["value"]?.Value<string>();
+                        var mode = message["mode"]?.Value<string>() ?? "text";
+                        if (!string.IsNullOrWhiteSpace(sessionId) && !string.IsNullOrWhiteSpace(value))
+                        {
+                            HandleUserReply(sessionId, value, mode);
+                        }
+                        else
+                        {
+                            AddLog("丢弃 reply：sessionId 或 value 缺失");
+                        }
+                        break;
+                    }
+
+                    case "create-session":
+                    {
+                        var sessionId = message["sessionId"]?.Value<string>();
+                        var initialMessage = message["initialMessage"]?.Value<string>();
+                        AddLog($"拒绝 create-session：监听式会话创建接口已下线，sessionId={sessionId ?? "<empty>"}");
+                        SendMessageToWeb(new
+                        {
+                            type = "session-error",
+                            sessionId = sessionId ?? "",
+                            message = string.IsNullOrWhiteSpace(initialMessage)
+                                ? "对话式会话创建接口已下线；请使用工作流控制台启动 workflow。"
+                                : "对话式会话创建接口已下线；请使用工作流控制台启动 workflow，或把这条请求写入 workflow 步骤。"
+                        });
+                        break;
+                    }
 
                     // J-09：前端 click 拦截后把外链 href 转给 host 端，统一走 OpenExternalLink
                     // （仍复用 N-19 弹确认 + http(s) 白名单的兜底逻辑）。
@@ -1434,12 +1471,40 @@ namespace CodePanion.Gui
             }
         }
 
+        private static string DefaultModelForProvider(string providerType)
+        {
+            return providerType switch
+            {
+                "openai" => "gpt-4o-mini",
+                "anthropic" => "claude-3-5-sonnet-latest",
+                "deepseek" => "deepseek-chat",
+                "openrouter" => "openai/gpt-4o-mini",
+                "ollama" => "llama3.1",
+                "azure-openai" => "gpt-4o-mini",
+                "gemini" => "gemini-1.5-flash",
+                "qwen" => "qwen-plus",
+                "glm" => "glm-4-flash",
+                _ => "default"
+            };
+        }
+
         private async System.Threading.Tasks.Task HandleCreateProviderAsync(string name, string providerType, string apiKey, string? apiBase)
         {
             try
             {
                 var url = $"{_daemonClient.DaemonUrl}/api/v1/providers";
-                var payload = new { name, provider_type = providerType, api_key = apiKey, api_base = apiBase ?? "" };
+                var config = new JObject
+                {
+                    ["apiKey"] = apiKey,
+                    ["baseUrl"] = apiBase ?? "",
+                    ["defaultModel"] = DefaultModelForProvider(providerType)
+                };
+                var payload = new JObject
+                {
+                    ["name"] = name,
+                    ["type"] = providerType,
+                    ["config"] = config
+                };
                 var json = JsonConvert.SerializeObject(payload);
                 var httpContent = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
 
@@ -1467,7 +1532,29 @@ namespace CodePanion.Gui
             try
             {
                 var url = $"{_daemonClient.DaemonUrl}/api/v1/providers/{providerId}";
-                var payload = new { name, provider_type = providerType, api_key = apiKey, api_base = apiBase };
+                var payload = new JObject
+                {
+                    ["name"] = name
+                };
+                if (!string.IsNullOrWhiteSpace(providerType))
+                {
+                    payload["type"] = providerType;
+                }
+
+                var config = new JObject();
+                if (!string.IsNullOrWhiteSpace(apiKey))
+                {
+                    config["apiKey"] = apiKey;
+                }
+                if (apiBase != null)
+                {
+                    config["baseUrl"] = apiBase;
+                }
+                if (config.HasValues)
+                {
+                    payload["config"] = config;
+                }
+
                 var json = JsonConvert.SerializeObject(payload);
                 var httpContent = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
 
@@ -1578,7 +1665,13 @@ namespace CodePanion.Gui
                 {
                     var data = JObject.Parse(content);
                     var models = data["models"];
-                    SendMessageToWeb(new { type = "models", models });
+                    SendMessageToWeb(new
+                    {
+                        type = "models",
+                        models,
+                        defaultModel = data["defaultModel"],
+                        roleBindings = data["roleBindings"]
+                    });
                     AddLog($"已加载 {models?.Count() ?? 0} 个模型");
                 }
                 else
