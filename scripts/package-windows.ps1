@@ -231,8 +231,16 @@ function Remove-PortableDevelopmentFiles {
 
 Set-Location -LiteralPath $root
 
-Write-Host "[1/5] Building daemon bundle..."
-npm run build
+Write-Host "[1/5] Building Rust daemon and CLI..."
+Push-Location -LiteralPath (Join-Path $root "codepanion-rust")
+try {
+    cargo build --release --bin codepanion-daemon --bin codepanion
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+} finally {
+    Pop-Location
+}
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
@@ -258,32 +266,20 @@ Get-ChildItem -LiteralPath $publishDir -Force | ForEach-Object {
     Copy-Item -LiteralPath $_.FullName -Destination $destination -Recurse -Force
 }
 
-$runtimeDir = Join-Path $distDir "runtime"
-New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
-$nodePath = Resolve-NodePath
-$nodeInfo = Assert-NodeRuntime -NodePath $nodePath
-$packagedNodePath = Join-Path $runtimeDir "node.exe"
-Copy-Item -LiteralPath $nodePath -Destination $packagedNodePath -Force
-Assert-NodeRuntime -NodePath $packagedNodePath | Out-Null
-Write-Host "[package] Node runtime: $($nodeInfo.Version), SHA256=$($nodeInfo.Sha256)"
-
-# S-2：daemon.cjs 旁的 daemon/ 目录被 dotnet publish 拷过来（含 daemon.cjs），现在补上 external
-# 依赖。FindDaemonEntry 已经认准 baseDir/daemon/daemon.cjs，所以 node_modules 放在
-# daemon/node_modules 下即可被 Node require 解析命中（向上查找规则）。
 $daemonRuntimeDir = Join-Path $distDir "daemon"
-if (Test-Path -LiteralPath $daemonRuntimeDir) {
-    Copy-DaemonRuntimeDependencies -DaemonRuntimeDir $daemonRuntimeDir -RepoRoot $root -RuntimeIdentifier $RuntimeIdentifier
-} else {
-    Write-Warning "daemon/ subdirectory missing in publish output; skipping runtime dep copy. Investigate csproj layout."
-}
+New-Item -ItemType Directory -Path $daemonRuntimeDir -Force | Out-Null
+$rustReleaseDir = Join-Path $root "codepanion-rust\target\release"
+Copy-Item -LiteralPath (Join-Path $rustReleaseDir "codepanion-daemon.exe") -Destination (Join-Path $daemonRuntimeDir "codepanion-daemon.exe") -Force
+Copy-Item -LiteralPath (Join-Path $rustReleaseDir "codepanion.exe") -Destination (Join-Path $distDir "codepanion.exe") -Force
+Write-Host "[package] Rust daemon copied to $daemonRuntimeDir"
 
 $readmePath = Join-Path $distDir "README_START.txt"
 @(
     "CodePanion Portable Build (Windows Alpha)",
     "",
     "Start: double-click CodePanion.Gui.exe.",
-    "The GUI starts the local daemon automatically. No separate Node.js or npm install is required for end users.",
-    "Keep all files inside this directory tree. The GUI, daemon bundle, and packaged Node runtime must stay together.",
+    "The GUI starts the local Rust daemon automatically. No separate Node.js or npm install is required for end users.",
+    "Keep all files inside this directory tree. The GUI and Rust daemon binaries must stay together.",
     "",
     "Logs and local config are written to %USERPROFILE%\\.codepanion\\ for the current Windows user.",
     "Uninstall: close the GUI and remove this directory."

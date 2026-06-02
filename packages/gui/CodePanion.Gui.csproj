@@ -28,11 +28,6 @@
     <Version>0.0.0</Version>
   </PropertyGroup>
 
-  <Target Name="BuildDaemonBundle" BeforeTargets="BeforeBuild">
-    <Message Text="Building daemon bundle for GUI output..." Importance="High" />
-    <Exec WorkingDirectory="$(MSBuildThisFileDirectory)..\.." Command="npm run build:daemon-bundle" />
-  </Target>
-
   <ItemGroup>
     <Compile Remove="obj\**\*.cs;bin\**\*.cs" />
     <EmbeddedResource Remove="obj\**\*;bin\**\*" />
@@ -58,7 +53,6 @@
     <None Include="Assets\**\*" Exclude="Assets\**\README.md;Assets\**\*-source.*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Include="..\daemon\bundle\daemon.cjs" Link="daemon\daemon.cjs" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

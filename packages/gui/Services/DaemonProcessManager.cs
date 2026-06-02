@@ -25,19 +25,31 @@ namespace CodePanion.Gui.Services
         {
             if (await IsHealthyAsync(daemonUrl)) return true;
 
-            var daemonPath = FindDaemonEntry();
+            var daemonPath = FindRustDaemonEntry();
             if (daemonPath == null)
             {
-                log("未找到随软件发布的 daemon 文件，无法自动启动。");
-                return false;
+                if (!IsLegacyNodeFallbackEnabled())
+                {
+                    log("未找到 Rust daemon 文件，无法自动启动。");
+                    return false;
+                }
+
+                var legacyPath = FindLegacyNodeDaemonEntry();
+                if (legacyPath == null)
+                {
+                    log("未找到 Rust daemon 文件，且旧 Node daemon 回退入口不存在。");
+                    return false;
+                }
+
+                return await StartLegacyNodeDaemonAsync(legacyPath, daemonUrl, log);
             }
 
             try
             {
                 var startInfo = new ProcessStartInfo
                 {
-                    FileName = FindNodeExecutable(),
-                    Arguments = $"\"{daemonPath}\" --daemon",
+                    FileName = daemonPath,
+                    Arguments = $"--serve {GetDaemonPort(daemonUrl)}",
                     WorkingDirectory = Path.GetDirectoryName(daemonPath) ?? AppDomain.CurrentDomain.BaseDirectory,
                     UseShellExecute = false,
                     CreateNoWindow = true,
@@ -51,7 +63,7 @@ namespace CodePanion.Gui.Services
                     Interlocked.Exchange(ref _managedProcess, process)?.Dispose();
                     TryBindToJobObject(process, log);
                 }
-                log($"已在后台启动 daemon：PID={process?.Id}");
+                log($"已在后台启动 Rust daemon：PID={process?.Id}");
 
                 for (var i = 0; i < 40; i++)
                 {
@@ -59,12 +71,12 @@ namespace CodePanion.Gui.Services
                     if (await IsHealthyAsync(daemonUrl)) return true;
                 }
 
-                log("daemon 已启动但健康检查未及时通过。");
+                log("Rust daemon 已启动但健康检查未及时通过。");
                 return false;
             }
             catch (Exception ex)
             {
-                log($"自动启动 daemon 失败：{ex.Message}");
+                log($"自动启动 Rust daemon 失败：{ex.Message}");
                 return false;
             }
         }
@@ -121,7 +133,86 @@ namespace CodePanion.Gui.Services
             return "node.exe";
         }
 
-        private static string? FindDaemonEntry()
+        private static bool IsLegacyNodeFallbackEnabled()
+        {
+            var value = Environment.GetEnvironmentVariable("CODEPANION_ENABLE_LEGACY_NODE_DAEMON");
+            return string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static int GetDaemonPort(string daemonUrl)
+        {
+            if (Uri.TryCreate(daemonUrl, UriKind.Absolute, out var uri) && uri.Port > 0)
+            {
+                return uri.Port;
+            }
+            return 8318;
+        }
+
+        private static async Task<bool> StartLegacyNodeDaemonAsync(string daemonPath, string daemonUrl, Action<string> log)
+        {
+            try
+            {
+                var startInfo = new ProcessStartInfo
+                {
+                    FileName = FindNodeExecutable(),
+                    Arguments = $"\"{daemonPath}\" --daemon",
+                    WorkingDirectory = Path.GetDirectoryName(daemonPath) ?? AppDomain.CurrentDomain.BaseDirectory,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    WindowStyle = ProcessWindowStyle.Hidden,
+                };
+                startInfo.Environment["CODEPANION_STARTED_BY_GUI"] = "1";
+
+                var process = Process.Start(startInfo);
+                if (process != null)
+                {
+                    Interlocked.Exchange(ref _managedProcess, process)?.Dispose();
+                    TryBindToJobObject(process, log);
+                }
+                log($"已在后台启动旧 Node daemon：PID={process?.Id}");
+
+                for (var i = 0; i < 40; i++)
+                {
+                    await Task.Delay(250);
+                    if (await IsHealthyAsync(daemonUrl)) return true;
+                }
+
+                log("旧 Node daemon 已启动但健康检查未及时通过。");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                log($"自动启动旧 Node daemon 失败：{ex.Message}");
+                return false;
+            }
+        }
+
+        private static string? FindRustDaemonEntry()
+        {
+            var configured = Environment.GetEnvironmentVariable("CODEPANION_DAEMON_PATH");
+            if (!string.IsNullOrWhiteSpace(configured) && File.Exists(configured)) return configured;
+
+            var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            var bundled = Path.Combine(baseDir, "daemon", "codepanion-daemon.exe");
+            if (File.Exists(bundled)) return bundled;
+
+            var dir = new DirectoryInfo(baseDir);
+            while (dir != null)
+            {
+                var release = Path.Combine(dir.FullName, "codepanion-rust", "target", "release", "codepanion-daemon.exe");
+                if (File.Exists(release)) return release;
+
+                var debug = Path.Combine(dir.FullName, "codepanion-rust", "target", "debug", "codepanion-daemon.exe");
+                if (File.Exists(debug)) return debug;
+
+                dir = dir.Parent;
+            }
+
+            return null;
+        }
+
+        private static string? FindLegacyNodeDaemonEntry()
         {
             var baseDir = AppDomain.CurrentDomain.BaseDirectory;
             var bundled = Path.Combine(baseDir, "daemon", "daemon.cjs");

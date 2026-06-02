@@ -93,7 +93,7 @@ if (-not (Test-Path $cliPath)) {
 
     # 测试 provider list
     try {
-        $output = & $cliPath provider list 2>&1
+        $output = & $cliPath --api-url $DAEMON_URL provider list 2>&1
         if ($LASTEXITCODE -eq 0) {
             Write-Host "  ✓ provider list" -ForegroundColor Green
         } else {
@@ -105,7 +105,7 @@ if (-not (Test-Path $cliPath)) {
 
     # 测试 model list
     try {
-        $output = & $cliPath model list 2>&1
+        $output = & $cliPath --api-url $DAEMON_URL model list 2>&1
         if ($LASTEXITCODE -eq 0) {
             Write-Host "  ✓ model list" -ForegroundColor Green
         } else {

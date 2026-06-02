@@ -76,6 +76,63 @@
 ### GET /v1/models
 列出所有 provider 的所有模型（OpenAI 兼容格式）。
 
+## Model 与配置 API
+
+### GET /api/v1/models
+列出 GUI 使用的模型、默认模型和角色绑定。
+
+### POST /api/v1/models/default
+设置默认模型。
+
+请求：
+
+```json
+{
+  "modelId": "provider:openai:model:gpt-4o-mini"
+}
+```
+
+### POST /api/v1/models/role-binding
+设置或清除角色模型绑定。`modelId` 为空时清除该角色绑定。
+
+请求：
+
+```json
+{
+  "role": "reviewer",
+  "modelId": "provider:openai:model:gpt-4o-mini"
+}
+```
+
+### POST /api/v1/models/aliases
+设置通用模型别名。
+
+请求：
+
+```json
+{
+  "alias": "fast",
+  "modelId": "gpt-4o-mini"
+}
+```
+
+### DELETE /api/v1/models/aliases/:alias
+删除通用模型别名。
+
+### POST /api/v1/config/effort
+设置默认推理强度。`level` 必须是 `low`、`medium`、`high`、`xhigh` 或 `max`。
+
+请求：
+
+```json
+{
+  "level": "high"
+}
+```
+
+### POST /api/v1/config/import
+从 CC Switch 或 Claude Code 配置导入模型别名、环境变量和默认模型设置。
+
 ## Workflow API
 
 ### GET /workflow/board

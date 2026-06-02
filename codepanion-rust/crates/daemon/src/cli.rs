@@ -326,24 +326,18 @@ async fn handle_status_command(api_url: &str) -> Result<(), Box<dyn std::error::
 
     println!("Daemon status: {}", status);
 
-    // 如果 daemon 正在运行，尝试连接 API
-    if matches!(
-        status,
-        codepanion_daemon::daemon_manager::DaemonStatus::Running { .. }
-    ) {
-        let client = api_client();
-        let url = format!("{}/health", api_url);
+    let client = api_client();
+    let url = format!("{}/health", api_url);
 
-        match client.get(&url).send().await {
-            Ok(response) if response.status().is_success() => {
-                println!("API server: reachable at {}", api_url);
-            }
-            Ok(response) => {
-                println!("API server: unreachable (status: {})", response.status());
-            }
-            Err(e) => {
-                println!("API server: unreachable ({})", e);
-            }
+    match client.get(&url).send().await {
+        Ok(response) if response.status().is_success() => {
+            println!("API server: reachable at {}", api_url);
+        }
+        Ok(response) => {
+            println!("API server: unreachable (status: {})", response.status());
+        }
+        Err(e) => {
+            println!("API server: unreachable ({})", e);
         }
     }
 

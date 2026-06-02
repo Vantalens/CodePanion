@@ -6,8 +6,8 @@ $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
 $distDir = Join-Path $root "dist\CodePanion-$RuntimeIdentifier"
-$nodeModules = Join-Path $distDir "daemon\node_modules"
-$packagedNode = Join-Path $distDir "runtime\node.exe"
+$daemonExe = Join-Path $distDir "daemon\codepanion-daemon.exe"
+$cliExe = Join-Path $distDir "codepanion.exe"
 
 function Assert-PathExists {
     param([string]$Path)
@@ -20,42 +20,22 @@ function Assert-PathExists {
 $requiredPaths = @(
     (Join-Path $distDir "CodePanion.Gui.exe"),
     (Join-Path $distDir "README_START.txt"),
-    (Join-Path $distDir "daemon\daemon.cjs"),
-    $packagedNode,
-    $nodeModules
+    $daemonExe,
+    $cliExe
 )
 foreach ($path in $requiredPaths) {
     Assert-PathExists -Path $path
 }
 
-$allowedModules = @(
-    "node-pty",
-    "pino",
-    "sonic-boom",
-    "thread-stream",
-    "atomic-sleep",
-    "on-exit-leak-free",
-    "pino-abstract-transport",
-    "pino-std-serializers",
-    "process-warning",
-    "quick-format-unescaped",
-    "real-require",
-    "safe-stable-stringify",
-    "@pinojs\redact"
+$forbiddenRuntimePaths = @(
+    (Join-Path $distDir "daemon\daemon.cjs"),
+    (Join-Path $distDir "daemon\node_modules"),
+    (Join-Path $distDir "runtime\node.exe")
 )
-$actualModules = @()
-Get-ChildItem -LiteralPath $nodeModules -Directory -Force | ForEach-Object {
-    if ($_.Name.StartsWith("@")) {
-        Get-ChildItem -LiteralPath $_.FullName -Directory -Force | ForEach-Object {
-            $actualModules += (Join-Path $_.Parent.Name $_.Name)
-        }
-    } else {
-        $actualModules += $_.Name
+foreach ($path in $forbiddenRuntimePaths) {
+    if (Test-Path -LiteralPath $path) {
+        throw "Portable package still contains legacy Node daemon runtime path: $path"
     }
-}
-$unexpectedModules = @($actualModules | Where-Object { $allowedModules -notcontains $_ })
-if ($unexpectedModules.Count -gt 0) {
-    throw "Portable package contains unapproved runtime modules: $($unexpectedModules -join ', ')"
 }
 
 $forbiddenFiles = @(Get-ChildItem -LiteralPath $distDir -Recurse -File -Force |
@@ -68,33 +48,20 @@ if ($forbiddenFiles.Count -gt 0) {
     throw "Portable package contains development/debug files: $($forbiddenFiles[0].FullName)"
 }
 
-$forbiddenDirectories = @(Get-ChildItem -LiteralPath $nodeModules -Recurse -Directory -Force |
+$forbiddenDirectories = @(Get-ChildItem -LiteralPath $distDir -Recurse -Directory -Force |
     Where-Object { $_.Name -match "^(\.github|\.vscode|coverage|fixtures|scripts|test|tests|docs|example|examples|benchmark|benchmarks)$" })
 if ($forbiddenDirectories.Count -gt 0) {
     throw "Portable package contains development-only directories: $($forbiddenDirectories[0].FullName)"
 }
 
-$requiredPrebuild = switch ($RuntimeIdentifier) {
-    "win-x64"   { "win32-x64" }
-    "win-arm64" { "win32-arm64" }
-    default     { throw "Unsupported portable runtime identifier: $RuntimeIdentifier" }
-}
-$prebuildRoot = Join-Path $nodeModules "node-pty\prebuilds"
-Assert-PathExists -Path (Join-Path $prebuildRoot $requiredPrebuild)
-$unexpectedPrebuilds = @(Get-ChildItem -LiteralPath $prebuildRoot -Directory -Force |
-    Where-Object { $_.Name -ne $requiredPrebuild })
-if ($unexpectedPrebuilds.Count -gt 0) {
-    throw "Portable package contains native prebuilds for unsupported platforms: $($unexpectedPrebuilds.Name -join ', ')"
+& $daemonExe
+if ($LASTEXITCODE -ne 0) {
+    throw "Packaged Rust daemon failed to start in help/version mode."
 }
 
-Push-Location -LiteralPath $distDir
-try {
-    & $packagedNode -e "require('./daemon/node_modules/node-pty'); require('./daemon/node_modules/pino'); require('./daemon/node_modules/sonic-boom'); require('./daemon/node_modules/thread-stream'); console.log('portable runtime deps ok');"
-    if ($LASTEXITCODE -ne 0) {
-        throw "Packaged Node.js failed to load daemon runtime dependencies."
-    }
-} finally {
-    Pop-Location
+& $cliExe --help | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    throw "Packaged CodePanion CLI failed to print help."
 }
 
-Write-Host "[validate] Portable package allowlist and runtime probe passed: $distDir"
+Write-Host "[validate] Portable package Rust runtime probe passed: $distDir"
