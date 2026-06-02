@@ -1,12 +1,12 @@
 # CodePanion
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 **Local-first AI IDE and multi-agent coding workspace for developers.**
 
 CodePanion helps individual developers run autonomous AI development workflows across local projects. It connects your own model APIs, coding agents, local tools, workflow automation, human approval gates, and project artifacts into one observable desktop workspace.
 
 CodePanion is not another chat window and it is not a traditional code editor. It is a local AI development control layer for turning a product goal into planned, executed, tested, reviewed, and archived development work.
-
-[中文介绍](#中文介绍)
 
 ## Why CodePanion
 
@@ -156,28 +156,6 @@ CodePanion/
 ├── scripts/           # Build, packaging, and validation scripts
 └── README.md
 ```
-
-## 中文介绍
-
-CodePanion 是一个本地优先、供应商中立的 AI 开发工作台，面向希望在一台电脑上同时管理多个项目、多个 AI 编程工具和多条开发任务的个人开发者。
-
-它不是新的聊天窗口，也不是传统代码编辑器。CodePanion 的目标是把一次开发任务从“输入目标”推进到“计划、执行、测试、审查、产出归档”，并在需要人工判断的高风险操作前停下来让用户确认。
-
-### 核心能力
-
-- **本地优先**：项目配置、workflow 状态、运行产出、模型配置和任务记录围绕本地 workspace 管理。
-- **供应商中立**：用户自行配置模型 API，不内置模型、不转售 token、不锁定供应商。
-- **多 AI 角色分工**：Orchestrator、Planner、Builder、Tester、Reviewer、Docs Writer 可以绑定不同模型或外部工具。
-- **多项目 / 多任务并行**：在一个工作台中查看全局 runs、gates、队列、项目状态和任务产出。
-- **高风险操作门控**：删除文件、修改关键配置、危险命令、外部网络请求、git 历史改写等动作交给用户确认。
-- **外部 AI 编程工具接入**：Codex、Claude Code、OpenCode、CLI executor、API provider 和本地 agent harness 都可以作为 workflow 能力源。
-
-### 适合用户
-
-- 同时维护多个本地项目，希望集中查看任务进度、运行状态和待处理事项的开发者。
-- 已经在使用 Codex、Claude Code、OpenCode 或其他 AI 编程工具，希望把它们纳入同一个本地工作流的人。
-- 希望使用自己的模型 API，而不是被某个模型供应商或 token 分销方式绑定的用户。
-- 想要让 AI 自动拆解、实现、测试和审查开发任务，但仍保留关键操作确认权的个人开发者。
 
 ## License
 
