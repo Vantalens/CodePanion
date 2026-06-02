@@ -10,6 +10,12 @@ const state = {
     projects: [],               // 所有项目列表 { id, name, path, description, lastActiveAt, createdAt }
     currentProjectId: '',       // 当前选中项目 ID，空 = 全局
     projectStates: new Map(),   // 每个项目的状态快照 { selectedRunId, scrollPos }
+    // G-06: Provider 管理
+    providers: [],              // 所有 provider 列表
+    models: [],                 // 所有模型列表
+    activeProviderId: '',       // 当前激活的 provider ID
+    defaultModel: '',           // 默认模型 ID
+    roleBindings: {},           // 角色绑定 { architect: modelId, coder: modelId, ... }
     // 原有状态
     workspace: '',              // 当前 workspace 绝对路径，空 = daemon 全局 fallback（兼容）
     recentWorkspaces: [],       // 最近用过的 workspace（localStorage 持久化）（兼容）
@@ -590,6 +596,22 @@ function handleMessage(message) {
                 window.applyProjects(message.projects);
             }
             break;
+        // G-06: Provider 管理消息
+        case 'providers':
+            if (typeof window.applyProviders === 'function') {
+                window.applyProviders(message.providers);
+            }
+            break;
+        case 'models':
+            if (typeof window.applyModels === 'function') {
+                window.applyModels(message.models);
+            }
+            break;
+        case 'provider-test-result':
+            if (typeof window.applyProviderTestResult === 'function') {
+                window.applyProviderTestResult(message.providerId, message.success, message.message);
+            }
+            break;
         default:
             // 重建后控制台不再处理监听态消息；未知类型静默忽略。
             break;
@@ -630,6 +652,10 @@ function initApp() {
     // G-01: 初始化项目管理
     if (typeof initProjectManagement === 'function') {
         initProjectManagement();
+    }
+    // G-06: 初始化 Provider 管理
+    if (typeof initProviderManagement === 'function') {
+        initProviderManagement();
     }
     renderTimeline();
     renderGatePanel();

@@ -488,3 +488,152 @@ button { border: 0; }
     #console-body { grid-template-columns: 1fr; }
     #console-sidebar, #console-detail { display: none; }
 }
+
+/* ── G-06: Provider 设置 ── */
+.dialog-large {
+    width: 900px;
+}
+
+.settings-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 8px;
+}
+
+.settings-tab {
+    padding: 6px 16px;
+    background: transparent;
+    color: var(--muted);
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.settings-tab:hover {
+    color: var(--text);
+}
+
+.settings-tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+}
+
+.settings-content {
+    min-height: 400px;
+}
+
+/* Provider 列表 */
+.provider-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.provider-item {
+    background: var(--panel-soft);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+}
+
+.provider-item:hover {
+    border-color: var(--line-strong);
+}
+
+.provider-item.active {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+}
+
+.provider-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.provider-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.provider-name {
+    font-weight: 600;
+    color: var(--text);
+    font-size: 14px;
+}
+
+.provider-status {
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    background: var(--panel-strong);
+    color: var(--muted);
+}
+
+.provider-status.active {
+    background: var(--green);
+    color: var(--bg);
+}
+
+.provider-meta {
+    color: var(--muted-2);
+    font-size: 11px;
+    margin-bottom: 2px;
+}
+
+.provider-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.provider-actions .btn {
+    padding: 4px 10px;
+    font-size: 11px;
+}
+
+/* 模型配置 */
+.model-config-section {
+    margin-bottom: 20px;
+}
+
+.model-config-label {
+    display: block;
+    color: var(--muted);
+    font-size: 12px;
+    margin-bottom: 6px;
+    font-weight: 600;
+}
+
+.model-config-select {
+    width: 100%;
+    max-width: 400px;
+    background: var(--panel-soft);
+    color: var(--text);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    padding: 6px 10px;
+}
+
+.role-binding-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.role-binding-label {
+    width: 120px;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.role-binding-row .model-config-select {
+    flex: 1;
+}

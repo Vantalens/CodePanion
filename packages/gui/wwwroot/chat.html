@@ -23,6 +23,8 @@
                 <button id="project-manage" class="btn" type="button" title="管理项目">📁</button>
                 <button id="project-refresh" class="btn" type="button" title="刷新项目列表">🔄</button>
             </div>
+            <!-- G-06: 设置按钮 -->
+            <button id="settings-btn" class="btn" type="button" title="设置">⚙️</button>
             <div class="conn" title="本地 daemon 连接状态">
                 <span class="status-dot"></span>
                 <span class="status-text">未连接</span>
@@ -150,7 +152,77 @@
         </div>
     </div>
 
+    <!-- G-06: 设置对话框 -->
+    <div id="settings-dialog" class="dialog-overlay" hidden>
+        <div class="dialog-box dialog-large">
+            <header class="dialog-header">
+                <h3>设置</h3>
+                <button id="settings-dialog-close" class="dialog-close" type="button">×</button>
+            </header>
+            <div class="dialog-body">
+                <div class="settings-tabs">
+                    <button class="settings-tab active" data-tab="providers" type="button">Providers</button>
+                    <button class="settings-tab" data-tab="models" type="button">模型配置</button>
+                </div>
+
+                <!-- Providers 标签页 -->
+                <div id="settings-providers" class="settings-content">
+                    <div class="dialog-toolbar">
+                        <button id="provider-add" class="btn primary" type="button">+ 添加 Provider</button>
+                    </div>
+                    <div id="provider-list" class="provider-list"></div>
+                </div>
+
+                <!-- 模型配置标签页 -->
+                <div id="settings-models" class="settings-content" hidden>
+                    <div id="model-config-container"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- G-06: Provider 表单对话框 -->
+    <div id="provider-form-dialog" class="dialog-overlay" hidden>
+        <div class="dialog-box dialog-small">
+            <header class="dialog-header">
+                <h3 id="provider-form-title">添加 Provider</h3>
+                <button id="provider-form-close" class="dialog-close" type="button">×</button>
+            </header>
+            <div class="dialog-body">
+                <form id="provider-form">
+                    <input type="hidden" id="provider-form-id" value="">
+                    <div class="form-field">
+                        <label for="provider-form-name">Provider 名称 *</label>
+                        <input id="provider-form-name" type="text" required placeholder="例如：OpenAI">
+                    </div>
+                    <div class="form-field">
+                        <label for="provider-form-type">类型 *</label>
+                        <select id="provider-form-type" required>
+                            <option value="openai">OpenAI</option>
+                            <option value="anthropic">Anthropic</option>
+                            <option value="deepseek">DeepSeek</option>
+                            <option value="custom">Custom</option>
+                        </select>
+                    </div>
+                    <div class="form-field">
+                        <label for="provider-form-apikey">API Key *</label>
+                        <input id="provider-form-apikey" type="password" required placeholder="sk-...">
+                    </div>
+                    <div class="form-field">
+                        <label for="provider-form-apibase">API Base URL</label>
+                        <input id="provider-form-apibase" type="text" placeholder="https://api.openai.com/v1">
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn primary">保存</button>
+                        <button type="button" id="provider-form-cancel" class="btn">取消</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <script src="https://codepanion.local/projects.js"></script>
+    <script src="https://codepanion.local/settings.js"></script>
     <script src="https://codepanion.local/chat.js"></script>
 </body>
 </html>

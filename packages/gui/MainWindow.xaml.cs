@@ -45,6 +45,16 @@ namespace CodePanion.Gui
             "update-project",
             "delete-project",
             "activate-project",
+            // G-06: Provider 管理
+            "request-providers",
+            "create-provider",
+            "update-provider",
+            "delete-provider",
+            "test-provider",
+            "activate-provider",
+            "request-models",
+            "set-default-model",
+            "set-role-binding",
         };
 
         private readonly DaemonClient _daemonClient;
@@ -364,6 +374,86 @@ namespace CodePanion.Gui
                         if (string.IsNullOrWhiteSpace(projectId))
                         { AddLog("丢弃 activate-project：projectId 缺失"); break; }
                         _ = HandleActivateProjectAsync(projectId!);
+                        break;
+                    }
+
+                    // G-06: Provider 管理
+                    case "request-providers":
+                        _ = HandleRequestProvidersAsync();
+                        break;
+
+                    case "create-provider":
+                    {
+                        var name = message["name"]?.Value<string>();
+                        var providerType = message["providerType"]?.Value<string>();
+                        var apiKey = message["apiKey"]?.Value<string>();
+                        var apiBase = message["apiBase"]?.Value<string>();
+                        if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(providerType) || string.IsNullOrWhiteSpace(apiKey))
+                        { AddLog("丢弃 create-provider：name/providerType/apiKey 缺失"); break; }
+                        _ = HandleCreateProviderAsync(name!, providerType!, apiKey!, apiBase);
+                        break;
+                    }
+
+                    case "update-provider":
+                    {
+                        var providerId = message["providerId"]?.Value<string>();
+                        var name = message["name"]?.Value<string>();
+                        var providerType = message["providerType"]?.Value<string>();
+                        var apiKey = message["apiKey"]?.Value<string>();
+                        var apiBase = message["apiBase"]?.Value<string>();
+                        if (string.IsNullOrWhiteSpace(providerId) || string.IsNullOrWhiteSpace(name))
+                        { AddLog("丢弃 update-provider：providerId/name 缺失"); break; }
+                        _ = HandleUpdateProviderAsync(providerId!, name!, providerType, apiKey, apiBase);
+                        break;
+                    }
+
+                    case "delete-provider":
+                    {
+                        var providerId = message["providerId"]?.Value<string>();
+                        if (string.IsNullOrWhiteSpace(providerId))
+                        { AddLog("丢弃 delete-provider：providerId 缺失"); break; }
+                        _ = HandleDeleteProviderAsync(providerId!);
+                        break;
+                    }
+
+                    case "test-provider":
+                    {
+                        var providerId = message["providerId"]?.Value<string>();
+                        if (string.IsNullOrWhiteSpace(providerId))
+                        { AddLog("丢弃 test-provider：providerId 缺失"); break; }
+                        _ = HandleTestProviderAsync(providerId!);
+                        break;
+                    }
+
+                    case "activate-provider":
+                    {
+                        var providerId = message["providerId"]?.Value<string>();
+                        if (string.IsNullOrWhiteSpace(providerId))
+                        { AddLog("丢弃 activate-provider：providerId 缺失"); break; }
+                        _ = HandleActivateProviderAsync(providerId!);
+                        break;
+                    }
+
+                    case "request-models":
+                        _ = HandleRequestModelsAsync();
+                        break;
+
+                    case "set-default-model":
+                    {
+                        var modelId = message["modelId"]?.Value<string>();
+                        if (string.IsNullOrWhiteSpace(modelId))
+                        { AddLog("丢弃 set-default-model：modelId 缺失"); break; }
+                        _ = HandleSetDefaultModelAsync(modelId!);
+                        break;
+                    }
+
+                    case "set-role-binding":
+                    {
+                        var role = message["role"]?.Value<string>();
+                        var modelId = message["modelId"]?.Value<string>();
+                        if (string.IsNullOrWhiteSpace(role))
+                        { AddLog("丢弃 set-role-binding：role 缺失"); break; }
+                        _ = HandleSetRoleBindingAsync(role!, modelId);
                         break;
                     }
                 }
@@ -1279,6 +1369,247 @@ namespace CodePanion.Gui
             catch (Exception ex)
             {
                 AddLog($"激活项目异常：{ex.Message}");
+            }
+        }
+
+        // G-06: Provider 管理处理函数
+        private async System.Threading.Tasks.Task HandleRequestProvidersAsync()
+        {
+            try
+            {
+                var url = $"{_daemonClient.DaemonUrl}/api/v1/providers";
+                var response = await _daemonClient.HttpClient.GetAsync(url);
+                var content = await response.Content.ReadAsStringAsync();
+
+                if (response.IsSuccessStatusCode)
+                {
+                    var data = JObject.Parse(content);
+                    var providers = data["providers"];
+                    SendMessageToWeb(new { type = "providers", providers });
+                    AddLog($"已加载 {providers?.Count() ?? 0} 个 provider");
+                }
+                else
+                {
+                    AddLog($"获取 provider 列表失败：{response.StatusCode}");
+                    SendMessageToWeb(new { type = "providers", providers = new JArray() });
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"请求 provider 列表异常：{ex.Message}");
+                SendMessageToWeb(new { type = "providers", providers = new JArray() });
+            }
+        }
+
+        private async System.Threading.Tasks.Task HandleCreateProviderAsync(string name, string providerType, string apiKey, string? apiBase)
+        {
+            try
+            {
+                var url = $"{_daemonClient.DaemonUrl}/api/v1/providers";
+                var payload = new { name, provider_type = providerType, api_key = apiKey, api_base = apiBase ?? "" };
+                var json = JsonConvert.SerializeObject(payload);
+                var httpContent = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
+
+                var response = await _daemonClient.HttpClient.PostAsync(url, httpContent);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    AddLog($"Provider 已创建：{name}");
+                    await HandleRequestProvidersAsync();
+                }
+                else
+                {
+                    var content = await response.Content.ReadAsStringAsync();
+                    AddLog($"创建 provider 失败：{response.StatusCode} - {content}");
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"创建 provider 异常：{ex.Message}");
+            }
+        }
+
+        private async System.Threading.Tasks.Task HandleUpdateProviderAsync(string providerId, string name, string? providerType, string? apiKey, string? apiBase)
+        {
+            try
+            {
+                var url = $"{_daemonClient.DaemonUrl}/api/v1/providers/{providerId}";
+                var payload = new { name, provider_type = providerType, api_key = apiKey, api_base = apiBase };
+                var json = JsonConvert.SerializeObject(payload);
+                var httpContent = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
+
+                var response = await _daemonClient.HttpClient.PutAsync(url, httpContent);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    AddLog($"Provider 已更新：{name}");
+                    await HandleRequestProvidersAsync();
+                }
+                else
+                {
+                    var content = await response.Content.ReadAsStringAsync();
+                    AddLog($"更新 provider 失败：{response.StatusCode} - {content}");
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"更新 provider 异常：{ex.Message}");
+            }
+        }
+
+        private async System.Threading.Tasks.Task HandleDeleteProviderAsync(string providerId)
+        {
+            try
+            {
+                var url = $"{_daemonClient.DaemonUrl}/api/v1/providers/{providerId}";
+                var response = await _daemonClient.HttpClient.DeleteAsync(url);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    AddLog($"Provider 已删除：{providerId}");
+                    await HandleRequestProvidersAsync();
+                }
+                else
+                {
+                    var content = await response.Content.ReadAsStringAsync();
+                    AddLog($"删除 provider 失败：{response.StatusCode} - {content}");
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"删除 provider 异常：{ex.Message}");
+            }
+        }
+
+        private async System.Threading.Tasks.Task HandleTestProviderAsync(string providerId)
+        {
+            try
+            {
+                var url = $"{_daemonClient.DaemonUrl}/api/v1/providers/{providerId}/test";
+                var response = await _daemonClient.HttpClient.PostAsync(url, null);
+                var content = await response.Content.ReadAsStringAsync();
+
+                if (response.IsSuccessStatusCode)
+                {
+                    var data = JObject.Parse(content);
+                    var success = data["success"]?.Value<bool>() ?? false;
+                    var message = data["message"]?.Value<string>() ?? "测试完成";
+                    SendMessageToWeb(new { type = "provider-test-result", providerId, success, message });
+                    AddLog($"Provider 测试结果：{message}");
+                }
+                else
+                {
+                    SendMessageToWeb(new { type = "provider-test-result", providerId, success = false, message = $"测试失败：{response.StatusCode}" });
+                    AddLog($"Provider 测试失败：{response.StatusCode}");
+                }
+            }
+            catch (Exception ex)
+            {
+                SendMessageToWeb(new { type = "provider-test-result", providerId, success = false, message = ex.Message });
+                AddLog($"Provider 测试异常：{ex.Message}");
+            }
+        }
+
+        private async System.Threading.Tasks.Task HandleActivateProviderAsync(string providerId)
+        {
+            try
+            {
+                var url = $"{_daemonClient.DaemonUrl}/api/v1/providers/{providerId}/activate";
+                var response = await _daemonClient.HttpClient.PostAsync(url, null);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    AddLog($"Provider 已激活：{providerId}");
+                    await HandleRequestProvidersAsync();
+                }
+                else
+                {
+                    AddLog($"激活 provider 失败：{response.StatusCode}");
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"激活 provider 异常：{ex.Message}");
+            }
+        }
+
+        private async System.Threading.Tasks.Task HandleRequestModelsAsync()
+        {
+            try
+            {
+                var url = $"{_daemonClient.DaemonUrl}/api/v1/models";
+                var response = await _daemonClient.HttpClient.GetAsync(url);
+                var content = await response.Content.ReadAsStringAsync();
+
+                if (response.IsSuccessStatusCode)
+                {
+                    var data = JObject.Parse(content);
+                    var models = data["models"];
+                    SendMessageToWeb(new { type = "models", models });
+                    AddLog($"已加载 {models?.Count() ?? 0} 个模型");
+                }
+                else
+                {
+                    AddLog($"获取模型列表失败：{response.StatusCode}");
+                    SendMessageToWeb(new { type = "models", models = new JArray() });
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"请求模型列表异常：{ex.Message}");
+                SendMessageToWeb(new { type = "models", models = new JArray() });
+            }
+        }
+
+        private async System.Threading.Tasks.Task HandleSetDefaultModelAsync(string modelId)
+        {
+            try
+            {
+                var url = $"{_daemonClient.DaemonUrl}/api/v1/models/default";
+                var payload = new { model_id = modelId };
+                var json = JsonConvert.SerializeObject(payload);
+                var httpContent = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
+
+                var response = await _daemonClient.HttpClient.PostAsync(url, httpContent);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    AddLog($"默认模型已设置：{modelId}");
+                }
+                else
+                {
+                    AddLog($"设置默认模型失败：{response.StatusCode}");
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"设置默认模型异常：{ex.Message}");
+            }
+        }
+
+        private async System.Threading.Tasks.Task HandleSetRoleBindingAsync(string role, string? modelId)
+        {
+            try
+            {
+                var url = $"{_daemonClient.DaemonUrl}/api/v1/models/role-binding";
+                var payload = new { role, model_id = modelId ?? "" };
+                var json = JsonConvert.SerializeObject(payload);
+                var httpContent = new System.Net.Http.StringContent(json, System.Text.Encoding.UTF8, "application/json");
+
+                var response = await _daemonClient.HttpClient.PostAsync(url, httpContent);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    AddLog($"角色绑定已设置：{role} -> {modelId ?? "默认"}");
+                }
+                else
+                {
+                    AddLog($"设置角色绑定失败：{response.StatusCode}");
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"设置角色绑定异常：{ex.Message}");
             }
         }
 
