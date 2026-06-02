@@ -1,35 +1,37 @@
-# CodePanion 文档中心
+# CodePanion Documentation
 
-CodePanion 当前路线是：**本地优先、供应商中立、面向个人开发者的 AI 工作流操作台**。
+[English](README.md) | [简体中文](README.zh-CN.md)
 
-旧的监听、监控源、工具接入指南、能力证据、阶段验收、审计日志和历史设计草案已经从文档入口中移除。当前文档只围绕路线大改后的本地 AI 工作流：任务拆分、角色协作、显式 executor、人工审核和产品产出归档。
+CodePanion's current product line is a **local-first, vendor-neutral AI development workspace for individual developers**.
 
-## 当前入口
+This documentation entry focuses on the current local AI workflow direction: task decomposition, role collaboration, explicit executors, human review gates, and product artifact delivery. Older listener, passive monitoring, source-ingestion, audit-log, and historical design drafts are no longer the primary documentation path.
 
-- [项目概述](../README.md)
-- [产品定位契约](POSITIONING.md)
-- [本地 AI 工作流设计](LOCAL_AI_WORKFLOW.md)
-- [产品路线](PRODUCT_ROADMAP.md)
-- [架构设计](ARCHITECTURE.md)
-- [开发指南](DEVELOPMENT.md)
-- [API 文档](API.md)
-- [安装与构建](../INSTALL.md)
-- [当前开发任务](../DEVELOPMENT_TASKS.md)
+## Main Entries
 
-## 阅读顺序
+- [Project Overview](../README.md)
+- [Product Positioning Contract](POSITIONING.md)
+- [Local AI Workflow Design](LOCAL_AI_WORKFLOW.md)
+- [Product Roadmap](PRODUCT_ROADMAP.md)
+- [Architecture](ARCHITECTURE.md)
+- [Development Guide](DEVELOPMENT.md)
+- [API Documentation](API.md)
+- [Installation and Build](INSTALL.md)
+- [Current Development Tasks](../DEVELOPMENT_TASKS.md)
 
-1. 先读 [产品定位契约](POSITIONING.md)，确认 CodePanion 不再走监听路线。
-2. 再读 [本地 AI 工作流设计](LOCAL_AI_WORKFLOW.md)，理解 workspace、role、workflow、human gate、artifact 和 executor。
-3. 接着读 [产品路线](PRODUCT_ROADMAP.md)，确认 Alpha / Beta / GA 的新优先级。
-4. 开发前读 [架构设计](ARCHITECTURE.md)、[开发指南](DEVELOPMENT.md) 和 [当前开发任务](../DEVELOPMENT_TASKS.md)。
+## Recommended Reading Order
 
-## 保留边界
+1. Start with [Product Positioning Contract](POSITIONING.md) to understand why CodePanion no longer follows the listener/monitoring route.
+2. Read [Local AI Workflow Design](LOCAL_AI_WORKFLOW.md) to understand workspaces, roles, workflows, human gates, artifacts, and executors.
+3. Read [Product Roadmap](PRODUCT_ROADMAP.md) for Alpha / Beta / GA priorities.
+4. Before development, read [Architecture](ARCHITECTURE.md), [Development Guide](DEVELOPMENT.md), and [Current Development Tasks](../DEVELOPMENT_TASKS.md).
 
-- `source`、旧适配器和历史接入代码可以作为兼容层存在，但不再是新产品路线的设计对象。
-- 新能力优先围绕 workflow executor、角色权限、人工审核门和 artifact loop 建模。
-- 后续文档若重新引入监听、被动状态采集或进程识别，必须先更新 [产品定位契约](POSITIONING.md)。
+## Boundaries
 
-## 文档状态
+- `source`, legacy adapters, and historical integration code may remain as compatibility layers, but they are no longer the design center of the product.
+- New capabilities should prioritize workflow executors, role permissions, human gates, and the artifact loop.
+- If future documentation reintroduces listener, passive state collection, or process-identification behavior, [Product Positioning Contract](POSITIONING.md) must be updated first.
 
-- 最后更新：2026-05-27
-- 当前阶段：路线大改后的工作流主线收束
+## Documentation Status
+
+- Last updated: 2026-06-02
+- Current phase: Rust-first local AI workflow and multi-agent development workspace

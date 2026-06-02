@@ -1,45 +1,49 @@
-# CodePanion 工作流示例模板
+# CodePanion Workflow Examples
 
-本目录是开箱可用的多步骤工作流模板集。用 `codepanion workflow import --file <json>` 把示例加载到本地仓库（`~/.codepanion/workflows.json`），然后用 `codepanion workflow run <name>` 运行；运行期间各步骤进度会通过 daemon 事件总线推送给 GUI。
+[English](README.md) | [简体中文](README.zh-CN.md)
 
-## 提供的模板
+This directory contains ready-to-import multi-step workflow templates for CodePanion.
 
-| 文件 | 名称 | 用途 |
+Use `codepanion workflow import --file <json>` to load an example into the local workflow store (`~/.codepanion/workflows.json`), then run it with `codepanion workflow run <name>`. While the workflow runs, step progress is forwarded through the daemon event bus for the GUI.
+
+## Templates
+
+| File | Name | Purpose |
 | --- | --- | --- |
-| [`codex-then-claude-review.json`](./codex-then-claude-review.json) | `codex-then-claude-review` | Codex 起草改动 → 人工检查点 → Claude Code 复审，串成跨工具任务流 |
-| [`build-test-audit.json`](./build-test-audit.json) | `build-test-audit` | 本地交付前 build → test → audit 导出 |
+| [`codex-then-claude-review.json`](./codex-then-claude-review.json) | `codex-then-claude-review` | Codex drafts changes, a human checkpoint pauses execution, then Claude Code reviews the result. |
+| [`build-test-audit.json`](./build-test-audit.json) | `build-test-audit` | Local pre-delivery build, test, and audit export. |
 
-## 用法
+## Usage
 
 ```powershell
-# 导入示例
+# Import an example
 codepanion workflow import --file packages/daemon/examples/workflows/build-test-audit.json
 
-# 查看
+# Inspect a workflow
 codepanion workflow show build-test-audit
 
-# 干跑（只解析步骤、不执行命令）
+# Dry run: parse steps without executing commands
 codepanion workflow run build-test-audit --dry-run
 
-# 实际执行；遇到 checkpoint 步骤会暂停，附 --yes 继续
+# Execute; checkpoint steps pause unless --yes is provided
 codepanion workflow run codex-then-claude-review --yes --set feature=add-dark-mode
 
-# 复用一次历史运行的参数
+# Reuse parameters from a previous run
 codepanion workflow replay <runId>
 ```
 
-## 自定义
+## Customization
 
-`workflow import` 接受三种 JSON 形态：
+`workflow import` accepts three JSON shapes:
 
-- 单个工作流对象：`{ "name": "...", "steps": [...] }`
-- 数组：`[ { "name": "..." }, { "name": "..." } ]`
-- 带 `workflows` 键的对象：`{ "workflows": [ ... ] }`
+- A single workflow object: `{ "name": "...", "steps": [...] }`
+- An array: `[ { "name": "..." }, { "name": "..." } ]`
+- An object with a `workflows` key: `{ "workflows": [ ... ] }`
 
-每个 step 至少需要 `id` 和 `command` 或 `template`；可选字段：`tool`、`args`、`values`、`dependsOn`、`checkpoint`。模板字段对应已有的 `codepanion template add` 模板，把同样的占位符传过去即可。
+Each step requires at least `id` plus `command` or `template`. Optional fields include `tool`, `args`, `values`, `dependsOn`, and `checkpoint`.
 
-参数解析使用 `{param}` 占位符；运行时通过 `--set key=value` 覆盖默认值，未覆盖时使用 `params` 块里的默认值。
+Parameter parsing uses `{param}` placeholders. Runtime values can be supplied with `--set key=value`; otherwise defaults from the `params` block are used.
 
-## 与 GUI 的衔接
+## GUI Integration
 
-`codepanion workflow run` / `replay` 在 daemon 在线时会注册一个临时来源（`kind=cli`、name=`workflow:<name>`），并把每个步骤的启动 / 完成 / 失败 / checkpoint 作为 `monitor-event` 推送到 GUI 的来源活动流。运行结束时该来源自动断开。daemon 离线则退回纯 CLI 行为，不影响实际执行。
+When the daemon is online, `codepanion workflow run` / `replay` registers a temporary source (`kind=cli`, `name=workflow:<name>`) and pushes step start / finish / failure / checkpoint events to the GUI activity stream. When the run finishes, the source disconnects automatically. If the daemon is offline, the command falls back to pure CLI behavior.

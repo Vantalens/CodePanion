@@ -1,32 +1,36 @@
-# 提示音文件
+# CodePanion GUI Assets
 
-本目录包含 CodePanion 使用的提示音文件。
+[English](README.md) | [简体中文](README.zh-CN.md)
 
-## 文件列表
+This directory stores static assets used by the CodePanion Windows GUI, including notification sounds and generated icon files.
 
-- `prompt.wav` - 需要用户输入时的提示音（短促的"叮"声）
-- `done.wav` - 任务完成时的提示音（柔和的"咚"声）
+## Sound Files
 
-## 生成提示音
+- `prompt.wav`: short prompt sound used when user input is required.
+- `done.wav`: soft completion sound used when a task finishes.
 
-如果文件不存在，可以使用以下方法生成：
+## Generate Sounds
 
-### 方法 1: 使用在线工具
-访问 https://www.soundjay.com/beep-sounds-1.html 下载免费的提示音
+If the files are missing, they can be recreated with one of these methods:
 
-### 方法 2: 使用 Audacity
-1. 打开 Audacity
-2. 生成 → 音调
-3. 设置频率（prompt: 800Hz, done: 400Hz）
-4. 持续时间 0.2 秒
-5. 导出为 WAV 格式
+### Option 1: Online Assets
 
-### 方法 3: 使用 PowerShell 生成
+Download free short notification sounds from a trusted source such as SoundJay.
+
+### Option 2: Audacity
+
+1. Open Audacity.
+2. Use Generate -> Tone.
+3. Set frequency: prompt `800Hz`, done `400Hz`.
+4. Set duration to `0.2s`.
+5. Export as WAV.
+
+### Option 3: PowerShell
+
 ```powershell
-# 生成简单的提示音（需要额外工具）
 [console]::beep(800, 200)
 ```
 
-## 备用方案
+## Fallback
 
-如果提示音文件不存在，程序会自动使用系统默认的 Beep 声音。
+If the sound files are unavailable, the application falls back to the system default beep.
