@@ -321,6 +321,91 @@ button { border: 0; }
     font-weight: 400;
 }
 
+/* ── G-02: 全局视图标签和筛选 ── */
+.side-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.side-section-tabs {
+    display: flex;
+    gap: 4px;
+}
+
+.side-section-tab {
+    padding: 3px 8px;
+    font-size: 10px;
+    background: transparent;
+    color: var(--muted-2);
+    border: 1px solid transparent;
+    border-radius: var(--radius);
+    cursor: pointer;
+}
+
+.side-section-tab:hover {
+    color: var(--muted);
+}
+
+.side-section-tab.active {
+    color: var(--accent);
+    background: var(--accent-soft);
+    border-color: var(--accent);
+}
+
+.side-section-filters {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+}
+
+.filter-btn {
+    padding: 3px 8px;
+    font-size: 10px;
+    background: var(--panel-soft);
+    color: var(--muted-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    cursor: pointer;
+}
+
+.filter-btn:hover {
+    border-color: var(--line-strong);
+    color: var(--muted);
+}
+
+.filter-btn.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-soft);
+}
+
+.filter-btn[data-status="running"].active {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: var(--bg);
+}
+
+.filter-btn[data-status="queued"].active {
+    border-color: var(--orange);
+    background: var(--orange);
+    color: var(--bg);
+}
+
+.filter-btn[data-status="failed"].active {
+    border-color: var(--red);
+    background: var(--red);
+    color: var(--bg);
+}
+
+.filter-btn[data-status="completed"].active {
+    border-color: var(--green);
+    background: var(--green);
+    color: var(--bg);
+}
+
 .card-list { display: flex; flex-direction: column; gap: 8px; }
 
 /* ── 卡片（workflow 定义 / run / gate / artifact 共用基底） ── */

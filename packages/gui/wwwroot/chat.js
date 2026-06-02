@@ -16,6 +16,15 @@ const state = {
     activeProviderId: '',       // 当前激活的 provider ID
     defaultModel: '',           // 默认模型 ID
     roleBindings: {},           // 角色绑定 { architect: modelId, coder: modelId, ... }
+    // G-02: 全局视图
+    viewMode: {                 // 每个区域的视图模式（project / global）
+        workflows: 'project',
+        runs: 'project',
+        gates: 'project',
+    },
+    filterStatus: {             // runs 的状态筛选
+        runs: 'all',            // all / running / queued / failed / completed
+    },
     // 原有状态
     workspace: '',              // 当前 workspace 绝对路径，空 = daemon 全局 fallback（兼容）
     recentWorkspaces: [],       // 最近用过的 workspace（localStorage 持久化）（兼容）
@@ -612,6 +621,16 @@ function handleMessage(message) {
                 window.applyProviderTestResult(message.providerId, message.success, message.message);
             }
             break;
+        // G-02: 全局视图消息
+        case 'global-runs':
+            applyGlobalRuns(message.runs);
+            break;
+        case 'global-gates':
+            applyGlobalGates(message.gates);
+            break;
+        case 'global-workflows':
+            applyGlobalWorkflows(message.workflows);
+            break;
         default:
             // 重建后控制台不再处理监听态消息；未知类型静默忽略。
             break;
@@ -643,6 +662,120 @@ function bindControls() {
     const ho = document.getElementById('delivery-handoff');
     if (md) md.addEventListener('click', () => requestDelivery('markdown'));
     if (ho) ho.addEventListener('click', () => requestDelivery('handoff'));
+
+    // G-02: 绑定全局视图标签切换
+    document.querySelectorAll('.side-section-tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const section = btn.dataset.section;
+            const mode = btn.dataset.mode;
+            setViewMode(section, mode);
+        });
+    });
+
+    // G-02: 绑定状态筛选按钮
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const section = btn.dataset.section;
+            const status = btn.dataset.status;
+            setFilterStatus(section, status);
+        });
+    });
+}
+
+// G-02: 视图模式切换
+function setViewMode(section, mode) {
+    state.viewMode[section] = mode;
+
+    // 更新标签按钮状态
+    document.querySelectorAll(`.side-section-tab[data-section="${section}"]`).forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.mode === mode);
+    });
+
+    // 重新加载数据
+    if (mode === 'global') {
+        requestGlobalData(section);
+    } else {
+        requestBoard();
+    }
+}
+
+// G-02: 状态筛选切换
+function setFilterStatus(section, status) {
+    state.filterStatus[section] = status;
+
+    // 更新筛选按钮状态
+    document.querySelectorAll(`.filter-btn[data-section="${section}"]`).forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.status === status);
+    });
+
+    // 重新加载数据
+    if (state.viewMode[section] === 'global') {
+        requestGlobalData(section, status);
+    } else {
+        requestBoard();
+    }
+}
+
+// G-02: 请求全局数据
+function requestGlobalData(section, status) {
+    const statusParam = status && status !== 'all' ? status : '';
+
+    if (section === 'runs') {
+        sendToHost({
+            type: 'request-global-runs',
+            status: statusParam
+        });
+    } else if (section === 'gates') {
+        sendToHost({ type: 'request-global-gates' });
+    } else if (section === 'workflows') {
+        sendToHost({ type: 'request-global-workflows' });
+    }
+}
+
+// G-02: 应用全局数据
+function applyGlobalRuns(runs) {
+    const runsList = document.getElementById('runs-list');
+    if (!runsList) return;
+
+    runsList.innerHTML = '';
+    if (!Array.isArray(runs) || runs.length === 0) {
+        runsList.appendChild(emptyHint('没有找到全局运行记录。'));
+        return;
+    }
+
+    runs.forEach(run => {
+        runsList.appendChild(renderWorkflowRunCard(run));
+    });
+}
+
+function applyGlobalGates(gates) {
+    const gatesList = document.getElementById('gates-list');
+    if (!gatesList) return;
+
+    gatesList.innerHTML = '';
+    if (!Array.isArray(gates) || gates.length === 0) {
+        gatesList.appendChild(emptyHint('没有找到全局人工门。'));
+        return;
+    }
+
+    gates.forEach(gate => {
+        gatesList.appendChild(renderWorkflowGateCard(gate));
+    });
+}
+
+function applyGlobalWorkflows(workflows) {
+    const defList = document.getElementById('def-list');
+    if (!defList) return;
+
+    defList.innerHTML = '';
+    if (!Array.isArray(workflows) || workflows.length === 0) {
+        defList.appendChild(emptyHint('没有找到全局 workflow。'));
+        return;
+    }
+
+    workflows.forEach(w => {
+        defList.appendChild(renderWorkflowDefinitionCard(w));
+    });
 }
 
 function initApp() {

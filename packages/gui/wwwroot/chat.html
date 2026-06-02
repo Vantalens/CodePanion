@@ -33,16 +33,47 @@
 
         <div id="console-body">
             <aside id="console-sidebar">
+                <!-- G-02: 可执行 workflow 区域 -->
                 <section class="side-section">
-                    <h3>可执行 workflow</h3>
+                    <div class="side-section-header">
+                        <h3>可执行 workflow</h3>
+                        <div class="side-section-tabs">
+                            <button class="side-section-tab active" data-section="workflows" data-mode="project" type="button">项目</button>
+                            <button class="side-section-tab" data-section="workflows" data-mode="global" type="button">全局</button>
+                        </div>
+                    </div>
                     <div id="def-list" class="card-list"></div>
                 </section>
+
+                <!-- G-02: 近期运行区域 -->
                 <section class="side-section">
-                    <h3>近期运行</h3>
+                    <div class="side-section-header">
+                        <h3>近期运行</h3>
+                        <div class="side-section-tabs">
+                            <button class="side-section-tab active" data-section="runs" data-mode="project" type="button">项目</button>
+                            <button class="side-section-tab" data-section="runs" data-mode="global" type="button">全局</button>
+                        </div>
+                    </div>
+                    <!-- G-02: 状态筛选 -->
+                    <div class="side-section-filters">
+                        <button class="filter-btn active" data-section="runs" data-status="all" type="button">全部</button>
+                        <button class="filter-btn" data-section="runs" data-status="running" type="button">运行中</button>
+                        <button class="filter-btn" data-section="runs" data-status="queued" type="button">队列</button>
+                        <button class="filter-btn" data-section="runs" data-status="failed" type="button">失败</button>
+                        <button class="filter-btn" data-section="runs" data-status="completed" type="button">完成</button>
+                    </div>
                     <div id="runs-list" class="card-list"></div>
                 </section>
+
+                <!-- G-02: 人工门区域 -->
                 <section class="side-section">
-                    <h3>人工门</h3>
+                    <div class="side-section-header">
+                        <h3>人工门</h3>
+                        <div class="side-section-tabs">
+                            <button class="side-section-tab active" data-section="gates" data-mode="project" type="button">项目</button>
+                            <button class="side-section-tab" data-section="gates" data-mode="global" type="button">全局</button>
+                        </div>
+                    </div>
                     <div id="gates-list" class="card-list"></div>
                 </section>
             </aside>

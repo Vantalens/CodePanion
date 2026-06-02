@@ -55,6 +55,10 @@ namespace CodePanion.Gui
             "request-models",
             "set-default-model",
             "set-role-binding",
+            // G-02: 全局视图
+            "request-global-runs",
+            "request-global-gates",
+            "request-global-workflows",
         };
 
         private readonly DaemonClient _daemonClient;
@@ -456,6 +460,22 @@ namespace CodePanion.Gui
                         _ = HandleSetRoleBindingAsync(role!, modelId);
                         break;
                     }
+
+                    // G-02: 全局视图
+                    case "request-global-runs":
+                    {
+                        var status = message["status"]?.Value<string>();
+                        _ = HandleRequestGlobalRunsAsync(status);
+                        break;
+                    }
+
+                    case "request-global-gates":
+                        _ = HandleRequestGlobalGatesAsync();
+                        break;
+
+                    case "request-global-workflows":
+                        _ = HandleRequestGlobalWorkflowsAsync();
+                        break;
                 }
             }
             catch (Exception ex)
@@ -1610,6 +1630,96 @@ namespace CodePanion.Gui
             catch (Exception ex)
             {
                 AddLog($"设置角色绑定异常：{ex.Message}");
+            }
+        }
+
+        // G-02: 全局视图处理函数
+        private async System.Threading.Tasks.Task HandleRequestGlobalRunsAsync(string? status)
+        {
+            try
+            {
+                var url = $"{_daemonClient.DaemonUrl}/api/v1/global/runs";
+                if (!string.IsNullOrWhiteSpace(status))
+                {
+                    url += $"?status={status}";
+                }
+
+                var response = await _daemonClient.HttpClient.GetAsync(url);
+                var content = await response.Content.ReadAsStringAsync();
+
+                if (response.IsSuccessStatusCode)
+                {
+                    var data = JObject.Parse(content);
+                    var runs = data["runs"];
+                    SendMessageToWeb(new { type = "global-runs", runs });
+                    AddLog($"已加载 {runs?.Count() ?? 0} 个全局运行");
+                }
+                else
+                {
+                    AddLog($"获取全局运行失败：{response.StatusCode}");
+                    SendMessageToWeb(new { type = "global-runs", runs = new JArray() });
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"请求全局运行异常：{ex.Message}");
+                SendMessageToWeb(new { type = "global-runs", runs = new JArray() });
+            }
+        }
+
+        private async System.Threading.Tasks.Task HandleRequestGlobalGatesAsync()
+        {
+            try
+            {
+                var url = $"{_daemonClient.DaemonUrl}/api/v1/global/gates";
+                var response = await _daemonClient.HttpClient.GetAsync(url);
+                var content = await response.Content.ReadAsStringAsync();
+
+                if (response.IsSuccessStatusCode)
+                {
+                    var data = JObject.Parse(content);
+                    var gates = data["gates"];
+                    SendMessageToWeb(new { type = "global-gates", gates });
+                    AddLog($"已加载 {gates?.Count() ?? 0} 个全局人工门");
+                }
+                else
+                {
+                    AddLog($"获取全局人工门失败：{response.StatusCode}");
+                    SendMessageToWeb(new { type = "global-gates", gates = new JArray() });
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"请求全局人工门异常：{ex.Message}");
+                SendMessageToWeb(new { type = "global-gates", gates = new JArray() });
+            }
+        }
+
+        private async System.Threading.Tasks.Task HandleRequestGlobalWorkflowsAsync()
+        {
+            try
+            {
+                var url = $"{_daemonClient.DaemonUrl}/api/v1/global/workflows";
+                var response = await _daemonClient.HttpClient.GetAsync(url);
+                var content = await response.Content.ReadAsStringAsync();
+
+                if (response.IsSuccessStatusCode)
+                {
+                    var data = JObject.Parse(content);
+                    var workflows = data["workflows"];
+                    SendMessageToWeb(new { type = "global-workflows", workflows });
+                    AddLog($"已加载 {workflows?.Count() ?? 0} 个全局 workflow");
+                }
+                else
+                {
+                    AddLog($"获取全局 workflow 失败：{response.StatusCode}");
+                    SendMessageToWeb(new { type = "global-workflows", workflows = new JArray() });
+                }
+            }
+            catch (Exception ex)
+            {
+                AddLog($"请求全局 workflow 异常：{ex.Message}");
+                SendMessageToWeb(new { type = "global-workflows", workflows = new JArray() });
             }
         }
 
