@@ -25,8 +25,7 @@
     "packages/daemon"
   ],
   "scripts": {
-    "build": "npm run build -w packages/daemon && npm run build:daemon-bundle",
-    "build:daemon-bundle": "node scripts/build-daemon-bundle.mjs",
+    "build": "npm run build -w packages/daemon",
     "dev:daemon": "npm run dev -w packages/daemon",
     "gui:run": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/run-gui.ps1",
     "gui:build": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-gui.ps1",
