@@ -94,12 +94,20 @@
 
 ## P5：GUI 工作台
 
+**进度**: 1/6 完成（16.7%）
+
 目标：GUI 从过渡 workflow board 升级为多项目 AI 开发工作台。
 
-- [ ] **G-01 项目侧栏**
-  - 项目列表、添加/删除/编辑。
-  - 项目搜索和筛选。
-  - 项目切换后恢复上次状态。
+- [x] **G-01 项目侧栏** (已完成 2026-06-02)
+  - [x] 项目列表、添加/删除/编辑（完整 CRUD）
+  - [x] 项目搜索和筛选（实时搜索）
+  - [x] 项目切换后恢复上次状态（selectedRunId、scrollPos）
+  - **实现细节**：
+    - 前端：projects.js (390行)，纯 HTML/CSS/JavaScript
+    - 后端：MainWindow.xaml.cs (5个消息处理器)
+    - API：Rust daemon Projects API 完全集成
+    - UI：Tokyo Night 配色，模态对话框
+    - 提交：bb1ad22 feat: implement G-01 project sidebar
 
 - [ ] **G-02 全局任务视图**
   - 全局 runs。
