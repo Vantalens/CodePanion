@@ -20,8 +20,12 @@ clap = { version = "4.5", features = ["derive"] }
 reqwest = { version = "0.12", features = ["json"] }
 futures = "0.3"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
+
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
+tempfile = "3"
 
 [lib]
 path = "src/lib.rs"

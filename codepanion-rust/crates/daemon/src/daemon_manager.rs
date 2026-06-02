@@ -166,17 +166,26 @@ impl DaemonManager {
 
         #[cfg(windows)]
         {
-            // 使用 tasklist 检查进程是否存在
-            Command::new("tasklist")
-                .args(["/FI", &format!("PID eq {}", pid), "/NH"])
-                .stdout(Stdio::piped())
-                .stderr(Stdio::null())
-                .output()
-                .map(|output| {
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                    stdout.contains(&pid.to_string())
-                })
-                .unwrap_or(false)
+            use windows_sys::Win32::Foundation::CloseHandle;
+            use windows_sys::Win32::System::Threading::{
+                OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+            };
+
+            if pid == 0 {
+                return false;
+            }
+
+            // tasklist can fail under restricted Windows runners; querying the process handle is
+            // locale-independent and only requires limited process information access.
+            let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+            if handle.is_null() {
+                return false;
+            }
+
+            unsafe {
+                let _ = CloseHandle(handle);
+            }
+            true
         }
     }
 
@@ -207,8 +216,9 @@ impl DaemonManager {
 
     /// 后台启动 daemon
     fn spawn_daemon(&self, port: u16) -> Result<()> {
-        let exe = std::env::current_exe()
-            .map_err(|e| CodePanionError::Runtime(format!("Failed to get executable path: {}", e)))?;
+        let exe = std::env::current_exe().map_err(|e| {
+            CodePanionError::Runtime(format!("Failed to get executable path: {}", e))
+        })?;
 
         #[cfg(unix)]
         {
@@ -287,7 +297,9 @@ impl std::fmt::Display for DaemonStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             DaemonStatus::Running { pid } => write!(f, "Running (PID: {})", pid),
-            DaemonStatus::Stopped { stale_pid: Some(pid) } => {
+            DaemonStatus::Stopped {
+                stale_pid: Some(pid),
+            } => {
                 write!(f, "Stopped (stale PID: {})", pid)
             }
             DaemonStatus::Stopped { stale_pid: None } => write!(f, "Stopped"),

@@ -108,7 +108,11 @@ impl StepExecutor for AgentStepExecutor {
         executor.execute_shell(command, args).await
     }
 
-    async fn execute_agent(&self, prompt: &str, step: &WorkflowStep) -> Result<StepExecutionResult> {
+    async fn execute_agent(
+        &self,
+        prompt: &str,
+        step: &WorkflowStep,
+    ) -> Result<StepExecutionResult> {
         // 构建 agent loop request
         let request = AgentLoopRequest::new(self.backend.clone(), prompt)
             .with_max_turns(12)
@@ -299,7 +303,9 @@ impl WorkflowRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codepanion_workflow_engine::{WorkflowArchitecture, WorkflowContextPolicy, WorkflowProvider};
+    use codepanion_workflow_engine::{
+        WorkflowArchitecture, WorkflowContextPolicy, WorkflowProvider,
+    };
 
     #[tokio::test]
     async fn test_workflow_runner_lifecycle() {

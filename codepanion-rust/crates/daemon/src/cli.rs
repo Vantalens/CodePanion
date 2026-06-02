@@ -288,7 +288,10 @@ async fn handle_status_command(api_url: &str) -> Result<(), Box<dyn std::error::
     println!("Daemon status: {}", status);
 
     // 如果 daemon 正在运行，尝试连接 API
-    if matches!(status, codepanion_daemon::daemon_manager::DaemonStatus::Running { .. }) {
+    if matches!(
+        status,
+        codepanion_daemon::daemon_manager::DaemonStatus::Running { .. }
+    ) {
         let client = reqwest::Client::new();
         let url = format!("{}/health", api_url);
 
@@ -335,7 +338,10 @@ async fn handle_workflows_command(
         if response.runs.is_empty() {
             println!("No workflows found.");
         } else {
-            println!("{:<40} {:<30} {:<20} {:<15}", "RUN ID", "WORKFLOW ID", "PROJECT ID", "STATUS");
+            println!(
+                "{:<40} {:<30} {:<20} {:<15}",
+                "RUN ID", "WORKFLOW ID", "PROJECT ID", "STATUS"
+            );
             println!("{}", "-".repeat(105));
             for run in response.runs {
                 println!(
@@ -371,7 +377,11 @@ async fn handle_workspace_command(
                         "{:<40} {:<50} {:<15}",
                         project.id,
                         project.path.display(),
-                        if project.is_active { "active" } else { "inactive" }
+                        if project.is_active {
+                            "active"
+                        } else {
+                            "inactive"
+                        }
                     );
                 }
             }

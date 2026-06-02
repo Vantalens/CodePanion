@@ -1,7 +1,7 @@
 use std::io::{Read, Write};
 use std::net::TcpStream;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use codepanion_config::ModelBackendConfig;
@@ -223,9 +223,8 @@ fn build_chat_body(request: &ChatRequest) -> Result<String> {
         body["stream"] = json!(true);
     }
 
-    serde_json::to_string(&body).map_err(|e| {
-        CodePanionError::InvalidInput(format!("Failed to serialize request: {}", e))
-    })
+    serde_json::to_string(&body)
+        .map_err(|e| CodePanionError::InvalidInput(format!("Failed to serialize request: {}", e)))
 }
 
 fn parse_chat_response(response: &str) -> Result<ChatCompletionResult> {
