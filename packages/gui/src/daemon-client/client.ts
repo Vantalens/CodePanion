@@ -31,7 +31,8 @@ export async function ensureDaemon(): Promise<DaemonConfig> {
     };
   }
   await invoke('ensure_daemon');
-  return invoke<DaemonConfig>('get_daemon_config');
+  const config = await invoke<DaemonConfig>('get_daemon_config');
+  return config;
 }
 
 export async function stopDaemon(): Promise<void> {
@@ -174,11 +175,11 @@ export class DaemonClient {
   }
 
   setDefaultModel(modelId: string): Promise<unknown> {
-    return this.post('/api/v1/models/default', { modelId, model_id: modelId });
+    return this.post('/api/v1/models/default', { modelId });
   }
 
   setRoleBinding(role: string, modelId: string): Promise<unknown> {
-    return this.post('/api/v1/models/role-binding', { role, modelId, model_id: modelId });
+    return this.post('/api/v1/models/role-binding', { role, modelId });
   }
 
   private get<T>(path: string): Promise<T> {

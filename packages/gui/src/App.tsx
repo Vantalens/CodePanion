@@ -65,7 +65,9 @@ export function App() {
   const activeProject = projects.find((project) => project.id === projectId);
   const workspace = activeProject?.path || '';
   const threads = useMemo(() => buildThreads(board), [board]);
-  const selectedArtifact = artifacts.find((artifact) => artifact.id === selectedArtifactId) || artifacts[0];
+  const selectedArtifact = useMemo(() => {
+    return artifacts.find((artifact) => artifact.id === selectedArtifactId) || null;
+  }, [artifacts, selectedArtifactId]);
 
   const refreshBoard = useCallback(async () => {
     if (!client) return;
@@ -139,7 +141,10 @@ export function App() {
   useEffect(() => {
     if (!client) return;
     refreshProjects().catch((err) => setError(err instanceof Error ? err.message : String(err)));
-    refreshSettings().catch(() => undefined);
+    refreshSettings().catch((err) => {
+      console.error('Failed to load providers/models:', err);
+      setError(err instanceof Error ? err.message : String(err));
+    });
   }, [client, refreshProjects, refreshSettings]);
 
   useEffect(() => {
@@ -149,7 +154,7 @@ export function App() {
   useEffect(() => {
     if (!client) return;
     wsRef.current?.close();
-    wsRef.current = client.connectRunEvents(
+    const ws = client.connectRunEvents(
       (event) => {
         setSelectedRun((run) => applyRunEvent(run, event));
         if (event.type === 'run-finish' || event.type === 'step-finish') {
@@ -158,8 +163,9 @@ export function App() {
       },
       () => setConnected(false),
     );
-    wsRef.current.onopen = () => setConnected(true);
-    return () => wsRef.current?.close();
+    ws.onopen = () => setConnected(true);
+    wsRef.current = ws;
+    return () => ws.close();
   }, [client, refreshBoard]);
 
   async function selectThread(thread: WorkflowThread) {
@@ -223,7 +229,12 @@ export function App() {
   }
 
   async function copyDelivery() {
-    await navigator.clipboard.writeText(delivery || '');
+    try {
+      await navigator.clipboard.writeText(delivery || '');
+    } catch (err) {
+      console.error('Failed to copy to clipboard:', err);
+      setError('无法复制到剪贴板。请检查浏览器权限或使用安全上下文（HTTPS）。');
+    }
   }
 
   async function cancelRun() {
@@ -478,11 +489,8 @@ function SettingsDrawer({
     await client.createProvider({
       name: providerName,
       providerType,
-      provider_type: providerType,
       apiKey,
-      api_key: apiKey,
       apiBase,
-      api_base: apiBase,
     });
     setProviderName('');
     setApiKey('');
@@ -507,9 +515,15 @@ function SettingsDrawer({
                 <strong>{provider.name}</strong>
                 <span>{provider.type || provider.config?.base_url || 'provider'}</span>
                 <div className="button-row">
-                  <Button onClick={() => client?.activateProvider(provider.id).then(onRefresh)}>激活</Button>
+                  <Button onClick={async () => {
+                    await client?.activateProvider(provider.id);
+                    await onRefresh();
+                  }}>激活</Button>
                   <Button onClick={() => client?.testProvider(provider.id)}>测试</Button>
-                  <Button variant="danger" onClick={() => client?.deleteProvider(provider.id).then(onRefresh)}>删除</Button>
+                  <Button variant="danger" onClick={async () => {
+                    await client?.deleteProvider(provider.id);
+                    await onRefresh();
+                  }}>删除</Button>
                 </div>
               </div>
             ))}
@@ -532,7 +546,10 @@ function SettingsDrawer({
         <section>
           <h3>模型</h3>
           <Field label="默认模型">
-            <select value={defaultModel} onChange={(event) => client?.setDefaultModel(event.target.value).then(onRefresh)}>
+            <select value={defaultModel} onChange={async (event) => {
+              await client?.setDefaultModel(event.target.value);
+              await onRefresh();
+            }}>
               <option value="">未设置</option>
               {models.map((model) => (
                 <option key={model.id} value={model.id}>{model.name || model.id}</option>
@@ -543,7 +560,10 @@ function SettingsDrawer({
             <Field key={role} label={role}>
               <select
                 value={roleBindings[role] || ''}
-                onChange={(event) => client?.setRoleBinding(role, event.target.value).then(onRefresh)}
+                onChange={async (event) => {
+                  await client?.setRoleBinding(role, event.target.value);
+                  await onRefresh();
+                }}
               >
                 <option value="">默认</option>
                 {models.map((model) => (
