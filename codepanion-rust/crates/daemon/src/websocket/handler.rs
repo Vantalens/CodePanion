@@ -38,8 +38,14 @@ async fn handle_socket(socket: WebSocket, broadcaster: std::sync::Arc<EventBroad
     // Spawn a task to forward events from broadcaster to WebSocket
     let mut send_task = tokio::spawn(async move {
         while let Some(event) = event_rx.recv().await {
-            // Serialize event to JSON
-            let json = match serde_json::to_string(&event) {
+            // Wrap event in GUI-expected format: { type: "workflow-run-event", event: {...} }
+            let wrapped = serde_json::json!({
+                "type": "workflow-run-event",
+                "event": event
+            });
+
+            // Serialize to JSON
+            let json = match serde_json::to_string(&wrapped) {
                 Ok(json) => json,
                 Err(e) => {
                     eprintln!("Failed to serialize event: {}", e);

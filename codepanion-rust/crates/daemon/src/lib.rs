@@ -298,10 +298,15 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::
         )
         // Workflow API endpoints (legacy compatibility)
         .route("/workflow/board", get(routes::workflow::get_workflow_board))
+        .route("/workflow/runs", post(routes::workflow::launch_workflow))
         .route("/workflow/runs", get(routes::workflow::get_workflow_runs))
         .route(
             "/workflow/runs/:id",
             get(routes::workflow::get_workflow_run),
+        )
+        .route(
+            "/workflow/runs/:id/cancel",
+            post(routes::workflow::cancel_workflow_run),
         )
         .route(
             "/workflow/runs/:id/artifacts",

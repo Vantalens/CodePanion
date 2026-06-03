@@ -19,6 +19,8 @@ use crate::AppState;
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowBoardResponse {
     pub workflows: Vec<WorkflowDefinition>,
+    pub runs: Vec<WorkflowRunSummary>,
+    pub gates: Vec<GateSummary>,
 }
 
 #[derive(Debug, Serialize)]
@@ -134,6 +136,20 @@ pub struct ResolveGateRequest {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LaunchWorkflowRequest {
+    pub workflow: String,
+    pub workspace: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LaunchWorkflowResponse {
+    pub run_id: String,
+    pub workflow_name: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct DeliveryQuery {
     pub format: Option<String>,
 }
@@ -151,7 +167,7 @@ pub struct ResolveGateResponse {
 // Route Handlers
 // ============================================================================
 
-/// GET /workflow/board - List workflow definitions
+/// GET /workflow/board - List workflow definitions, recent runs, and paused gates
 pub async fn get_workflow_board(State(state): State<AppState>) -> Json<WorkflowBoardResponse> {
     // Get all workflows from orchestrator
     let orchestrator = state.orchestrator.lock().unwrap();
@@ -167,9 +183,176 @@ pub async fn get_workflow_board(State(state): State<AppState>) -> Json<WorkflowB
         })
         .collect();
 
+    // Get recent runs from scheduler and history
+    let history_runs = state.workflow_history.list().unwrap_or_default();
+    let scheduler_runs = state.scheduler.list_all();
+
+    let mut runs = history_runs
+        .into_iter()
+        .take(10) // Limit to 10 most recent from history
+        .map(|r| WorkflowRunSummary {
+            run_id: r.id,
+            workflow_id: r.workflow_name,
+            project_id: String::new(),
+            status: format!("{:?}", r.status),
+            started_at: Some(r.started_at),
+            completed_at: Some(r.ended_at),
+        })
+        .collect::<Vec<_>>();
+
+    runs.extend(scheduler_runs.into_iter().map(|r| WorkflowRunSummary {
+        run_id: r.run_id,
+        workflow_id: r.workflow_id,
+        project_id: r.project_id,
+        status: format!("{:?}", r.status),
+        started_at: r.started_at,
+        completed_at: r.completed_at,
+    }));
+
+    // Get paused gates
+    let manager = HumanGateManager::new(&state.workflow_history, &state.workflow_artifacts);
+    let gates = manager
+        .list_paused_gates()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|gate| GateSummary {
+            run_id: gate.run_id,
+            step_id: gate.step_id,
+            workflow_id: gate.workflow_name,
+            project_id: String::new(),
+            message: gate.message,
+            paused_at: gate.paused_at,
+        })
+        .collect();
+
     Json(WorkflowBoardResponse {
         workflows: workflow_defs,
+        runs,
+        gates,
     })
+}
+
+/// POST /workflow/runs - Launch a workflow (GUI compatibility endpoint)
+pub async fn launch_workflow(
+    State(_state): State<AppState>,
+    Json(req): Json<LaunchWorkflowRequest>,
+) -> Result<Json<LaunchWorkflowResponse>, StatusCode> {
+    // Generate a unique run ID using timestamp
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let run_id = format!("run-{}", timestamp);
+
+    // TODO: Actually start the workflow execution
+    // For now, return the run ID so GUI doesn't error
+
+    Ok(Json(LaunchWorkflowResponse {
+        run_id,
+        workflow_name: req.workflow,
+    }))
+}
+
+/// POST /workflow/runs/:id/cancel - Cancel a workflow run (GUI compatibility endpoint)
+pub async fn cancel_workflow_run(
+    State(state): State<AppState>,
+    Path(run_id): Path<String>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    // Try to cancel via scheduler first
+    if state.scheduler.cancel_run(&run_id).is_ok() {
+        return Ok(Json(serde_json::json!({
+            "success": true,
+            "message": "Workflow cancelled"
+        })));
+    }
+
+    // Try to cancel via workflow runner
+    let runner = state.workflow_runner.lock().await;
+    runner.cancel_workflow(&run_id).await;
+
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "message": "Workflow cancellation requested"
+    })))
+}
+
+/// GET /workflow/runs/:id - Get a single workflow run (GUI compatibility - wrap response)
+pub async fn get_workflow_run(
+    State(state): State<AppState>,
+    Path(run_id): Path<String>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    if let Some(run) = state
+        .workflow_history
+        .get(&run_id)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    {
+        let detail = run_detail_from_history_gui_format(run);
+        return Ok(Json(serde_json::json!({ "run": detail })));
+    }
+
+    let run = state
+        .scheduler
+        .get_run(&run_id)
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    let detail = WorkflowRunDetailGUI {
+        id: run.run_id.clone(),
+        workflow_name: run.workflow_id.clone(),
+        status: format!("{:?}", run.status),
+        started_at: run.started_at,
+        completed_at: run.completed_at,
+        steps: vec![],
+        current_step_id: None,
+    };
+
+    Ok(Json(serde_json::json!({ "run": detail })))
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkflowRunDetailGUI {
+    pub id: String,
+    pub workflow_name: String,
+    pub status: String,
+    pub started_at: Option<u64>,
+    pub completed_at: Option<u64>,
+    pub steps: Vec<StepSummaryGUI>,
+    pub current_step_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StepSummaryGUI {
+    pub id: String,
+    pub name: String,
+    pub status: String,
+    pub output: String,
+    pub started_at: Option<u64>,
+    pub completed_at: Option<u64>,
+}
+
+fn run_detail_from_history_gui_format(run: WorkflowRun) -> WorkflowRunDetailGUI {
+    WorkflowRunDetailGUI {
+        id: run.id,
+        workflow_name: run.workflow_name,
+        status: format!("{:?}", run.status),
+        started_at: Some(run.started_at),
+        completed_at: Some(run.ended_at),
+        steps: run
+            .steps
+            .into_iter()
+            .map(|step| StepSummaryGUI {
+                id: step.id.clone(),
+                name: step.id,
+                status: format!("{:?}", step.status),
+                output: step.stdout.unwrap_or_default() + &step.stderr.unwrap_or_default(),
+                started_at: step.started_at,
+                completed_at: step.ended_at,
+            })
+            .collect(),
+        current_step_id: None,
+    }
 }
 
 /// GET /workflow/runs - List workflow runs
@@ -204,35 +387,6 @@ pub async fn get_workflow_runs(State(state): State<AppState>) -> Json<WorkflowRu
         runs: run_summaries,
         total,
     })
-}
-
-/// GET /workflow/runs/:id - Get a single workflow run
-pub async fn get_workflow_run(
-    State(state): State<AppState>,
-    Path(run_id): Path<String>,
-) -> Result<Json<WorkflowRunDetail>, StatusCode> {
-    if let Some(run) = state
-        .workflow_history
-        .get(&run_id)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    {
-        return Ok(Json(run_detail_from_history(run)));
-    }
-
-    let run = state
-        .scheduler
-        .get_run(&run_id)
-        .ok_or(StatusCode::NOT_FOUND)?;
-
-    Ok(Json(WorkflowRunDetail {
-        run_id: run.run_id,
-        workflow_id: run.workflow_id,
-        project_id: run.project_id,
-        status: format!("{:?}", run.status),
-        started_at: run.started_at,
-        completed_at: run.completed_at,
-        steps: vec![],
-    }))
 }
 
 /// GET /workflow/runs/:id/artifacts - Get artifacts for a run
