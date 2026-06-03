@@ -48,7 +48,7 @@ Current Rust daemon validation:
 | Core HTTP API tests | 100% passing |
 | Workflow execution end-to-end tests | 100% passing |
 
-The Windows desktop UI uses WPF + WebView2 and starts the Rust daemon automatically. The TypeScript daemon remains only as a legacy behavior baseline.
+The Windows desktop UI now uses Tauri + React + TypeScript and starts the Rust daemon automatically. The old WPF/WebView2 GUI and TypeScript daemon remain only as legacy compatibility baselines.
 
 ## Use CodePanion
 
@@ -57,10 +57,10 @@ The Windows desktop UI uses WPF + WebView2 and starts the Rust daemon automatica
 For users, the recommended entry is the Windows portable desktop app:
 
 ```text
-CodePanion.Gui.exe
+CodePanion.exe
 ```
 
-The app provides project management, global workflow views, run timelines, artifact previews, human gate decisions, and provider configuration.
+The app provides a Codex-style thread workspace with project management, global workflow views, run timelines, artifact previews, human gate decisions, and provider configuration.
 
 ### Rust Daemon
 
@@ -150,7 +150,8 @@ CodePanion/
 ├── codepanion-rust/   # Rust daemon, workflow engine, providers, agent runtime
 ├── packages/
 │   ├── daemon/        # TypeScript transition daemon and behavior baseline
-│   └── gui/           # Windows WPF + WebView2 desktop app
+│   ├── gui/           # Tauri + React desktop app
+│   └── gui-wpf-legacy/# Legacy WPF + WebView2 desktop app
 ├── docs/              # Product, architecture, development, and migration docs
 ├── scripts/           # Build, packaging, and validation scripts
 └── README.md

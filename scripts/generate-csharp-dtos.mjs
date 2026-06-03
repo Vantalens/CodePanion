@@ -16,7 +16,7 @@ import { z } from 'zod';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '..');
 const distPath = resolve(repoRoot, 'packages/daemon/dist/shared/protocol.js');
-const outPath = resolve(repoRoot, 'packages/gui/Models/Generated/ProtocolDtos.g.cs');
+const outPath = resolve(repoRoot, 'packages/gui-wpf-legacy/Models/Generated/ProtocolDtos.g.cs');
 
 const isDebug = process.env.CODEPANION_DEBUG === '1' || process.env.LOG_LEVEL === 'debug';
 

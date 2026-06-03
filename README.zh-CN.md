@@ -48,7 +48,7 @@ CodePanion 当前默认使用 Rust daemon 作为本地运行时，目标是降�
 | 核心 HTTP API 测试 | 100% 通过 |
 | Workflow 执行端到端测试 | 100% 通过 |
 
-Windows 桌面界面使用 WPF + WebView2，并会自动启动 Rust daemon。TypeScript daemon 仅作为旧行为兼容基线保留。
+Windows 桌面界面现在使用 Tauri + React + TypeScript，并会自动启动 Rust daemon。旧 WPF/WebView2 GUI 和 TypeScript daemon 仅作为兼容基线保留。
 
 ## 使用 CodePanion
 
@@ -57,10 +57,10 @@ Windows 桌面界面使用 WPF + WebView2，并会自动启动 Rust daemon。Typ
 普通用户推荐从 Windows 便携版进入：
 
 ```text
-CodePanion.Gui.exe
+CodePanion.exe
 ```
 
-桌面应用提供项目管理、全局 workflow 视图、run 时间线、artifact 预览、human gate 决策和 provider 配置。
+桌面应用提供 Codex 式线程工作台、项目管理、全局 workflow 视图、run 时间线、artifact 预览、human gate 决策和 provider 配置。
 
 ### Rust Daemon
 
@@ -150,7 +150,8 @@ CodePanion/
 ├── codepanion-rust/   # Rust daemon、workflow engine、provider、agent runtime
 ├── packages/
 │   ├── daemon/        # TypeScript 过渡 daemon 和行为基线
-│   └── gui/           # Windows WPF + WebView2 桌面应用
+│   ├── gui/           # Tauri + React 桌面应用
+│   └── gui-wpf-legacy/# Legacy WPF + WebView2 桌面应用
 ├── docs/              # 产品、架构、开发和迁移文档
 ├── scripts/           # 构建、打包和验证脚本
 └── README.md

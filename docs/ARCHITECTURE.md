@@ -103,8 +103,8 @@ Provider 不允许读取外部工具的私有 token、cookie、插件数据库�
 ┌──────────────────────────────────────────────────────────────────────┐
 │                            用户层                                     │
 │   ┌──────────────┐  ┌──────────────┐  ┌──────────────────────────┐  │
-│   │  WPF GUI     │  │  Terminal    │  │  Workflow Executors       │  │
-│   │  + WebView2  │  │  + CLI/PTTY  │  │  (Codex / Claude /        │  │
+│   │  Tauri GUI   │  │  Terminal    │  │  Workflow Executors       │  │
+│   │  + React     │  │  + CLI/PTTY  │  │  (Codex / Claude /        │  │
 │   │              │  │              │  │   OpenCode / local cmds)  │  │
 │   └──────┬───────┘  └──────┬───────┘  └────────────┬─────────────┘  │
 └──────────┼──────────────────┼─────────────────────-┼─────────────────┘
@@ -536,7 +536,7 @@ Rust daemon 使用统一错误响应：输入校验失败回 400，未知资源�
 
 - Rust CLI 失败：命令向 stderr 输出错误并返回非零退出码。
 - 旧 Adapter SDK 失败：仅作为兼容层维护，不作为新路线扩展入口。
-- GUI 失败：WPF 端 `async void` 全部包 try/catch（[MainWindow.xaml.cs:95-107](../packages/gui/MainWindow.xaml.cs#L95-L107)），WebSocket 断开走指数退避重连（2s → 30s 上限）。
+- GUI 失败：默认 Tauri shell 负责 daemon 生命周期，React 端通过 typed HTTP/WS client 进入断线态并允许刷新；legacy WPF 代码保留在 `packages/gui-wpf-legacy` 作为兼容基线。
 
 ### 错误恢复策略
 
@@ -593,7 +593,7 @@ Rust daemon 使用统一错误响应：输入校验失败回 400，未知资源�
 | 单元 | `codepanion-rust/crates/*/src/*.rs` | config、provider、workflow、runtime 纯逻辑 |
 | Daemon 集成 | `codepanion-rust/crates/daemon/tests/*_test.rs` | HTTP API、WebSocket、provider、scheduler、workflow execution |
 | CLI 集成 | `codepanion-rust/crates/daemon/tests/cli_test.rs` | CLI 命令真实调用 test daemon |
-| GUI | `dotnet build packages/gui/CodePanion.Gui.csproj -c Release` + `scripts/verify-gui-cli.ps1` | GUI 编译、Rust daemon API/CLI smoke |
+| GUI | `npm run gui:build` + `scripts/verify-gui-cli.ps1` | Tauri GUI 编译、Rust daemon API/CLI smoke |
 | 兼容基线 | `npm test` | 旧 TypeScript 行为仍未破坏 |
 
 新增 Rust daemon/CLI 功能时优先在 `codepanion-rust/crates/daemon/tests/` 或对应 crate 单元测试中追加用例。
@@ -605,20 +605,20 @@ Rust daemon 使用统一错误响应：输入校验失败回 400，未知资源�
 ```bash
 npm install
 npm run build               # 编译 daemon + 生成 bundle
-npm run gui:build           # WPF 调试构建
+npm run gui:build           # Tauri GUI 构建
 npm test                    # daemon + adapter-sdk + DTO 一致性
 ```
 
 ### Windows Alpha 用户路径
 
-Windows Alpha 阶段以 `CodePanion.Gui.exe` 双击运行为唯一普通用户路径，不强制 CLI / NSSM / 服务化部署：
+Windows Alpha 阶段以 `CodePanion.exe` 双击运行为唯一普通用户路径，不强制 CLI / NSSM / 服务化部署：
 
-- GUI 启动时由 `DaemonProcessManager` 自动 spawn Rust daemon（优先便携包内 `daemon/codepanion-daemon.exe`，开发环境回退 `codepanion-rust/target/release/codepanion-daemon.exe` 或 debug 构建）。旧 Node daemon 仅在 `CODEPANION_ENABLE_LEGACY_NODE_DAEMON=1` 时回退。
+- GUI 启动时由 Tauri command 自动 spawn Rust daemon（优先便携包内 `daemon/codepanion-daemon.exe`，开发环境回退 `codepanion-rust/target/release/codepanion-daemon.exe` 或 debug 构建）。旧 WPF GUI 位于 `packages/gui-wpf-legacy`，不再是默认入口。
 - daemon 监听 `127.0.0.1`，token 写入 `~/.codepanion/config.json`（权限 0o600）。
 - 退出 GUI 时 daemon 进程随之结束；无需 systemd / launchd / NSSM。
 - 打包流程参考 [scripts/package-windows.ps1](../scripts/package-windows.ps1)。
 
-跨平台 GUI（Tauri / Avalonia）与服务化部署都在 [PRODUCT_ROADMAP.md](PRODUCT_ROADMAP.md) 后续路线中，不作为 Alpha 阻塞项。
+Avalonia 备选壳、服务化部署和非 Windows 分发都在 [PRODUCT_ROADMAP.md](PRODUCT_ROADMAP.md) 后续路线中，不作为 Alpha 阻塞项；默认桌面壳已切到 Tauri + React。
 
 ## 路线衔接
 

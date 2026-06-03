@@ -6,7 +6,7 @@ import { dirname, resolve } from 'node:path';
 import { JSDOM } from 'jsdom';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const SCRIPT_PATH = resolve(here, '../../gui/wwwroot/vendor/codepanion-markdown.js');
+const SCRIPT_PATH = resolve(here, '../../gui-wpf-legacy/wwwroot/vendor/codepanion-markdown.js');
 const SCRIPT_SOURCE = readFileSync(SCRIPT_PATH, 'utf8');
 
 function loadSanitizer() {

@@ -207,6 +207,22 @@ async fn test_workflow_gate_resolution() {
                         .contains("decision=approve")
             })
     );
+
+    let history_response = daemon
+        .get(&format!("/api/v1/workflow/gates/{}/review/history", run_id))
+        .await
+        .unwrap();
+    assert_eq!(history_response.status(), 200);
+    let history: serde_json::Value = history_response.json().await.unwrap();
+    let decisions = history["history"].as_array().unwrap();
+    assert!(decisions.iter().any(|item| {
+        item["type"] == "human-decision"
+            && item["stepId"] == "review"
+            && item["content"]
+                .as_str()
+                .unwrap()
+                .contains("decision=approve")
+    }));
 }
 
 /// Test workflow board listing

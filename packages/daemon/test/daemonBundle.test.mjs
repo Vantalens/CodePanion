@@ -1,27 +1,31 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFileSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
-// P2.2：daemon 自动启动路径的契约检查。
-// DaemonProcessManager.FindDaemonEntry() 会优先查找 packages/daemon/bundle/daemon.cjs，
-// 找不到再回退 packages/daemon/dist/daemon-entry.js。两份产物缺一不可，否则便携版双击
-// 启动会直接失败到 "未找到随软件发布的 daemon 文件" 的诊断分支。
+// P8：默认桌面壳已切到 Tauri + React，便携版必须打包 Rust daemon，
+// 旧 WPF/Node daemon bundle 只能作为 legacy fallback 存在，不能回到默认入口。
 const here = dirname(fileURLToPath(import.meta.url));
-const bundlePath = resolve(here, '../bundle/daemon.cjs');
 const distEntryPath = resolve(here, '../dist/daemon-entry.js');
+const packageScriptPath = resolve(here, '../../../scripts/package-windows.ps1');
+const validateScriptPath = resolve(here, '../../../scripts/validate-portable-package.ps1');
 
-test('daemon bundle 产物存在且非空', () => {
-  assert.equal(existsSync(bundlePath), true, '便携版打包要求 packages/daemon/bundle/daemon.cjs 存在');
-  const stat = statSync(bundlePath);
-  assert.ok(stat.size > 100_000, `daemon.cjs 看起来不是完整 bundle，大小=${stat.size}`);
+test('Windows 打包默认使用 Tauri shell 和 Rust daemon', () => {
+  const content = readFileSync(packageScriptPath, 'utf8');
+  assert.match(content, /npm run tauri:build/, 'package:windows 必须构建 Tauri GUI');
+  assert.match(content, /CodePanion\.exe/, '便携版默认入口必须是 Tauri 产物 CodePanion.exe');
+  assert.match(content, /codepanion-daemon\.exe/, '便携版必须包含 Rust daemon');
+  assert.doesNotMatch(content, /daemon\.cjs/, '默认 Windows 打包不能依赖旧 Node daemon bundle');
+  assert.doesNotMatch(content, /CodePanion\.Gui\.exe/, '默认 Windows 打包不能回退 WPF 入口');
 });
 
-test('daemon bundle 内含 /health 路由与 bootDaemon 入口符号', () => {
-  const content = readFileSync(bundlePath, 'utf8');
-  assert.match(content, /\/health/, 'bundle 必须包含 /health 路由，否则 DaemonProcessManager 健康检查永远失败');
-  assert.match(content, /bootDaemon|acquireLock/, 'bundle 必须包含 daemon 启动入口符号');
+test('便携版校验脚本检查新默认入口并拒绝旧运行时', () => {
+  const content = readFileSync(validateScriptPath, 'utf8');
+  assert.match(content, /CodePanion\.exe/, '校验脚本必须检查 Tauri GUI 入口');
+  assert.match(content, /daemon\\codepanion-daemon\.exe/, '校验脚本必须检查 Rust daemon');
+  assert.match(content, /daemon\\daemon\.cjs/, '校验脚本必须拒绝旧 Node daemon bundle');
+  assert.match(content, /CodePanion\.Gui\.exe/, '校验脚本必须拒绝旧 WPF 入口');
 });
 
 test('dist daemon-entry.js 存在以满足 DaemonProcessManager 的回退路径', () => {

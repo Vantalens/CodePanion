@@ -11,9 +11,9 @@ import { JSDOM } from 'jsdom';
 // window.CODEPANION.__test 暴露的内部函数断言控制台的核心渲染与消息处理逻辑。
 
 const here = dirname(fileURLToPath(import.meta.url));
-const projectsSource = readFileSync(resolve(here, '../../gui/wwwroot/projects.js'), 'utf8');
-const settingsSource = readFileSync(resolve(here, '../../gui/wwwroot/settings.js'), 'utf8');
-const chatSource = readFileSync(resolve(here, '../../gui/wwwroot/chat.js'), 'utf8');
+const projectsSource = readFileSync(resolve(here, '../../gui-wpf-legacy/wwwroot/projects.js'), 'utf8');
+const settingsSource = readFileSync(resolve(here, '../../gui-wpf-legacy/wwwroot/settings.js'), 'utf8');
+const chatSource = readFileSync(resolve(here, '../../gui-wpf-legacy/wwwroot/chat.js'), 'utf8');
 
 // 构造一份和重建后 chat.html 对齐的最小 DOM；缺任何 id 都会让对应 render 静默跳过。
 const SHELL = `<!doctype html><html><body>

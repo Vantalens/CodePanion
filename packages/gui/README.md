@@ -1,91 +1,42 @@
 # CodePanion GUI
 
-[English](README.md) | [简体中文](README.zh-CN.md)
+This package is the default CodePanion desktop GUI. It uses Tauri, React, and TypeScript, and talks directly to the local Rust daemon over HTTP/WebSocket.
 
-This package contains the Windows desktop GUI for CodePanion. It is built with C# WPF and WebView2, and it connects to the local daemon to display projects, workflow runs, human gates, artifacts, and provider settings.
-
-## Features
-
-- Project sidebar with project CRUD, search, filtering, and selected-run state restoration.
-- Global workspace views for runs, gates, workflows, queues, and project status.
-- Current run timeline with step status, stdout/stderr output, role/model/provider metadata, and permission indicators.
-- Artifact preview for delivery notes, patch summaries, test results, and review reports.
-- Human gate decision panel with approve / reject / retry, constraints, messages, and decision history.
-- Provider and model configuration UI for local workflow execution.
-
-## Technology Stack
-
-- .NET 8.0
-- WPF (Windows Presentation Foundation)
-- WebView2
-- Rust daemon HTTP/WebSocket API
-- Local HTML/CSS/JavaScript workspace UI
-
-## Build and Run
-
-### Prerequisites
-
-- .NET SDK 8.0 or later
-- Windows 10/11
-- WebView2 Runtime
-
-### Build
+## Development
 
 ```bash
-cd packages/gui
-dotnet restore
-dotnet build
-```
-
-From the repository root:
-
-```bash
-npm run gui:build
+npm install
 npm run gui:run
 ```
 
-### Publish
+The Tauri shell starts `codepanion-daemon` automatically when no healthy daemon is available. In development it searches `codepanion-rust/target/release` and `codepanion-rust/target/debug`; set `CODEPANION_DAEMON_PATH` to override.
+
+## Build
 
 ```bash
-dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+npm run gui:build
 ```
 
-Output:
+The production app is emitted by Tauri under `packages/gui/src-tauri/target/release`.
 
-```text
-bin/Release/net8.0-windows/win-x64/publish/CodePanion.Gui.exe
+## Verification
+
+```bash
+npm --prefix packages/gui test
+npm --prefix packages/gui run test:visual
 ```
 
-## Usage
+The visual check starts Vite, verifies 1200px, 900px, and 390px workbench widths have no horizontal overflow, and refreshes ignored screenshots under `output/playwright`.
 
-For normal use, start the packaged desktop application:
-
-```text
-CodePanion.Gui.exe
-```
-
-The GUI connects to the local daemon on the configured port, shows workspace status, and lets users monitor or intervene in workflow execution.
-
-## Project Structure
+## Structure
 
 ```text
 packages/gui/
-├── App.xaml
-├── App.xaml.cs
-├── MainWindow.xaml
-├── MainWindow.xaml.cs
-├── Services/
-├── Assets/
-├── web/
-└── CodePanion.Gui.csproj
+├── src/                  # React application
+│   ├── daemon-client/    # typed Rust daemon HTTP/WS client
+│   ├── state/            # reducers and formatting helpers
+│   └── components/       # reusable UI primitives
+└── src-tauri/            # Tauri desktop shell and daemon lifecycle commands
 ```
 
-## Development Notes
-
-- Keep GUI behavior aligned with `DEVELOPMENT_TASKS.md` and the Rust daemon API contract.
-- Avoid reintroducing old session-monitoring or passive source-listener flows as new product surfaces.
-- Prefer local WebView assets and explicit daemon API calls.
-
-## License
-
-MIT
+The old WPF/WebView2 GUI is retained in `packages/gui-wpf-legacy` for one transition cycle.

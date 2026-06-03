@@ -7,7 +7,7 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $distDir = Join-Path $root "dist\CodePanion-$RuntimeIdentifier"
 $daemonExe = Join-Path $distDir "daemon\codepanion-daemon.exe"
-$cliExe = Join-Path $distDir "codepanion.exe"
+$cliExe = Join-Path $distDir "codepanion-cli.exe"
 
 function Assert-PathExists {
     param([string]$Path)
@@ -18,7 +18,7 @@ function Assert-PathExists {
 }
 
 $requiredPaths = @(
-    (Join-Path $distDir "CodePanion.Gui.exe"),
+    (Join-Path $distDir "CodePanion.exe"),
     (Join-Path $distDir "README_START.txt"),
     $daemonExe,
     $cliExe
@@ -30,7 +30,8 @@ foreach ($path in $requiredPaths) {
 $forbiddenRuntimePaths = @(
     (Join-Path $distDir "daemon\daemon.cjs"),
     (Join-Path $distDir "daemon\node_modules"),
-    (Join-Path $distDir "runtime\node.exe")
+    (Join-Path $distDir "runtime\node.exe"),
+    (Join-Path $distDir "CodePanion.Gui.exe")
 )
 foreach ($path in $forbiddenRuntimePaths) {
     if (Test-Path -LiteralPath $path) {

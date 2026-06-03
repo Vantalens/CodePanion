@@ -1,6 +1,8 @@
-# CodePanion GUI
+# CodePanion GUI Legacy
 
 [English](README.md) | [简体中文](README.zh-CN.md)
+
+本目录保留旧 WPF/WebView2 GUI。默认 GUI 已迁移到 `packages/gui`，技术栈为 Tauri + React + TypeScript。
 
 本包是 CodePanion 的 Windows 桌面 GUI，基于 C# WPF 和 WebView2 开发。它连接本地 daemon，用于展示项目、workflow run、human gate、artifact 和 provider 设置。
 

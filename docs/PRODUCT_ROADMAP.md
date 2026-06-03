@@ -30,11 +30,11 @@ CodePanion 更接近“个人本地 Devin + 多 agent 调度器 + Rust 高性能
 
 ## 产品保留决策
 
-- **保留当前入口**：Windows Alpha 继续以 `CodePanion.Gui.exe` 双击运行为普通用户路径。
+- **保留当前入口**：Windows Alpha 继续以桌面 GUI 双击运行为普通用户路径；默认入口已迁移为 Tauri 产物 `CodePanion.exe`。
 - **Rust daemon 默认**：GUI、CLI、打包和新开发默认走 Rust daemon；Node daemon 只作为旧行为基线保留。
 - **保留当前行为基线**：HTTP/WebSocket 契约、workflow 定义、run history、artifact、人工门和 GUI 工作台作为迁移验收标准。
 - **重排当前主线**：先 Rust 化本地全自动 workflow，再做多项目/多任务调度和外部能力源接入；监听、识别和外部来源不再进入新路线。
-- **后置评估**：Tauri/Avalonia 跨平台 GUI、provider adapter、Enterprise 治理能力和规则跨生态同步进入后续路线，不作为 Alpha 阻塞项。
+- **GUI 现代化**：Tauri + React GUI 已成为默认桌面壳；Avalonia 仅保留为后续评估项。
 
 ## 核心原则
 
@@ -112,7 +112,7 @@ CodePanion 更接近“个人本地 Devin + 多 agent 调度器 + Rust 高性能
 - 对首批工具按 L1/L2/L3/L4 分层推进，不强行读取闭源私有状态
 - 能力源接入 SDK 草案，降低对一个新外部 AI 工具完成 API provider / CLI provider / in-process harness 适配的成本
 - 本地 workflow 历史、artifact 查询、角色模板和跨工具能力编排基础
-- Tauri/Avalonia 跨平台 GUI 评估，但只在 Alpha 稳定后决定是否迁移
+- Tauri GUI 已作为默认桌面壳落地；Avalonia 仅作为后续跨平台备选评估
 
 ### 成功标准
 

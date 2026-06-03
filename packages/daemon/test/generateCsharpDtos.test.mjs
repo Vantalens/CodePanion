@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '../../..');
 const generatorPath = resolve(repoRoot, 'scripts/generate-csharp-dtos.mjs');
-const generatedPath = resolve(repoRoot, 'packages/gui/Models/Generated/ProtocolDtos.g.cs');
+const generatedPath = resolve(repoRoot, 'packages/gui-wpf-legacy/Models/Generated/ProtocolDtos.g.cs');
 
 function runGenerator(args = [], env = {}) {
   return spawnSync(process.execPath, [generatorPath, ...args], {

@@ -313,6 +313,10 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::
         )
         .route("/workflow/gates", get(routes::workflow::get_workflow_gates))
         .route(
+            "/api/v1/workflow/gates/:run_id/:step_id/history",
+            get(routes::workflow::get_gate_history),
+        )
+        .route(
             "/workflow/gates/:run_id/:step_id/resolve",
             post(routes::workflow::resolve_gate),
         )

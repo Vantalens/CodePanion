@@ -65,7 +65,7 @@
 
 ### 你的 CodePanion 架构
 ```
-GUI (WPF + WebView2)
+GUI (Tauri + React)
   └─> Rust daemon
        └─> DeepSeek API（外部）
 ```

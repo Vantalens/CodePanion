@@ -18,11 +18,13 @@
     "openai-api",
     "claude-code",
     "rust",
-    "wpf",
+    "tauri",
+    "react",
     "websocket"
   ],
   "workspaces": [
-    "packages/daemon"
+    "packages/daemon",
+    "packages/gui"
   ],
   "scripts": {
     "build": "npm run build -w packages/daemon",

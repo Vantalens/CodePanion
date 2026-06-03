@@ -5,15 +5,14 @@ CodePanion 当前推荐入口是 Windows 便携版 GUI。GUI 会自动启动随�
 ## 系统要求
 
 - Windows 10/11 64-bit
-- WebView2 Runtime
+- WebView2 Runtime（仅 legacy WPF GUI 需要）
 - 4 GB RAM 或以上
 - 首次配置 provider 时需要可访问对应模型 API
 
 源码开发还需要：
 
 - Rust stable toolchain
-- .NET SDK 8.0+
-- Node.js 24.x，仅用于保留的 TypeScript 兼容测试
+- Node.js 24.x，用于 Tauri/React GUI 和保留的 TypeScript 兼容测试
 
 ## 使用 Windows 便携版
 
@@ -33,14 +32,14 @@ dist/CodePanion-win-x64/
 双击启动：
 
 ```text
-CodePanion.Gui.exe
+CodePanion.exe
 ```
 
 便携包必须包含：
 
 ```text
-CodePanion.Gui.exe
-codepanion.exe
+CodePanion.exe
+codepanion-cli.exe
 daemon/codepanion-daemon.exe
 README_START.txt
 ```
@@ -83,7 +82,7 @@ target\release\codepanion.exe --api-url http://127.0.0.1:8318 model list
 构建 GUI：
 
 ```powershell
-dotnet build packages/gui/CodePanion.Gui.csproj -c Release
+npm run gui:build
 ```
 
 开发环境中 GUI 会优先查找：
@@ -141,7 +140,7 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo build --release --bin codepanion-daemon --bin codepanion
 cd ..
-dotnet build packages/gui/CodePanion.Gui.csproj -c Release
+npm run gui:build
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-gui-cli.ps1
 git diff --check
 ```
@@ -150,7 +149,7 @@ git diff --check
 
 - GUI 显示未连接：确认 `daemon/codepanion-daemon.exe` 存在，或先运行 `cargo build --release --bin codepanion-daemon`。
 - CLI 连接失败：给 CLI 加 `--api-url http://127.0.0.1:<port>`，并确认 `/health` 可访问。
-- WebView2 缺失：安装 Microsoft Edge WebView2 Evergreen Runtime。
+- WebView2 缺失：仅影响 legacy WPF GUI；默认 Tauri GUI 不以 WPF/WebView2 项目作为入口。
 - Provider 测试失败：检查 API key、base URL、网络代理和默认模型名称。
 - 便携包校验失败：重新运行 `scripts/package-windows.ps1`，不要手工混入旧 `daemon.cjs`、`node_modules` 或 `runtime/node.exe`。
 

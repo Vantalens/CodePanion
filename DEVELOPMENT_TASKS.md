@@ -193,7 +193,7 @@
   - `cargo fmt --all`
   - `cargo test --workspace`
   - `cargo clippy --workspace --all-targets -- -D warnings`
-  - `dotnet build packages/gui/CodePanion.Gui.csproj -c Release`
+  - `npm run gui:build`
   - `git diff --check`
 
 ---
@@ -265,6 +265,22 @@
     - [x] Workflow execution 持久化 run history、step artifacts、delivery-note
   - [x] 移除 TypeScript daemon 依赖（阶段 6，P2）：GUI/打包默认走 Rust daemon；旧 Node daemon 仅显式环境变量回退
   - **验收**：`cargo fmt --all` ✓；`cargo test --workspace` ✓；`cargo clippy --workspace --all-targets -- -D warnings` ✓；`cargo build --release --bin codepanion-daemon --bin codepanion` ✓；`npm test` ✓；GUI 隔离输出 Release build ✓；portable package + validate ✓；`scripts/verify-gui-cli.ps1` ✓；核心 API / Provider / WebSocket / Workflow execution / CLI 测试 100% 通过 ✓；性能指标超预期 ✓；迁移文档已完成 ✓；冷启动 < 500ms 作为后续优化项保留，不阻塞本阶段完成
+
+---
+
+## P8：Tauri + React GUI 现代化
+
+**进度**: 5/5 完成（100%） ✅
+
+目标：把默认 GUI 从 WPF/WebView2 直接替换为 Tauri + React + TypeScript，并保留 WPF legacy 一轮。
+
+- [x] T-01 迁移旧 WPF GUI 到 `packages/gui-wpf-legacy`
+- [x] T-02 新建 `packages/gui` Tauri + React + TypeScript 应用
+- [x] T-03 实现 Codex 式线程工作台、typed daemon client、WS run event reducer
+- [x] T-04 切换 `gui:run`、`gui:build`、`package:windows` 默认入口
+- [x] T-05 更新文档、legacy 测试路径和 portable package 验证脚本
+
+**验收**：`npm --prefix packages/gui test` ✓；`npm --prefix packages/gui run test:visual` ✓；`npm --prefix packages/gui run build` ✓；`npm run gui:build` ✓；`npm run package:windows` ✓；`scripts/validate-portable-package.ps1` ✓
 
 ---
 

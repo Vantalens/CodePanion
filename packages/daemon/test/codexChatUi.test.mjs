@@ -6,10 +6,10 @@ import { dirname, resolve } from 'node:path';
 import { JSDOM } from 'jsdom';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const markdownSource = readFileSync(resolve(here, '../../gui/wwwroot/markdown.js'), 'utf8');
-const projectsSource = readFileSync(resolve(here, '../../gui/wwwroot/projects.js'), 'utf8');
-const settingsSource = readFileSync(resolve(here, '../../gui/wwwroot/settings.js'), 'utf8');
-const codexSource = readFileSync(resolve(here, '../../gui/wwwroot/codex.js'), 'utf8');
+const markdownSource = readFileSync(resolve(here, '../../gui-wpf-legacy/wwwroot/markdown.js'), 'utf8');
+const projectsSource = readFileSync(resolve(here, '../../gui-wpf-legacy/wwwroot/projects.js'), 'utf8');
+const settingsSource = readFileSync(resolve(here, '../../gui-wpf-legacy/wwwroot/settings.js'), 'utf8');
+const codexSource = readFileSync(resolve(here, '../../gui-wpf-legacy/wwwroot/codex.js'), 'utf8');
 
 const SHELL = `<!doctype html><html><body>
   <aside>

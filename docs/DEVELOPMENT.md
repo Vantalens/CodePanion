@@ -7,9 +7,8 @@
 ## 环境要求
 
 - Rust stable toolchain
-- .NET SDK 8.0+
-- Node.js 24.x，用于保留的 TypeScript 兼容测试和历史包构建
-- WebView2 Runtime
+- Node.js 24.x，用于 Tauri/React GUI、保留的 TypeScript 兼容测试和历史包构建
+- WebView2 Runtime（仅 legacy WPF GUI 需要）
 - Git
 
 ## 项目结构
@@ -24,7 +23,8 @@ CodePanion/
 │   ├── crates/model-client/    # OpenAI-compatible client
 │   ├── crates/config/          # bootstrap config helpers
 │   └── crates/shared/          # shared errors/version/contracts
-├── packages/gui/               # WPF + WebView2 desktop workspace
+├── packages/gui/               # Tauri + React desktop workspace
+├── packages/gui-wpf-legacy/    # legacy WPF + WebView2 desktop workspace
 ├── packages/daemon/            # legacy TypeScript daemon compatibility baseline
 ├── docs/
 └── scripts/
@@ -53,7 +53,9 @@ cargo build --release --bin codepanion-daemon --bin codepanion
 GUI and package:
 
 ```bash
-dotnet build packages/gui/CodePanion.Gui.csproj -c Release
+npm --prefix packages/gui test
+npm --prefix packages/gui run test:visual
+npm run gui:build
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/package-windows.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/validate-portable-package.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-gui-cli.ps1
@@ -68,7 +70,7 @@ npm test
 ## Development Rules
 
 - Put new daemon, workflow, provider, scheduler, CLI, and config behavior in `codepanion-rust`.
-- GUI startup must prefer the packaged Rust daemon at `daemon/codepanion-daemon.exe`; legacy Node fallback is only enabled with `CODEPANION_ENABLE_LEGACY_NODE_DAEMON=1`.
+- GUI startup must prefer the packaged Rust daemon at `daemon/codepanion-daemon.exe`; the Tauri shell owns daemon startup and shutdown for GUI-launched daemons.
 - New provider/CLI behavior needs Rust integration tests under `codepanion-rust/crates/daemon/tests/`.
 - API additions must update `docs/API.md` and, when user-facing, `docs/INSTALL.md` or `README.md`.
 - High-risk file, shell, network, secret, and git-history actions must stay behind explicit risk classification and human gates.
@@ -85,7 +87,9 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo build --release --bin codepanion-daemon --bin codepanion
 cd ..
-dotnet build packages/gui/CodePanion.Gui.csproj -c Release
+npm --prefix packages/gui test
+npm --prefix packages/gui run test:visual
+npm run gui:build
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/package-windows.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/validate-portable-package.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-gui-cli.ps1

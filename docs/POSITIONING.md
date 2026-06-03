@@ -260,7 +260,7 @@
 3. **缓存优化**：缓存 workflow 定义、role 配置、模型响应
 4. **增量更新**：GUI 增量更新，只更新变化的部分
 5. **WebSocket 实时推送**：daemon → GUI 实时推送，不轮询
-6. **原生性能**：daemon 用 Node.js，GUI 用 WPF + WebView2，性能接近原生
+6. **原生性能**：daemon 用 Rust，GUI 用 Tauri + React，旧 WPF/WebView2 仅作为 legacy 兼容基线
 
 ### 简单操作策略
 

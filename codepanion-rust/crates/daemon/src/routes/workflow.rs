@@ -4,7 +4,7 @@ use axum::{
     http::StatusCode,
 };
 use codepanion_workflow_engine::{
-    ArtifactType, GateDecision, GateResolution, HumanGateManager, WorkflowRun,
+    ArtifactType, GateDecision, GateResolution, HumanGateManager, WorkflowArtifact, WorkflowRun,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -106,6 +106,12 @@ pub struct DeliveryNoteResponse {
 #[serde(rename_all = "camelCase")]
 pub struct GatesResponse {
     pub gates: Vec<GateSummary>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GateHistoryResponse {
+    pub history: Vec<ArtifactSummary>,
 }
 
 #[derive(Debug, Serialize)]
@@ -239,20 +245,24 @@ pub async fn get_run_artifacts(
         .list(Some(&run_id))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .into_iter()
-        .map(|artifact| ArtifactSummary {
-            key: artifact.id,
-            artifact_type: artifact.artifact_type,
-            title: artifact.title,
-            size: artifact.content.len() as u64,
-            content: artifact.content,
-            files: artifact.files,
-            step_id: artifact.step_id,
-            role: artifact.role,
-            created_at: artifact.created_at,
-        })
+        .map(artifact_summary)
         .collect();
 
     Ok(Json(ArtifactsResponse { artifacts }))
+}
+
+fn artifact_summary(artifact: WorkflowArtifact) -> ArtifactSummary {
+    ArtifactSummary {
+        key: artifact.id,
+        artifact_type: artifact.artifact_type,
+        title: artifact.title,
+        size: artifact.content.len() as u64,
+        content: artifact.content,
+        files: artifact.files,
+        step_id: artifact.step_id,
+        role: artifact.role,
+        created_at: artifact.created_at,
+    }
 }
 
 /// GET /workflow/runs/:id/delivery - Get delivery note for a run
@@ -340,6 +350,24 @@ pub async fn get_workflow_gates(State(state): State<AppState>) -> Json<GatesResp
         .collect();
 
     Json(GatesResponse { gates })
+}
+
+/// GET /api/v1/workflow/gates/:run_id/:step_id/history - List prior gate decisions
+pub async fn get_gate_history(
+    State(state): State<AppState>,
+    Path((run_id, step_id)): Path<(String, String)>,
+) -> Result<Json<GateHistoryResponse>, StatusCode> {
+    let artifacts = state
+        .workflow_artifacts
+        .get_by_type(&run_id, ArtifactType::HumanDecision)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let history = artifacts
+        .into_iter()
+        .filter(|artifact| artifact.step_id.as_deref() == Some(step_id.as_str()))
+        .map(artifact_summary)
+        .collect();
+
+    Ok(Json(GateHistoryResponse { history }))
 }
 
 /// POST /workflow/gates/:run_id/:step_id/resolve - Resolve a gate
