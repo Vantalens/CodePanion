@@ -126,7 +126,7 @@ fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
 mod tests {
     use super::*;
     use axum::body::Body;
-    use axum::http::{Request, StatusCode, header};
+    use axum::http::{Request, header};
 
     #[test]
     fn constant_time_eq_matches_equal_tokens() {
