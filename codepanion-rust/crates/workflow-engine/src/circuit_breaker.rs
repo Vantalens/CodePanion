@@ -47,10 +47,7 @@ impl CircuitBreaker {
     /// * `false` if execution can continue
     pub fn record_error(&mut self, error_signature: String) -> bool {
         let now = Instant::now();
-        let timestamps = self
-            .error_timestamps
-            .entry(error_signature)
-            .or_default();
+        let timestamps = self.error_timestamps.entry(error_signature).or_default();
 
         // Remove errors outside the time window
         while let Some(&oldest) = timestamps.front() {
@@ -126,7 +123,7 @@ mod tests {
 
         assert!(!breaker.record_error(error.clone())); // Count: 1
         assert!(!breaker.record_error(error.clone())); // Count: 2
-        assert!(breaker.record_error(error.clone()));  // Count: 3, trip!
+        assert!(breaker.record_error(error.clone())); // Count: 3, trip!
     }
 
     #[test]
@@ -183,7 +180,7 @@ mod tests {
         breaker.record_error(error.clone());
         assert!(!breaker.would_trip(&error)); // Count: 1
         breaker.record_error(error.clone());
-        assert!(breaker.would_trip(&error));  // Count: 2, next would trip
+        assert!(breaker.would_trip(&error)); // Count: 2, next would trip
     }
 
     #[test]

@@ -103,9 +103,7 @@ impl ReasoningGraph {
                 let from_confirmed = self
                     .nodes
                     .get(&edge.from)
-                    .map(|n| {
-                        n.state == NodeState::Confirmed || n.state == NodeState::Exploited
-                    })
+                    .map(|n| n.state == NodeState::Confirmed || n.state == NodeState::Exploited)
                     .unwrap_or(false);
 
                 if !from_confirmed {
@@ -119,9 +117,7 @@ impl ReasoningGraph {
                 edge.requires_all.iter().all(|req| {
                     self.nodes
                         .get(req)
-                        .map(|n| {
-                            n.state == NodeState::Confirmed || n.state == NodeState::Exploited
-                        })
+                        .map(|n| n.state == NodeState::Confirmed || n.state == NodeState::Exploited)
                         .unwrap_or(false)
                 })
             })
@@ -172,10 +168,7 @@ impl ReasoningGraph {
 
     /// Get all nodes in a specific state
     pub fn nodes_in_state(&self, state: NodeState) -> Vec<&Node> {
-        self.nodes
-            .values()
-            .filter(|n| n.state == state)
-            .collect()
+        self.nodes.values().filter(|n| n.state == state).collect()
     }
 
     /// Check if a node exists

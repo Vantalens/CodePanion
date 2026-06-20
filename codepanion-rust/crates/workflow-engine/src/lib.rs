@@ -14,9 +14,9 @@ pub mod artifacts;
 pub mod human_gate;
 
 // W-06: Omnigent-inspired agent intelligence modules
-pub mod loop_detection;
 pub mod circuit_breaker;
 pub mod domain_registry;
+pub mod loop_detection;
 pub mod reasoning_graph;
 
 // M-01: Project registry
@@ -79,12 +79,12 @@ pub use cross_project::{
 };
 
 // Omnigent-inspired agent intelligence
-pub use loop_detection::LoopDetector;
 pub use circuit_breaker::CircuitBreaker;
 pub use domain_registry::{
     ChainStep, DomainRegistry, ErrorPattern, ExtractorConfig, PhaseTemplate, ReflectorConfig,
     TaskStep,
 };
+pub use loop_detection::LoopDetector;
 pub use reasoning_graph::{Edge, Node, NodeState, ReasoningGraph};
 
 // 旧的简化版本（保留用于向后兼容）

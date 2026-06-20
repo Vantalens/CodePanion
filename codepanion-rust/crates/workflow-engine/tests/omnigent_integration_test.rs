@@ -16,10 +16,19 @@ async fn test_agent_workflow_with_omnigent_intelligence() {
     let registry = create_code_analysis_registry();
 
     // 2. Build reasoning graph for code quality analysis
-    reasoning_graph.add_node("project_scanned".to_string(), "Project structure scanned".to_string());
-    reasoning_graph.add_node("high_complexity".to_string(), "High complexity detected".to_string());
+    reasoning_graph.add_node(
+        "project_scanned".to_string(),
+        "Project structure scanned".to_string(),
+    );
+    reasoning_graph.add_node(
+        "high_complexity".to_string(),
+        "High complexity detected".to_string(),
+    );
     reasoning_graph.add_node("god_class".to_string(), "God class identified".to_string());
-    reasoning_graph.add_node("low_testability".to_string(), "Low testability score".to_string());
+    reasoning_graph.add_node(
+        "low_testability".to_string(),
+        "Low testability score".to_string(),
+    );
 
     reasoning_graph.add_edge(
         "project_scanned".to_string(),
@@ -67,9 +76,7 @@ async fn test_agent_workflow_with_omnigent_intelligence() {
         let result = simulate_tool_execution(tool_name, &args);
 
         // Circuit breaker on errors
-        if result.starts_with("ERROR")
-            && circuit_breaker.record_error(result.clone())
-        {
+        if result.starts_with("ERROR") && circuit_breaker.record_error(result.clone()) {
             execution_log.push("⚠ Circuit breaker tripped - stopping execution".to_string());
             break;
         }
@@ -98,14 +105,29 @@ async fn test_agent_workflow_with_omnigent_intelligence() {
         // Check active reasoning paths
         let active_edges = reasoning_graph.get_active_edges();
         if !active_edges.is_empty() {
-            execution_log.push(format!("→ {} reasoning paths available", active_edges.len()));
+            execution_log.push(format!(
+                "→ {} reasoning paths available",
+                active_edges.len()
+            ));
         }
     }
 
     // 4. Verify intelligence worked
-    assert!(execution_log.iter().any(|log| log.contains("Loop detected")));
-    assert!(execution_log.iter().any(|log| log.contains("Project scanned")));
-    assert!(execution_log.iter().any(|log| log.contains("God class identified")));
+    assert!(
+        execution_log
+            .iter()
+            .any(|log| log.contains("Loop detected"))
+    );
+    assert!(
+        execution_log
+            .iter()
+            .any(|log| log.contains("Project scanned"))
+    );
+    assert!(
+        execution_log
+            .iter()
+            .any(|log| log.contains("God class identified"))
+    );
 
     // Verify reasoning graph progression
     assert_eq!(
@@ -145,9 +167,15 @@ fn create_code_analysis_registry() -> DomainRegistry {
     let mut registry = DomainRegistry::new();
 
     // Tool timeouts
-    registry.tool_timeouts.insert("scan_project".to_string(), 30);
-    registry.tool_timeouts.insert("complexity_analyzer".to_string(), 120);
-    registry.tool_timeouts.insert("class_analyzer".to_string(), 60);
+    registry
+        .tool_timeouts
+        .insert("scan_project".to_string(), 30);
+    registry
+        .tool_timeouts
+        .insert("complexity_analyzer".to_string(), 120);
+    registry
+        .tool_timeouts
+        .insert("class_analyzer".to_string(), 60);
 
     // Extractors (simplified - just mark presence)
     registry.extractors.insert(
@@ -167,10 +195,22 @@ fn test_reasoning_graph_multi_prerequisite_chain() {
     // Example: Security analysis requiring multiple conditions
     let mut graph = ReasoningGraph::new();
 
-    graph.add_node("sqli_found".to_string(), "SQL Injection vulnerability".to_string());
-    graph.add_node("auth_bypass".to_string(), "Authentication bypass".to_string());
-    graph.add_node("db_access".to_string(), "Database access gained".to_string());
-    graph.add_node("admin_access".to_string(), "Admin access achieved".to_string());
+    graph.add_node(
+        "sqli_found".to_string(),
+        "SQL Injection vulnerability".to_string(),
+    );
+    graph.add_node(
+        "auth_bypass".to_string(),
+        "Authentication bypass".to_string(),
+    );
+    graph.add_node(
+        "db_access".to_string(),
+        "Database access gained".to_string(),
+    );
+    graph.add_node(
+        "admin_access".to_string(),
+        "Admin access achieved".to_string(),
+    );
 
     // Simple chain: SQLi → DB Access
     graph.add_edge(
@@ -213,8 +253,12 @@ fn test_domain_registry_merge() {
     base_registry.tool_timeouts.insert("tool_b".to_string(), 60);
 
     let mut override_registry = DomainRegistry::new();
-    override_registry.tool_timeouts.insert("tool_b".to_string(), 120); // Override
-    override_registry.tool_timeouts.insert("tool_c".to_string(), 90);
+    override_registry
+        .tool_timeouts
+        .insert("tool_b".to_string(), 120); // Override
+    override_registry
+        .tool_timeouts
+        .insert("tool_c".to_string(), 90);
 
     base_registry.merge(override_registry);
 

@@ -93,7 +93,10 @@ impl DomainRegistry {
 
     /// Get timeout for a specific tool, or default if not configured
     pub fn get_tool_timeout(&self, tool_name: &str, default: u64) -> u64 {
-        self.tool_timeouts.get(tool_name).copied().unwrap_or(default)
+        self.tool_timeouts
+            .get(tool_name)
+            .copied()
+            .unwrap_or(default)
     }
 
     /// Check if an extractor exists for a tool
@@ -151,11 +154,14 @@ mod tests {
     #[test]
     fn test_has_extractor() {
         let mut registry = DomainRegistry::new();
-        registry.extractors.insert("nmap".to_string(), ExtractorConfig {
-            name: "nmap".to_string(),
-            pattern: None,
-            fields: vec!["ports".to_string()],
-        });
+        registry.extractors.insert(
+            "nmap".to_string(),
+            ExtractorConfig {
+                name: "nmap".to_string(),
+                pattern: None,
+                fields: vec!["ports".to_string()],
+            },
+        );
 
         assert!(registry.has_extractor("nmap"));
         assert!(!registry.has_extractor("curl"));
@@ -165,12 +171,15 @@ mod tests {
     fn test_serialization() {
         let mut registry = DomainRegistry::new();
         registry.tool_timeouts.insert("tool1".to_string(), 60);
-        registry.error_patterns.insert("tool1".to_string(), ErrorPattern {
-            indicators: vec!["timeout".to_string()],
-            guidance: "Retry with longer timeout".to_string(),
-            retry_tool: Some("tool1".to_string()),
-            give_up: false,
-        });
+        registry.error_patterns.insert(
+            "tool1".to_string(),
+            ErrorPattern {
+                indicators: vec!["timeout".to_string()],
+                guidance: "Retry with longer timeout".to_string(),
+                retry_tool: Some("tool1".to_string()),
+                give_up: false,
+            },
+        );
 
         let json = serde_json::to_string(&registry).unwrap();
         let deserialized: DomainRegistry = serde_json::from_str(&json).unwrap();

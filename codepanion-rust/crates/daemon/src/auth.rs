@@ -65,10 +65,7 @@ fn websocket_protocol_token_matches(request: &Request<Body>, expected_token: &st
     };
 
     // Split protocols and look for our token protocol
-    let protocols: Vec<&str> = protocols_header
-        .split(',')
-        .map(str::trim)
-        .collect();
+    let protocols: Vec<&str> = protocols_header.split(',').map(str::trim).collect();
 
     // Security: Only accept if there's exactly ONE protocol total and it's our token protocol
     // This prevents attackers from mixing valid and malicious protocols
@@ -197,22 +194,34 @@ mod tests {
     fn websocket_token_valid() {
         let request = Request::builder()
             .uri("/ws")
-            .header(header::SEC_WEBSOCKET_PROTOCOL, "codepanion.token.valid-token-123")
+            .header(
+                header::SEC_WEBSOCKET_PROTOCOL,
+                "codepanion.token.valid-token-123",
+            )
             .body(Body::empty())
             .unwrap();
 
-        assert!(websocket_protocol_token_matches(&request, "valid-token-123"));
+        assert!(websocket_protocol_token_matches(
+            &request,
+            "valid-token-123"
+        ));
     }
 
     #[test]
     fn websocket_token_invalid() {
         let request = Request::builder()
             .uri("/ws")
-            .header(header::SEC_WEBSOCKET_PROTOCOL, "codepanion.token.wrong-token")
+            .header(
+                header::SEC_WEBSOCKET_PROTOCOL,
+                "codepanion.token.wrong-token",
+            )
             .body(Body::empty())
             .unwrap();
 
-        assert!(!websocket_protocol_token_matches(&request, "valid-token-123"));
+        assert!(!websocket_protocol_token_matches(
+            &request,
+            "valid-token-123"
+        ));
     }
 
     #[test]
@@ -222,12 +231,15 @@ mod tests {
             .uri("/ws")
             .header(
                 header::SEC_WEBSOCKET_PROTOCOL,
-                "other-protocol, codepanion.token.valid-token-123"
+                "other-protocol, codepanion.token.valid-token-123",
             )
             .body(Body::empty())
             .unwrap();
 
-        assert!(!websocket_protocol_token_matches(&request, "valid-token-123"));
+        assert!(!websocket_protocol_token_matches(
+            &request,
+            "valid-token-123"
+        ));
     }
 
     #[test]
@@ -237,44 +249,59 @@ mod tests {
             .uri("/ws")
             .header(
                 header::SEC_WEBSOCKET_PROTOCOL,
-                "codepanion.token.valid-token-123, codepanion.token.another-token"
+                "codepanion.token.valid-token-123, codepanion.token.another-token",
             )
             .body(Body::empty())
             .unwrap();
 
-        assert!(!websocket_protocol_token_matches(&request, "valid-token-123"));
+        assert!(!websocket_protocol_token_matches(
+            &request,
+            "valid-token-123"
+        ));
     }
 
     #[test]
     fn websocket_token_with_suspicious_characters_rejected() {
         let request = Request::builder()
             .uri("/ws")
-            .header(header::SEC_WEBSOCKET_PROTOCOL, "codepanion.token.token,injection")
+            .header(
+                header::SEC_WEBSOCKET_PROTOCOL,
+                "codepanion.token.token,injection",
+            )
             .body(Body::empty())
             .unwrap();
 
-        assert!(!websocket_protocol_token_matches(&request, "token,injection"));
+        assert!(!websocket_protocol_token_matches(
+            &request,
+            "token,injection"
+        ));
     }
 
     #[test]
     fn websocket_token_wrong_path() {
         let request = Request::builder()
             .uri("/api/test")
-            .header(header::SEC_WEBSOCKET_PROTOCOL, "codepanion.token.valid-token-123")
+            .header(
+                header::SEC_WEBSOCKET_PROTOCOL,
+                "codepanion.token.valid-token-123",
+            )
             .body(Body::empty())
             .unwrap();
 
-        assert!(!websocket_protocol_token_matches(&request, "valid-token-123"));
+        assert!(!websocket_protocol_token_matches(
+            &request,
+            "valid-token-123"
+        ));
     }
 
     #[test]
     fn websocket_token_missing_header() {
-        let request = Request::builder()
-            .uri("/ws")
-            .body(Body::empty())
-            .unwrap();
+        let request = Request::builder().uri("/ws").body(Body::empty()).unwrap();
 
-        assert!(!websocket_protocol_token_matches(&request, "valid-token-123"));
+        assert!(!websocket_protocol_token_matches(
+            &request,
+            "valid-token-123"
+        ));
     }
 
     #[test]
