@@ -153,11 +153,11 @@ impl LoopDetector {
 
     pub fn check_and_record(&mut self, tool_name: &str, args: &serde_json::Value) -> bool {
         let hash = self.compute_hash(tool_name, args);
-        
+
         if self.recent_calls.contains(&hash) {
             return false; // 检测到循环
         }
-        
+
         if self.recent_calls.len() >= self.max_history {
             self.recent_calls.pop_front();
         }
@@ -332,7 +332,7 @@ impl ReasoningGraph {
         });
     }
 
-    pub fn add_edge(&mut self, from: String, to: String, description: String, 
+    pub fn add_edge(&mut self, from: String, to: String, description: String,
                     tool_hint: Option<String>, requires_all: Vec<String>) {
         self.edges.push(Edge {
             from,
@@ -374,12 +374,12 @@ impl ReasoningGraph {
 
     pub fn to_prompt_context(&self) -> String {
         let mut ctx = String::from("## Reasoning Graph\n\n");
-        
+
         // 已确认节点
         let confirmed: Vec<_> = self.nodes.values()
             .filter(|n| n.state == NodeState::Confirmed || n.state == NodeState::Exploited)
             .collect();
-        
+
         if !confirmed.is_empty() {
             ctx.push_str("### Confirmed:\n");
             for node in confirmed {
@@ -396,7 +396,7 @@ impl ReasoningGraph {
                 let to_desc = self.nodes.get(&edge.to)
                     .map(|n| n.description.as_str())
                     .unwrap_or("?");
-                ctx.push_str(&format!("- {} → {} ({})\n", 
+                ctx.push_str(&format!("- {} → {} ({})\n",
                     edge.description, to_desc, edge.to));
                 if let Some(tool) = &edge.tool_hint {
                     ctx.push_str(&format!("  Tool: {}\n", tool));
@@ -439,7 +439,7 @@ impl ContextManager {
         }
 
         let mut trimmed = Vec::new();
-        
+
         // 保留系统消息（第一条）
         if let Some(first) = messages.first() {
             if first.get("role").and_then(|r| r.as_str()) == Some("system") {
@@ -450,7 +450,7 @@ impl ContextManager {
         // 压缩中间消息
         let middle_start = if messages[0].get("role").and_then(|r| r.as_str()) == Some("system") { 1 } else { 0 };
         let middle_end = messages.len().saturating_sub(self.recent_window_size);
-        
+
         for msg in &messages[middle_start..middle_end] {
             trimmed.push(self.compress_message(msg));
         }
@@ -467,7 +467,7 @@ impl ContextManager {
         let mut compressed = msg.clone();
         if let Some(content) = msg.get("content").and_then(|c| c.as_str()) {
             if content.len() > 300 {
-                let truncated = format!("{}... [truncated {} chars]", 
+                let truncated = format!("{}... [truncated {} chars]",
                     &content[..300], content.len() - 300);
                 compressed["content"] = Value::String(truncated);
             }
@@ -498,7 +498,7 @@ mod tests {
     fn test_loop_detection() {
         let mut detector = LoopDetector::new(10);
         let args = serde_json::json!({"target": "example.com"});
-        
+
         assert!(detector.check_and_record("nmap", &args));
         assert!(!detector.check_and_record("nmap", &args)); // 第二次应该被阻止
     }
@@ -507,7 +507,7 @@ mod tests {
     fn test_circuit_breaker() {
         let mut breaker = CircuitBreaker::new(3);
         let error = "Connection timeout".to_string();
-        
+
         assert!(!breaker.record_error(error.clone()));
         assert!(!breaker.record_error(error.clone()));
         assert!(breaker.record_error(error.clone())); // 第 3 次应该断路
@@ -518,12 +518,12 @@ mod tests {
         let mut graph = ReasoningGraph::new();
         graph.add_node("sqli".to_string(), "SQL Injection found".to_string());
         graph.add_node("db_access".to_string(), "Database access".to_string());
-        graph.add_edge("sqli".to_string(), "db_access".to_string(), 
+        graph.add_edge("sqli".to_string(), "db_access".to_string(),
                       "Dump database".to_string(), Some("sqlmap".to_string()), vec![]);
-        
+
         // 起始未激活
         assert_eq!(graph.get_active_edges().len(), 0);
-        
+
         // 确认 SQLi 后激活
         graph.mark_state("sqli", NodeState::Confirmed);
         assert_eq!(graph.get_active_edges().len(), 1);

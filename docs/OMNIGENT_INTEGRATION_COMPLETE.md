@@ -11,7 +11,7 @@
 
 #### 1.1 循环检测器 (LoopDetector)
 - **文件**: `codepanion-rust/crates/workflow-engine/src/loop_detection.rs`
-- **功能**: 
+- **功能**:
   - MD5 哈希检测重复的工具调用（tool_name + args）
   - 维护最近 10 次调用历史
   - 阻止完全相同的调用重复执行
@@ -69,7 +69,7 @@ Success rate: 100%
 
 ### Omnigent (Python)
 ```
-agent.py (1024 lines) 
+agent.py (1024 lines)
 ├── ReAct loop
 ├── Loop detection (MD5)
 ├── Circuit breaker
@@ -101,7 +101,7 @@ agent-runtime/ (未来工作)
 
 ```rust
 use codepanion_workflow_engine::{
-    CircuitBreaker, DomainRegistry, LoopDetector, 
+    CircuitBreaker, DomainRegistry, LoopDetector,
     NodeState, ReasoningGraph,
 };
 

@@ -210,10 +210,10 @@ await runCli(process.argv);
 ```typescript
 class PromptDetector {
   private buffer: string = '';
-  
+
   feed(chunk: string): PromptMatch | null {
     this.buffer += chunk;
-    
+
     // 检查是否匹配任何提示模式
     for (const pattern of this.patterns) {
       const match = this.buffer.match(pattern.regex);
@@ -225,12 +225,12 @@ class PromptDetector {
         };
       }
     }
-    
+
     // 保持缓冲区大小
     if (this.buffer.length > MAX_BUFFER) {
       this.buffer = this.buffer.slice(-MAX_BUFFER);
     }
-    
+
     return null;
   }
 }

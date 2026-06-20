@@ -21,10 +21,10 @@ codepanion provider list
 
 输出示例：
 ```
-ID                   NAME                           TYPE            STATUS    
+ID                   NAME                           TYPE            STATUS
 ---------------------------------------------------------------------------
-deepseek-main        DeepSeek API                   deepseek        active    
-claude-api           Claude API                     anthropic       inactive  
+deepseek-main        DeepSeek API                   deepseek        active
+claude-api           Claude API                     anthropic       inactive
 ```
 
 #### 查看当前活跃的 provider
@@ -119,12 +119,12 @@ codepanion model list
 
 输出示例：
 ```
-MODEL ID                                 PROVIDER                      
+MODEL ID                                 PROVIDER
 ----------------------------------------------------------------------
-claude-opus-4-20250514                   Claude API                    
-claude-sonnet-4-20250514                 Claude API                    
-deepseek-chat                            DeepSeek API                  
-deepseek-coder                           DeepSeek API                  
+claude-opus-4-20250514                   Claude API
+claude-sonnet-4-20250514                 Claude API
+deepseek-chat                            DeepSeek API
+deepseek-coder                           DeepSeek API
 ```
 
 #### 设置模型别名

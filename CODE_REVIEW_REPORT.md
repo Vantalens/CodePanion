@@ -1,7 +1,7 @@
 # 功能性代码审核报告
 
-**审核日期**: 2026-06-20  
-**审核范围**: 31个修改文件 + 10个新增文件  
+**审核日期**: 2026-06-20
+**审核范围**: 31个修改文件 + 10个新增文件
 **代码变更**: +2273 / -983 行
 
 ---
@@ -20,7 +20,7 @@
 
 **位置**: `workflow-engine/src/lib.rs`
 
-**问题**: 
+**问题**:
 - 引入了 4 个 "Omnigent-inspired" 模块（`loop_detection`, `circuit_breaker`, `domain_registry`, `reasoning_graph`），但这些模块在当前代码中**完全未使用**
 - `lib.rs:81-88` 导出了这些模块，但在 `daemon/workflow_runner.rs` 和 `daemon/routes/*.rs` 中找不到任何调用
 
@@ -38,7 +38,7 @@
 
 ### 1.2 ⚠️ 循环依赖风险
 
-**位置**: 
+**位置**:
 - `daemon/src/lib.rs` 使用 `workflow-engine`
 - `workflow-engine` 可能需要调用 daemon 的某些功能（通过 trait）
 
@@ -89,7 +89,7 @@ fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
         let _ = left.iter().zip(dummy.iter()).fold(0u8, |acc, (a, b)| acc | (a ^ b));
         return false;
     }
-    
+
     left.iter()
         .zip(right.iter())
         .fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0
@@ -102,7 +102,7 @@ fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
 
 **位置**: `daemon/src/auth.rs:50-64`
 
-**问题**: 
+**问题**:
 ```rust
 fn websocket_protocol_token_matches(request: &Request<Body>, expected_token: &str) -> bool {
     if request.uri().path() != "/ws" {
@@ -185,7 +185,7 @@ fn compute_hash(&self, tool_name: &str, args: &serde_json::Value) -> u64 {
     let mut hasher = DefaultHasher::new();
     tool_name.hash(&mut hasher);
     // 使用 canonical JSON 或者 hash Value 的结构而非字符串
-    args.to_string().hash(&mut hasher);  
+    args.to_string().hash(&mut hasher);
     hasher.finish()
 }
 ```
@@ -228,7 +228,7 @@ pub struct CircuitBreaker {
 pub fn record_error(&mut self, error_signature: String) -> bool {
     let now = Instant::now();
     let timestamps = self.error_counts.entry(error_signature).or_insert_with(VecDeque::new);
-    
+
     // 移除超出时间窗口的旧错误
     while let Some(&oldest) = timestamps.front() {
         if now.duration_since(oldest) > self.time_window {
@@ -237,7 +237,7 @@ pub fn record_error(&mut self, error_signature: String) -> bool {
             break;
         }
     }
-    
+
     timestamps.push_back(now);
     timestamps.len() >= self.threshold
 }
@@ -252,9 +252,9 @@ pub fn record_error(&mut self, error_signature: String) -> bool {
 async fn execute_agent(&self, prompt: &str, step: &WorkflowStep) -> Result<StepExecutionResult> {
     // ...
     let request = AgentLoopRequest { /* ... */ };
-    
+
     let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
-    
+
     tokio::spawn(async move {
         run_agent_loop(request, event_tx).await;  // ❌ 没有传递 cancel_signal
     });
@@ -262,7 +262,7 @@ async fn execute_agent(&self, prompt: &str, step: &WorkflowStep) -> Result<StepE
 }
 ```
 
-**影响**: 
+**影响**:
 - Workflow 取消后，agent 仍然继续运行
 - 资源泄漏和费用持续产生
 
@@ -500,6 +500,6 @@ let content = format!("{}{}", tool_name, args.to_string());  // 两次分配
 
 ---
 
-**审核人**: Claude (Opus 4.8)  
-**审核耗时**: ~15分钟  
+**审核人**: Claude (Opus 4.8)
+**审核耗时**: ~15分钟
 **建议复审**: 在修复 P0/P1 问题后

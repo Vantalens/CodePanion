@@ -66,13 +66,13 @@ match execute_tool(tool_name, &args).await {
     }
     Err(error) => {
         let error_signature = error.to_string();
-        
+
         // 记录错误，检查是否应该停止
         if circuit_breaker.record_error(error_signature) {
             println!("⚠ Circuit breaker tripped - stopping execution");
             return Err(CodePanionError::CircuitBreakerTripped);
         }
-        
+
         // 继续执行其他逻辑...
     }
 }
@@ -120,7 +120,7 @@ reasoning_graph.mark_state("high_complexity", NodeState::Confirmed);
 // 获取下一步可用的推理路径
 let active_edges = reasoning_graph.get_active_edges();
 for edge in active_edges {
-    println!("→ Can pursue: {} (tool: {:?})", 
+    println!("→ Can pursue: {} (tool: {:?})",
         edge.description, edge.tool_hint);
 }
 
@@ -254,7 +254,7 @@ impl IntelligentWorkflowExecutor {
     }
 
     pub async fn execute_step_with_intelligence(
-        &mut self, 
+        &mut self,
         step: &WorkflowStep
     ) -> Result<StepExecutionResult> {
         // 1. 循环检测
