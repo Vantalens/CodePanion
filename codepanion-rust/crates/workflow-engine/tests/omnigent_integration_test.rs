@@ -67,11 +67,11 @@ async fn test_agent_workflow_with_omnigent_intelligence() {
         let result = simulate_tool_execution(tool_name, &args);
 
         // Circuit breaker on errors
-        if result.starts_with("ERROR") {
-            if circuit_breaker.record_error(result.clone()) {
-                execution_log.push("⚠ Circuit breaker tripped - stopping execution".to_string());
-                break;
-            }
+        if result.starts_with("ERROR")
+            && circuit_breaker.record_error(result.clone())
+        {
+            execution_log.push("⚠ Circuit breaker tripped - stopping execution".to_string());
+            break;
         }
 
         // Update reasoning graph based on findings

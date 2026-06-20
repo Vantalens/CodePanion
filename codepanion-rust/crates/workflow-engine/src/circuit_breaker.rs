@@ -50,7 +50,7 @@ impl CircuitBreaker {
         let timestamps = self
             .error_timestamps
             .entry(error_signature)
-            .or_insert_with(VecDeque::new);
+            .or_default();
 
         // Remove errors outside the time window
         while let Some(&oldest) = timestamps.front() {

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 /// Domain-specific registries for agent behavior.
 /// All domain logic is injected as data, not hardcoded in the agent loop.
 /// Enables multi-agent scenarios with isolated state.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DomainRegistry {
     /// Extractors parse tool results into structured state
     pub extractors: HashMap<String, ExtractorConfig>,
@@ -73,19 +73,6 @@ pub struct ErrorPattern {
     pub retry_tool: Option<String>,
     #[serde(default)]
     pub give_up: bool,
-}
-
-impl Default for DomainRegistry {
-    fn default() -> Self {
-        Self {
-            extractors: HashMap::new(),
-            reflectors: HashMap::new(),
-            chains: HashMap::new(),
-            plan_templates: HashMap::new(),
-            error_patterns: HashMap::new(),
-            tool_timeouts: HashMap::new(),
-        }
-    }
 }
 
 impl DomainRegistry {
