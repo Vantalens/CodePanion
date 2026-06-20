@@ -1,7 +1,9 @@
 // Integration test helpers for CodePanion Rust daemon
+use axum::{Json, Router, routing::get};
 use codepanion_daemon::{DaemonConfig, run_daemon};
 use reqwest::{Client, Response};
 use serde_json::Value;
+use serde_json::json;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -14,24 +16,53 @@ pub struct TestDaemon {
     handle: Option<tokio::task::JoinHandle<()>>,
 }
 
+#[allow(dead_code)]
+pub async fn start_openai_models_server(model_ids: Vec<&'static str>) -> String {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let app = Router::new().route(
+        "/models",
+        get(move || {
+            let data = model_ids
+                .iter()
+                .map(|id| json!({ "id": id, "object": "model" }))
+                .collect::<Vec<_>>();
+            async move { Json(json!({ "object": "list", "data": data })) }
+        }),
+    );
+
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    format!("http://{}", addr)
+}
+
 impl TestDaemon {
     /// Start a test daemon instance
     pub async fn start() -> Self {
+        Self::start_with_token(None).await
+    }
+
+    pub async fn start_with_token(auth_token: Option<String>) -> Self {
         let port = Self::find_free_port();
         let temp_dir = tempfile::tempdir().unwrap().keep();
 
         let projects_path = temp_dir.join("projects.json");
         let providers_path = temp_dir.join("providers.json");
         let global_config_path = temp_dir.join("config.json");
+        let workflow_definitions_path = temp_dir.join("workflows.json");
         let workflow_history_path = temp_dir.join("workflow-runs.ndjson");
         let workflow_artifacts_path = temp_dir.join("workflow-artifacts.ndjson");
 
         let config = DaemonConfig {
             bind: "127.0.0.1".to_string(),
             port,
+            auth_token,
             projects_path,
             providers_path,
             global_config_path,
+            workflow_definitions_path,
             workflow_history_path,
             workflow_artifacts_path,
         };
@@ -83,11 +114,35 @@ impl TestDaemon {
             .await
     }
 
+    #[allow(dead_code)]
+    pub async fn get_with_token(&self, path: &str, token: &str) -> reqwest::Result<Response> {
+        self.client
+            .get(format!("{}{}", self.base_url, path))
+            .bearer_auth(token)
+            .send()
+            .await
+    }
+
     /// POST request with JSON body
     #[allow(dead_code)]
     pub async fn post(&self, path: &str, body: Value) -> reqwest::Result<Response> {
         self.client
             .post(format!("{}{}", self.base_url, path))
+            .json(&body)
+            .send()
+            .await
+    }
+
+    #[allow(dead_code)]
+    pub async fn post_with_token(
+        &self,
+        path: &str,
+        token: &str,
+        body: Value,
+    ) -> reqwest::Result<Response> {
+        self.client
+            .post(format!("{}{}", self.base_url, path))
+            .bearer_auth(token)
             .json(&body)
             .send()
             .await

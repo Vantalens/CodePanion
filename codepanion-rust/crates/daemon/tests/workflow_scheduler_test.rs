@@ -2,6 +2,7 @@
 mod integration;
 
 use integration::test_helpers::TestDaemon;
+use serde_json::json;
 
 // ============================================================================
 // Workflow API Tests (Legacy endpoints)
@@ -114,11 +115,35 @@ async fn test_get_scheduler_stats() {
 async fn test_get_global_runs() {
     let daemon = TestDaemon::start().await;
 
+    let enqueue_response = daemon
+        .post(
+            "/api/v1/scheduler/enqueue",
+            json!({
+                "runId": "global-run-1",
+                "projectId": "project-1",
+                "workflowId": "workflow-1",
+                "priority": "normal"
+            }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(enqueue_response.status(), 200);
+
     let response = daemon.get("/api/v1/global/runs").await.unwrap();
     assert_eq!(response.status(), 200);
 
     let body: serde_json::Value = response.json().await.unwrap();
     assert!(body["runs"].is_array());
+    let run = body["runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|run| run["id"] == "global-run-1")
+        .unwrap();
+    assert_eq!(run["workflowName"], "workflow-1");
+    assert_eq!(run["projectId"], "project-1");
+    assert!(run.get("runId").is_none());
+    assert!(run.get("workflowId").is_none());
 }
 
 #[tokio::test]

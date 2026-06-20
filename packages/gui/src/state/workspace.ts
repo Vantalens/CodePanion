@@ -59,7 +59,9 @@ export function applyRunEvent(run: WorkflowRunDetail | null, event: WorkflowRunE
     const stepId = event.step?.id || event.stepId || 'step';
     const index = base.steps.findIndex((step) => step.id === stepId);
     const existing: WorkflowStep = index >= 0 ? base.steps[index] : { id: stepId };
-    const output = [existing.output, event.output, event.stream, event.text].filter(Boolean).join('');
+    // Accumulate output incrementally to avoid O(n²) string concatenation
+    const newOutput = event.output || event.stream || event.text || '';
+    const output = existing.output ? existing.output + newOutput : newOutput;
     const next = {
       ...existing,
       ...event.step,

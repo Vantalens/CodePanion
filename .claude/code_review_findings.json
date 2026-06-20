@@ -1,0 +1,137 @@
+[
+  {
+    "file": "packages/gui/src-tauri/src/lib.rs",
+    "line": 62,
+    "summary": "Daemon process may leave zombie child if current_dir parent is None",
+    "failure_scenario": "When daemon_path has no parent directory, current_dir gets Path::new(\".\") which may differ from intended working directory, causing daemon to fail silently or run in wrong context",
+    "severity": "medium",
+    "status": "FIXED",
+    "fix_description": "Changed to return error if daemon_path has no parent directory instead of falling back to Path::new(\".\")"
+  },
+  {
+    "file": "packages/gui/src-tauri/src/lib.rs",
+    "line": 94,
+    "summary": "Child process kill followed by wait can hang if process is unresponsive",
+    "failure_scenario": "kill() sends SIGTERM but wait() blocks indefinitely if daemon is stuck in uninterruptible sleep; GUI shutdown hangs",
+    "severity": "high",
+    "status": "FIXED",
+    "fix_description": "Implemented timeout-based wait using try_wait() with 3-second timeout, followed by force kill (SIGKILL/taskkill -F) if process still alive"
+  },
+  {
+    "file": "packages/gui/src/daemon-client/client.ts",
+    "line": 177,
+    "summary": "setDefaultModel sends both camelCase and snake_case fields, one is always wrong",
+    "failure_scenario": "API expects either modelId or model_id but not both; sending both may cause validation errors or inconsistent behavior depending on daemon's parser precedence",
+    "severity": "medium",
+    "status": "FIXED",
+    "fix_description": "Removed duplicate snake_case field, now only sends camelCase modelId"
+  },
+  {
+    "file": "packages/gui/src/daemon-client/client.ts",
+    "line": 181,
+    "summary": "setRoleBinding sends both camelCase and snake_case fields, one is always wrong",
+    "failure_scenario": "API expects consistent naming convention but receives both; may cause parser errors or use wrong field depending on implementation",
+    "severity": "medium",
+    "status": "FIXED",
+    "fix_description": "Removed duplicate snake_case field, now only sends camelCase modelId"
+  },
+  {
+    "file": "packages/gui/src/App.tsx",
+    "line": 161,
+    "summary": "WebSocket onopen handler set after connection already established",
+    "failure_scenario": "wsRef.current.onopen set after connectRunEvents returns; if WebSocket connects immediately (localhost), onopen never fires and setConnected(true) is missed, GUI shows 'offline' despite working connection",
+    "severity": "high",
+    "status": "FIXED",
+    "fix_description": "Changed to assign WebSocket to local variable first, set onopen handler, then assign to wsRef.current to ensure handler is set before connection completes"
+  },
+  {
+    "file": "packages/gui/src/App.tsx",
+    "line": 141,
+    "summary": "refreshSettings error silently swallowed with empty catch",
+    "failure_scenario": "Provider/model fetch errors are hidden; user sees stale or empty provider list without knowing why, cannot diagnose API failures",
+    "severity": "low",
+    "status": "FIXED",
+    "fix_description": "Added console.error logging and setError() call in catch block to surface errors to user"
+  },
+  {
+    "file": "packages/gui/src/App.tsx",
+    "line": 510,
+    "summary": "Provider activation promise not awaited, onRefresh may run before activation completes",
+    "failure_scenario": "activateProvider().then(onRefresh) chains but isn't awaited in onClick; if user rapidly clicks multiple providers, onRefresh fires before activations settle, showing stale active state",
+    "severity": "medium",
+    "status": "FIXED",
+    "fix_description": "Changed onClick handlers to async functions that properly await both activateProvider and onRefresh sequentially"
+  },
+  {
+    "file": "packages/gui/src/App.tsx",
+    "line": 535,
+    "summary": "setDefaultModel promise not awaited in onChange, may cause race with onRefresh",
+    "failure_scenario": "User rapidly changes default model; setDefaultModel().then(onRefresh) fires but onChange returns immediately; React may batch updates incorrectly or show stale model selection",
+    "severity": "low",
+    "status": "FIXED",
+    "fix_description": "Changed onChange handlers to async functions that properly await both setDefaultModel/setRoleBinding and onRefresh sequentially"
+  },
+  {
+    "file": "packages/gui/src/state/workspace.ts",
+    "line": 62,
+    "summary": "Output concatenation creates unbounded string growth",
+    "failure_scenario": "Long-running workflow with streaming output: [existing.output, event.output, event.stream, event.text] concatenates repeatedly; each event appends to growing string, causing O(n²) memory allocation and potential browser OOM on large outputs",
+    "severity": "high",
+    "status": "FIXED",
+    "fix_description": "Changed from array filter+join pattern to direct string concatenation: only append new output to existing output, avoiding O(n²) allocation"
+  },
+  {
+    "file": "packages/gui/src/daemon-client/client.ts",
+    "line": 33,
+    "summary": "ensureDaemon does not await invoke('ensure_daemon') result before calling get_daemon_config",
+    "failure_scenario": "ensure_daemon may not finish spawning daemon before get_daemon_config reads config; race condition where config has stale/missing token if daemon writes config asynchronously",
+    "severity": "high",
+    "status": "FIXED",
+    "fix_description": "Split into two statements: await invoke('ensure_daemon'), then await invoke('get_daemon_config') on separate line to ensure proper sequencing"
+  },
+  {
+    "file": "packages/gui/src-tauri/src/lib.rs",
+    "line": 72,
+    "summary": "Health check polling uses fixed 40 iterations without checking child process status",
+    "failure_scenario": "Daemon crashes immediately after spawn; loop sleeps 10 seconds (40 × 250ms) checking port that will never open instead of detecting early exit via child.try_wait(), wasting user time",
+    "severity": "medium",
+    "status": "FIXED",
+    "fix_description": "Added child.try_wait() check in health check loop to detect early daemon exit and return descriptive error immediately"
+  },
+  {
+    "file": "packages/gui/src/App.tsx",
+    "line": 226,
+    "summary": "copyDelivery does not handle clipboard API permission denied or failure",
+    "failure_scenario": "navigator.clipboard.writeText() requires secure context and user permission; failure (HTTP, permission denied, or unsupported browser) throws unhandled promise rejection, no user feedback",
+    "severity": "low",
+    "status": "FIXED",
+    "fix_description": "Wrapped clipboard.writeText in try-catch with console.error and user-facing error message about permissions/HTTPS requirement"
+  },
+  {
+    "file": "packages/gui/src-tauri/src/lib.rs",
+    "line": 184,
+    "summary": "find_daemon_binary walks entire directory tree from cwd to root without depth limit",
+    "failure_scenario": "If cwd is deep in filesystem (e.g., /home/user/projects/a/b/c/d/e/f), traverses dozens of directories checking each for codepanion-rust/target/*/; slow startup on slow disks or network mounts",
+    "severity": "low",
+    "status": "FIXED",
+    "fix_description": "Added MAX_DEPTH constant of 10 levels to limit directory traversal"
+  },
+  {
+    "file": "packages/gui/src/App.tsx",
+    "line": 478,
+    "summary": "createProvider sends both camelCase and snake_case for every field",
+    "failure_scenario": "Sends providerType + provider_type, apiKey + api_key, apiBase + api_base; API may reject duplicate fields or use wrong one depending on parsing order, causing config corruption",
+    "severity": "high",
+    "status": "FIXED",
+    "fix_description": "Removed all duplicate snake_case fields from createProvider payload, now only sends camelCase fields"
+  },
+  {
+    "file": "packages/gui/src/App.tsx",
+    "line": 68,
+    "summary": "selectedArtifact fallback to artifacts[0] when selectedArtifactId not found causes selection jump",
+    "failure_scenario": "User selects artifact, backend updates artifacts array (new artifact added or order changed); selectedArtifactId becomes stale, useMemo returns artifacts[0] instead of null, UI jumps to different artifact without user action",
+    "severity": "medium",
+    "status": "FIXED",
+    "fix_description": "Changed fallback from artifacts[0] to null, wrapped in useMemo to prevent unnecessary recalculations"
+  }
+]

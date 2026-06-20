@@ -136,6 +136,8 @@ pub enum WorkflowRunStatus {
 pub struct WorkflowRun {
     pub id: String,
     pub workflow_name: String,
+    #[serde(default)]
+    pub project_id: String,
     pub status: WorkflowRunStatus,
     pub values: HashMap<String, String>,
     pub started_at: u64,
@@ -151,6 +153,7 @@ impl WorkflowRun {
         Self {
             id,
             workflow_name: workflow.name.clone(),
+            project_id: String::new(),
             status: WorkflowRunStatus::Success,
             values,
             started_at: timestamp,

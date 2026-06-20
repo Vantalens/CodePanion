@@ -19,7 +19,12 @@ pub async fn websocket_handler(
     State(state): State<crate::AppState>,
 ) -> Response {
     let broadcaster = state.event_broadcaster.clone();
-    ws.on_upgrade(move |socket| handle_socket(socket, broadcaster))
+    if let Some(token) = state.auth_token.as_deref() {
+        ws.protocols([format!("codepanion.token.{}", token)])
+            .on_upgrade(move |socket| handle_socket(socket, broadcaster))
+    } else {
+        ws.on_upgrade(move |socket| handle_socket(socket, broadcaster))
+    }
 }
 
 /// Handle a WebSocket connection
@@ -38,8 +43,14 @@ async fn handle_socket(socket: WebSocket, broadcaster: std::sync::Arc<EventBroad
     // Spawn a task to forward events from broadcaster to WebSocket
     let mut send_task = tokio::spawn(async move {
         while let Some(event) = event_rx.recv().await {
-            // Serialize event to JSON
-            let json = match serde_json::to_string(&event) {
+            // Wrap event in GUI-expected format: { type: "workflow-run-event", event: {...} }
+            let wrapped = serde_json::json!({
+                "type": "workflow-run-event",
+                "event": event
+            });
+
+            // Serialize to JSON
+            let json = match serde_json::to_string(&wrapped) {
                 Ok(json) => json,
                 Err(e) => {
                     eprintln!("Failed to serialize event: {}", e);
