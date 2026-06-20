@@ -17,6 +17,29 @@ async fn test_health_endpoint() {
 }
 
 #[tokio::test]
+async fn test_auth_token_protects_api_but_not_health() {
+    let daemon = TestDaemon::start_with_token(Some("test-token".to_string())).await;
+
+    let health = daemon.get("/health").await.unwrap();
+    assert_eq!(health.status(), 200);
+
+    let unauthenticated = daemon.get("/api/v1/projects").await.unwrap();
+    assert_eq!(unauthenticated.status(), 401);
+
+    let wrong_token = daemon
+        .get_with_token("/api/v1/projects", "wrong-token")
+        .await
+        .unwrap();
+    assert_eq!(wrong_token.status(), 401);
+
+    let authenticated = daemon
+        .get_with_token("/api/v1/projects", "test-token")
+        .await
+        .unwrap();
+    assert_eq!(authenticated.status(), 200);
+}
+
+#[tokio::test]
 async fn test_create_project() {
     let daemon = TestDaemon::start().await;
 

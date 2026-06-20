@@ -11,6 +11,7 @@ use codepanion_workflow_engine::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::time::Duration;
 
 /// Current timestamp in milliseconds
 fn current_timestamp() -> u64 {
@@ -207,6 +208,7 @@ impl IntoResponse for ErrorResponse {
             "not_found_error" => StatusCode::NOT_FOUND,
             "invalid_request_error" => StatusCode::BAD_REQUEST,
             "authentication_error" => StatusCode::UNAUTHORIZED,
+            "connection_error" => StatusCode::BAD_GATEWAY,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
         (status, Json(self)).into_response()
@@ -246,6 +248,28 @@ impl ErrorResponse {
             },
         }
     }
+
+    fn connection_error(message: String) -> Self {
+        Self {
+            error: ErrorDetail {
+                message,
+                error_type: "connection_error".to_string(),
+                code: "provider_connection_failed".to_string(),
+                param: None,
+            },
+        }
+    }
+}
+
+fn public_provider(mut provider: ModelProvider) -> ModelProvider {
+    if !provider.config.api_key.is_empty() {
+        provider.config.api_key = "[redacted]".to_string();
+    }
+    provider
+}
+
+fn public_providers(providers: Vec<ModelProvider>) -> Vec<ModelProvider> {
+    providers.into_iter().map(public_provider).collect()
 }
 
 fn default_base_url(provider_type: &ProviderType) -> String {
@@ -468,7 +492,7 @@ pub async fn create_provider(
         .upsert(provider.clone())
         .map_err(|e| ErrorResponse::internal_error(format!("Failed to create provider: {}", e)))?;
 
-    Ok(Json(provider))
+    Ok(Json(public_provider(provider)))
 }
 
 /// GET /api/v1/providers - List all providers
@@ -494,7 +518,10 @@ pub async fn list_providers(
     }
 
     let total = providers.len();
-    Ok(Json(ListProvidersResponse { providers, total }))
+    Ok(Json(ListProvidersResponse {
+        providers: public_providers(providers),
+        total,
+    }))
 }
 
 /// GET /api/v1/providers/:id - Get a single provider
@@ -510,7 +537,7 @@ pub async fn get_provider(
             ErrorResponse::not_found(format!("Provider {} not found", id), Some("id".to_string()))
         })?;
 
-    Ok(Json(provider))
+    Ok(Json(public_provider(provider)))
 }
 
 /// PUT /api/v1/providers/:id - Update a provider
@@ -614,7 +641,7 @@ pub async fn update_provider(
         .upsert(provider.clone())
         .map_err(|e| ErrorResponse::internal_error(format!("Failed to update provider: {}", e)))?;
 
-    Ok(Json(provider))
+    Ok(Json(public_provider(provider)))
 }
 
 /// DELETE /api/v1/providers/:id - Delete a provider
@@ -643,23 +670,24 @@ pub async fn test_provider(
             ErrorResponse::not_found(format!("Provider {} not found", id), Some("id".to_string()))
         })?;
 
-    // TODO: Implement actual connection test
-    // For now, just return a mock response
     let start = std::time::Instant::now();
-
-    // Simulate API call delay
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    let models = probe_provider_models(&provider).await.map_err(|message| {
+        let mut failed = provider.clone();
+        failed.status = ProviderStatus::Error;
+        failed.last_tested = Some(current_timestamp());
+        let _ = state.provider_registry.upsert(failed);
+        ErrorResponse::connection_error(message)
+    })?;
 
     let latency = start.elapsed().as_millis() as u64;
 
-    // Update last_tested timestamp
+    let mut tested = provider;
+    tested.status = ProviderStatus::Active;
+    tested.last_tested = Some(current_timestamp());
     state
         .provider_registry
-        .touch(&id)
+        .upsert(tested)
         .map_err(|e| ErrorResponse::internal_error(format!("Failed to update provider: {}", e)))?;
-
-    // Extract model IDs
-    let models: Vec<String> = provider.models.iter().map(|m| m.id.clone()).collect();
 
     Ok(Json(TestConnectionResponse {
         success: true,
@@ -667,6 +695,60 @@ pub async fn test_provider(
         models,
         message: "Connection successful".to_string(),
     }))
+}
+
+async fn probe_provider_models(provider: &ModelProvider) -> Result<Vec<String>, String> {
+    let base_url = provider.config.base_url.trim();
+    if base_url.is_empty() {
+        return Err("provider baseUrl is required for connection testing".to_string());
+    }
+
+    let url = format!("{}/models", base_url.trim_end_matches('/'));
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .map_err(|err| format!("failed to build provider test client: {err}"))?;
+
+    let mut request = client.get(url);
+    if !provider.config.api_key.trim().is_empty() {
+        request = request.bearer_auth(provider.config.api_key.trim());
+    }
+
+    let response = request
+        .send()
+        .await
+        .map_err(|err| format!("provider models request failed: {err}"))?;
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|err| format!("provider models response failed: {err}"))?;
+
+    if !status.is_success() {
+        return Err(format!(
+            "provider models request returned {}: {}",
+            status,
+            body.chars().take(300).collect::<String>()
+        ));
+    }
+
+    let parsed: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|err| format!("provider models response was not valid JSON: {err}"))?;
+    let data = parsed
+        .get("data")
+        .and_then(|value| value.as_array())
+        .ok_or_else(|| "provider models response missing data array".to_string())?;
+    let models = data
+        .iter()
+        .filter_map(|model| model.get("id").and_then(|id| id.as_str()))
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+
+    if models.is_empty() {
+        return Err("provider models response did not include any model ids".to_string());
+    }
+
+    Ok(models)
 }
 
 /// GET /api/v1/providers/:id/models - List provider models
@@ -704,7 +786,7 @@ pub async fn activate_provider(
         ErrorResponse::internal_error(format!("Failed to activate provider: {}", e))
     })?;
 
-    Ok(Json(provider))
+    Ok(Json(public_provider(provider)))
 }
 
 /// GET /api/v1/providers/active - Get active provider
@@ -735,7 +817,7 @@ pub async fn get_active_provider(
             )
         })?;
 
-    Ok(Json(provider))
+    Ok(Json(public_provider(provider)))
 }
 
 /// GET /api/v1/models - List all configured models for the GUI.
@@ -1032,15 +1114,36 @@ pub async fn import_config(
                     None,
                 )
             })?;
+            let providers_imported = providers.len();
+            for imported in providers {
+                state
+                    .provider_registry
+                    .upsert(ModelProvider {
+                        id: imported.id,
+                        name: imported.name,
+                        provider_type: imported.provider_type,
+                        config: imported.config,
+                        models: imported.models,
+                        capabilities: vec![ProviderCapability::Chat, ProviderCapability::Streaming],
+                        status: ProviderStatus::Active,
+                        last_tested: None,
+                        created_at: current_timestamp(),
+                    })
+                    .map_err(|e| {
+                        ErrorResponse::internal_error(format!(
+                            "Failed to save imported provider: {}",
+                            e
+                        ))
+                    })?;
+            }
 
             // Save global config
             state.global_config.save(&global_config).map_err(|e| {
                 ErrorResponse::internal_error(format!("Failed to save global config: {}", e))
             })?;
 
-            // TODO: Save providers to registry (need provider ID generation)
             codepanion_workflow_engine::ImportResult {
-                providers_imported: providers.len(),
+                providers_imported,
                 aliases_imported: global_config.model_aliases.len(),
                 env_vars_imported: global_config.env.len(),
                 active_provider: global_config.active_provider_id,

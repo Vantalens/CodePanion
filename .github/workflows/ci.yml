@@ -65,6 +65,9 @@ jobs:
       - name: Run daemon tests + DTO drift check
         run: npm test
 
+      - name: Run npm audit
+        run: npm audit --audit-level=moderate
+
       - name: Run Rust tests
         working-directory: codepanion-rust
         run: cargo test --workspace
@@ -76,6 +79,17 @@ jobs:
       - name: Check Rust formatting
         working-directory: codepanion-rust
         run: cargo fmt --all -- --check
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Audit Rust workspace dependencies
+        working-directory: codepanion-rust
+        run: cargo audit
+
+      - name: Audit Tauri dependency lockfile
+        working-directory: packages/gui/src-tauri
+        run: cargo audit
 
       - name: Validate extension manifests + activation contract
         run: npm run validate:extensions

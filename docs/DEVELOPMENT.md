@@ -71,6 +71,8 @@ npm test
 
 - Put new daemon, workflow, provider, scheduler, CLI, and config behavior in `codepanion-rust`.
 - GUI startup must prefer the packaged Rust daemon at `daemon/codepanion-daemon.exe`; the Tauri shell owns daemon startup and shutdown for GUI-launched daemons.
+- The default Tauri shell scope is daemon lifecycle, authenticated config bridge, restricted external URL opening, and shutdown. Native tray, file-picker, clipboard, and notification workflows are not part of the current default shell contract until explicitly implemented.
+- The React GUI must expose the Rust daemon project registry and provider registry with create, update, delete, activate/select, and refresh flows rather than relying on seed-only configuration.
 - New provider/CLI behavior needs Rust integration tests under `codepanion-rust/crates/daemon/tests/`.
 - API additions must update `docs/API.md` and, when user-facing, `docs/INSTALL.md` or `README.md`.
 - High-risk file, shell, network, secret, and git-history actions must stay behind explicit risk classification and human gates.

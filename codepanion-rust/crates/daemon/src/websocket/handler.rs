@@ -19,7 +19,12 @@ pub async fn websocket_handler(
     State(state): State<crate::AppState>,
 ) -> Response {
     let broadcaster = state.event_broadcaster.clone();
-    ws.on_upgrade(move |socket| handle_socket(socket, broadcaster))
+    if let Some(token) = state.auth_token.as_deref() {
+        ws.protocols([format!("codepanion.token.{}", token)])
+            .on_upgrade(move |socket| handle_socket(socket, broadcaster))
+    } else {
+        ws.on_upgrade(move |socket| handle_socket(socket, broadcaster))
+    }
 }
 
 /// Handle a WebSocket connection

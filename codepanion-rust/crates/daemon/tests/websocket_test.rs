@@ -7,6 +7,7 @@ use serde_json::json;
 use std::time::Duration;
 use tokio::time::timeout;
 use tokio_tungstenite::connect_async;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
 // ============================================================================
 // WebSocket Real-Time Event Tests
@@ -38,6 +39,23 @@ async fn test_websocket_receives_scheduler_run_event() {
     assert_eq!(event["projectId"], "ws-project");
     assert_eq!(event["workflowId"], "ws-workflow");
     assert_eq!(event["status"], "queued");
+}
+
+#[tokio::test]
+async fn test_websocket_requires_token_subprotocol_when_auth_enabled() {
+    let daemon = TestDaemon::start_with_token(Some("ws-token".to_string())).await;
+    let ws_url = daemon.base_url.replace("http://", "ws://") + "/ws";
+
+    let unauthenticated = connect_async(ws_url.clone()).await;
+    assert!(unauthenticated.is_err());
+
+    let mut request = ws_url.into_client_request().unwrap();
+    request.headers_mut().insert(
+        "sec-websocket-protocol",
+        "codepanion.token.ws-token".parse().unwrap(),
+    );
+    let (_ws, response) = connect_async(request).await.unwrap();
+    assert_eq!(response.status(), 101);
 }
 
 #[tokio::test]
@@ -123,5 +141,7 @@ async fn next_json_event(
     let text = message
         .into_text()
         .expect("expected text websocket message");
-    serde_json::from_str(&text).expect("websocket event should be JSON")
+    let payload: serde_json::Value =
+        serde_json::from_str(&text).expect("websocket event should be JSON");
+    payload.get("event").cloned().unwrap_or(payload)
 }

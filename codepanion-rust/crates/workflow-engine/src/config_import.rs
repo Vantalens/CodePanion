@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::{CodePanionError, GlobalConfig, ProviderConfig, ProviderType, Result};
+use crate::{CodePanionError, GlobalConfig, ModelInfo, ProviderConfig, ProviderType, Result};
 
 /// CC Switch config format (~/.ccm_config)
 #[derive(Debug, Deserialize)]
@@ -49,8 +49,18 @@ pub struct ImportResult {
     pub active_provider: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportedProvider {
+    pub id: String,
+    pub name: String,
+    pub provider_type: ProviderType,
+    pub config: ProviderConfig,
+    pub models: Vec<ModelInfo>,
+}
+
 /// Import CC Switch config file
-pub fn import_ccm_config(path: &Path) -> Result<(Vec<ProviderConfig>, GlobalConfig)> {
+pub fn import_ccm_config(path: &Path) -> Result<(Vec<ImportedProvider>, GlobalConfig)> {
     if !path.exists() {
         return Err(CodePanionError::InvalidInput(format!(
             "CC Switch config file not found: {}",
@@ -70,8 +80,8 @@ pub fn import_ccm_config(path: &Path) -> Result<(Vec<ProviderConfig>, GlobalConf
     let mut global_config = GlobalConfig::default();
 
     // Import providers
-    for (_name, provider) in ccm_config.providers {
-        let _provider_type = match provider.provider_type.as_str() {
+    for (name, provider) in ccm_config.providers {
+        let provider_type = match provider.provider_type.as_str() {
             "anthropic" => ProviderType::Anthropic,
             "openai" => ProviderType::OpenAI,
             "deepseek" => ProviderType::DeepSeek,
@@ -81,6 +91,25 @@ pub fn import_ccm_config(path: &Path) -> Result<(Vec<ProviderConfig>, GlobalConf
             "glm" => ProviderType::GLM,
             _ => ProviderType::Custom,
         };
+
+        let default_model = provider
+            .models
+            .get("default")
+            .cloned()
+            .unwrap_or_else(|| "default".to_string());
+        let mut model_ids = provider.models.values().cloned().collect::<Vec<_>>();
+        model_ids.sort();
+        model_ids.dedup();
+        let models = model_ids
+            .into_iter()
+            .map(|id| ModelInfo {
+                name: id.clone(),
+                id,
+                context_window: 128_000,
+                max_output_tokens: 4_096,
+                pricing: None,
+            })
+            .collect();
 
         let config = ProviderConfig {
             api_key: provider.api_key,
@@ -95,7 +124,16 @@ pub fn import_ccm_config(path: &Path) -> Result<(Vec<ProviderConfig>, GlobalConf
             custom: HashMap::new(),
         };
 
-        providers.push(config);
+        providers.push(ImportedProvider {
+            id: name.clone(),
+            name,
+            provider_type,
+            config: ProviderConfig {
+                default_model,
+                ..config
+            },
+            models,
+        });
 
         // Import model aliases
         for (alias, model_id) in provider.models {
@@ -237,8 +275,16 @@ mod tests {
         let (providers, global_config) = import_ccm_config(&path).unwrap();
 
         assert_eq!(providers.len(), 1);
-        assert_eq!(providers[0].base_url, "https://api.deepseek.com");
-        assert_eq!(providers[0].api_key, "sk-test-123");
+        assert_eq!(providers[0].id, "deepseek");
+        assert_eq!(providers[0].provider_type, ProviderType::DeepSeek);
+        assert_eq!(providers[0].config.base_url, "https://api.deepseek.com");
+        assert_eq!(providers[0].config.api_key, "sk-test-123");
+        assert!(
+            providers[0]
+                .models
+                .iter()
+                .any(|model| model.id == "deepseek-chat")
+        );
         assert_eq!(
             global_config.active_provider_id,
             Some("deepseek".to_string())

@@ -450,11 +450,15 @@ export function App() {
       {settingsOpen && (
         <SettingsDrawer
           client={client}
+          projects={projects}
+          selectedProjectId={projectId}
           providers={providers}
           models={models}
           defaultModel={defaultModel}
           roleBindings={roleBindings}
+          onProjectSelected={setProjectId}
           onClose={() => setSettingsOpen(false)}
+          onProjectsRefresh={refreshProjects}
           onRefresh={refreshSettings}
         />
       )}
@@ -464,37 +468,117 @@ export function App() {
 
 function SettingsDrawer({
   client,
+  projects,
+  selectedProjectId,
   providers,
   models,
   defaultModel,
   roleBindings,
+  onProjectSelected,
   onClose,
+  onProjectsRefresh,
   onRefresh,
 }: {
   client: DaemonClient | null;
+  projects: ProjectSummary[];
+  selectedProjectId: string;
   providers: ProviderConfig[];
   models: ModelInfo[];
   defaultModel: string;
   roleBindings: ModelBinding;
+  onProjectSelected: (projectId: string) => void;
   onClose: () => void;
+  onProjectsRefresh: () => Promise<void>;
   onRefresh: () => Promise<void>;
 }) {
+  const [editingProjectId, setEditingProjectId] = useState('');
+  const [projectName, setProjectName] = useState('');
+  const [projectPath, setProjectPath] = useState('');
+  const [projectDescription, setProjectDescription] = useState('');
+  const [editingProviderId, setEditingProviderId] = useState('');
   const [providerName, setProviderName] = useState('');
   const [providerType, setProviderType] = useState('openai');
   const [apiKey, setApiKey] = useState('');
   const [apiBase, setApiBase] = useState('');
 
-  async function addProvider() {
-    if (!client || !providerName || !apiKey) return;
-    await client.createProvider({
-      name: providerName,
-      providerType,
-      apiKey,
-      apiBase,
-    });
+  function editProject(project: ProjectSummary) {
+    setEditingProjectId(project.id);
+    setProjectName(project.name);
+    setProjectPath(project.path);
+    setProjectDescription(project.description ?? '');
+  }
+
+  function resetProjectForm() {
+    setEditingProjectId('');
+    setProjectName('');
+    setProjectPath('');
+    setProjectDescription('');
+  }
+
+  async function saveProject() {
+    if (!client || !projectName.trim() || !projectPath.trim()) return;
+    const payload = {
+      name: projectName.trim(),
+      path: projectPath.trim(),
+      description: projectDescription.trim() || undefined,
+    };
+    const project = editingProjectId
+      ? await client.updateProject(editingProjectId, payload)
+      : await client.createProject(payload);
+    resetProjectForm();
+    await onProjectsRefresh();
+    onProjectSelected(project.id);
+  }
+
+  async function removeProject(project: ProjectSummary) {
+    if (!client) return;
+    await client.deleteProject(project.id);
+    if (selectedProjectId === project.id) {
+      onProjectSelected('');
+    }
+    await onProjectsRefresh();
+  }
+
+  async function activateProject(project: ProjectSummary) {
+    if (!client) return;
+    await client.activateProject(project.id);
+    onProjectSelected(project.id);
+    await onProjectsRefresh();
+  }
+
+  function editProvider(provider: ProviderConfig) {
+    setEditingProviderId(provider.id);
+    setProviderName(provider.name);
+    setProviderType(provider.type || 'openai');
+    setApiBase(provider.apiBase || provider.config?.baseUrl || provider.config?.base_url || '');
+    setApiKey('');
+  }
+
+  function resetProviderForm() {
+    setEditingProviderId('');
     setProviderName('');
     setApiKey('');
     setApiBase('');
+    setProviderType('openai');
+  }
+
+  async function saveProvider() {
+    if (!client || !providerName.trim()) return;
+    const payload: Record<string, unknown> = {
+      name: providerName.trim(),
+      providerType,
+      apiBase: apiBase.trim() || undefined,
+    };
+    if (apiKey.trim()) {
+      payload.apiKey = apiKey.trim();
+    }
+    if (editingProviderId) {
+      await client.updateProvider(editingProviderId, payload);
+    } else {
+      if (!apiKey.trim()) return;
+      await client.createProvider(payload);
+    }
+    resetProviderForm();
     await onRefresh();
   }
 
@@ -508,6 +592,31 @@ function SettingsDrawer({
           </Button>
         </header>
         <section>
+          <h3>Projects</h3>
+          <div className="provider-list">
+            {projects.map((project) => (
+              <div key={project.id} className="provider-card">
+                <strong>{project.name}</strong>
+                <span>{project.path}</span>
+                <div className="button-row">
+                  <Button onClick={() => activateProject(project)}>激活</Button>
+                  <Button onClick={() => editProject(project)}>编辑</Button>
+                  <Button variant="danger" onClick={() => removeProject(project)}>删除</Button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="settings-form">
+            <Field label="名称"><input value={projectName} onChange={(event) => setProjectName(event.target.value)} /></Field>
+            <Field label="路径"><input value={projectPath} onChange={(event) => setProjectPath(event.target.value)} /></Field>
+            <Field label="描述"><input value={projectDescription} onChange={(event) => setProjectDescription(event.target.value)} /></Field>
+            <div className="button-row">
+              <Button variant="primary" onClick={saveProject}>{editingProjectId ? '保存项目' : '添加项目'}</Button>
+              {editingProjectId && <Button onClick={resetProjectForm}>取消编辑</Button>}
+            </div>
+          </div>
+        </section>
+        <section>
           <h3>Providers</h3>
           <div className="provider-list">
             {providers.map((provider) => (
@@ -519,6 +628,7 @@ function SettingsDrawer({
                     await client?.activateProvider(provider.id);
                     await onRefresh();
                   }}>激活</Button>
+                  <Button onClick={() => editProvider(provider)}>编辑</Button>
                   <Button onClick={() => client?.testProvider(provider.id)}>测试</Button>
                   <Button variant="danger" onClick={async () => {
                     await client?.deleteProvider(provider.id);
@@ -540,7 +650,10 @@ function SettingsDrawer({
             </Field>
             <Field label="API Key"><input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} /></Field>
             <Field label="API Base"><input value={apiBase} onChange={(event) => setApiBase(event.target.value)} /></Field>
-            <Button variant="primary" onClick={addProvider}>添加 Provider</Button>
+            <div className="button-row">
+              <Button variant="primary" onClick={saveProvider}>{editingProviderId ? '保存 Provider' : '添加 Provider'}</Button>
+              {editingProviderId && <Button onClick={resetProviderForm}>取消编辑</Button>}
+            </div>
           </div>
         </section>
         <section>

@@ -536,7 +536,7 @@ Rust daemon 使用统一错误响应：输入校验失败回 400，未知资源�
 
 - Rust CLI 失败：命令向 stderr 输出错误并返回非零退出码。
 - 旧 Adapter SDK 失败：仅作为兼容层维护，不作为新路线扩展入口。
-- GUI 失败：默认 Tauri shell 负责 daemon 生命周期，React 端通过 typed HTTP/WS client 进入断线态并允许刷新；legacy WPF 代码保留在 `packages/gui-wpf-legacy` 作为兼容基线。
+- GUI 失败：默认 Tauri shell 负责 daemon 生命周期、认证配置桥接、受限外部 URL 打开和关闭清理；React 端通过 typed HTTP/WS client 进入断线态并允许刷新。项目/provider 的 create、update、delete、activate/select 和刷新流程在 React 工作台内完成。tray、原生文件选择、系统剪贴板和通知不属于当前默认 shell 契约，直到有对应实现和测试；legacy WPF 代码保留在 `packages/gui-wpf-legacy` 作为兼容基线。
 
 ### 错误恢复策略
 

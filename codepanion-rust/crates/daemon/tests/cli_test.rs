@@ -1,7 +1,7 @@
 #[path = "integration/mod.rs"]
 mod integration;
 
-use integration::test_helpers::TestDaemon;
+use integration::test_helpers::{TestDaemon, start_openai_models_server};
 use serde_json::json;
 use std::path::Path;
 use std::process::Command;
@@ -92,6 +92,7 @@ async fn cli_workspace_commands_use_project_api() {
 #[tokio::test]
 async fn cli_provider_commands_use_provider_api() {
     let daemon = TestDaemon::start().await;
+    let model_server = start_openai_models_server(vec!["gpt-test"]).await;
 
     let add = run_cli(
         &daemon.base_url,
@@ -106,7 +107,7 @@ async fn cli_provider_commands_use_provider_api() {
             "--api-key",
             "sk-test",
             "--base-url",
-            "https://api.example.com/v1",
+            &model_server,
             "--default-model",
             "gpt-test",
         ],

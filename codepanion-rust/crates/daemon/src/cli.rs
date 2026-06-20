@@ -287,6 +287,40 @@ fn api_client() -> reqwest::Client {
         .expect("failed to build HTTP client")
 }
 
+fn with_daemon_auth(builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    match daemon_auth_token() {
+        Ok(token) if !token.trim().is_empty() => builder.bearer_auth(token),
+        _ => builder,
+    }
+}
+
+fn daemon_auth_token() -> Result<String, ()> {
+    std::env::var("CODEPANION_DAEMON_TOKEN")
+        .map_err(|_| ())
+        .or_else(|_| {
+            let home = dirs::home_dir().ok_or(())?;
+            let raw = std::fs::read_to_string(home.join(".codepanion").join("config.json"))
+                .map_err(|_| ())?;
+            let json: serde_json::Value = serde_json::from_str(&raw).map_err(|_| ())?;
+            json.get("token")
+                .and_then(|value| value.as_str())
+                .map(ToString::to_string)
+                .ok_or(())
+        })
+}
+
+fn api_get(client: &reqwest::Client, url: &str) -> reqwest::RequestBuilder {
+    with_daemon_auth(client.get(url))
+}
+
+fn api_post(client: &reqwest::Client, url: &str) -> reqwest::RequestBuilder {
+    with_daemon_auth(client.post(url))
+}
+
+fn api_delete(client: &reqwest::Client, url: &str) -> reqwest::RequestBuilder {
+    with_daemon_auth(client.delete(url))
+}
+
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
@@ -329,7 +363,7 @@ async fn handle_status_command(api_url: &str) -> Result<(), Box<dyn std::error::
     let client = api_client();
     let url = format!("{}/health", api_url);
 
-    match client.get(&url).send().await {
+    match api_get(&client, &url).send().await {
         Ok(response) if response.status().is_success() => {
             println!("API server: reachable at {}", api_url);
         }
@@ -353,7 +387,7 @@ async fn handle_workflows_command(
     if active {
         // 列出活跃的 workflow runs
         let url = format!("{}/api/v1/workflows/active", api_url);
-        let response: ActiveRunsResponse = client.get(&url).send().await?.json().await?;
+        let response: ActiveRunsResponse = api_get(&client, &url).send().await?.json().await?;
 
         if response.runs.is_empty() {
             println!("No active workflows.");
@@ -366,7 +400,7 @@ async fn handle_workflows_command(
     } else {
         // 列出所有 workflow runs
         let url = format!("{}/workflow/runs", api_url);
-        let response: WorkflowRunsResponse = client.get(&url).send().await?.json().await?;
+        let response: WorkflowRunsResponse = api_get(&client, &url).send().await?.json().await?;
 
         if response.runs.is_empty() {
             println!("No workflows found.");
@@ -398,7 +432,8 @@ async fn handle_workspace_command(
     match command {
         WorkspaceCommands::List => {
             let url = format!("{}/api/v1/projects", api_url);
-            let response: ListProjectsResponse = client.get(&url).send().await?.json().await?;
+            let response: ListProjectsResponse =
+                api_get(&client, &url).send().await?.json().await?;
 
             if response.projects.is_empty() {
                 println!("No workspaces configured.");
@@ -425,13 +460,19 @@ async fn handle_workspace_command(
                     .unwrap_or("workspace")
                     .to_string(),
             };
-            let _response: Project = client.post(&url).json(&req).send().await?.json().await?;
+            let _response: Project = api_post(&client, &url)
+                .json(&req)
+                .send()
+                .await?
+                .json()
+                .await?;
             println!("✓ Added workspace: {}", path.display());
         }
         WorkspaceCommands::Remove { path } => {
             // 先查找项目 ID
             let url = format!("{}/api/v1/projects", api_url);
-            let projects: ListProjectsResponse = client.get(&url).send().await?.json().await?;
+            let projects: ListProjectsResponse =
+                api_get(&client, &url).send().await?.json().await?;
 
             let project = projects
                 .projects
@@ -440,7 +481,7 @@ async fn handle_workspace_command(
                 .ok_or_else(|| format!("Workspace not found: {}", path.display()))?;
 
             let url = format!("{}/api/v1/projects/{}", api_url, project.id);
-            client.delete(&url).send().await?;
+            api_delete(&client, &url).send().await?;
             println!("✓ Removed workspace: {}", path.display());
         }
     }
@@ -457,7 +498,8 @@ async fn handle_provider_command(
     match command {
         ProviderCommands::List => {
             let url = format!("{}/api/v1/providers", api_url);
-            let response: ListProvidersResponse = client.get(&url).send().await?.json().await?;
+            let response: ListProvidersResponse =
+                api_get(&client, &url).send().await?.json().await?;
 
             if response.providers.is_empty() {
                 println!("No providers configured.");
@@ -477,7 +519,7 @@ async fn handle_provider_command(
         }
         ProviderCommands::Active => {
             let url = format!("{}/api/v1/providers/active", api_url);
-            match client.get(&url).send().await {
+            match api_get(&client, &url).send().await {
                 Ok(response) if response.status().is_success() => {
                     let provider: Provider = response.json().await?;
                     println!("Active provider: {} ({})", provider.name, provider.id);
@@ -498,7 +540,7 @@ async fn handle_provider_command(
         }
         ProviderCommands::Switch { id } => {
             let url = format!("{}/api/v1/providers/{}/activate", api_url, id);
-            let response: Provider = client.post(&url).send().await?.json().await?;
+            let response: Provider = api_post(&client, &url).send().await?.json().await?;
             println!("✓ Activated provider: {} ({})", response.name, response.id);
         }
         ProviderCommands::Add {
@@ -520,17 +562,22 @@ async fn handle_provider_command(
                     default_model,
                 },
             };
-            let _response: Provider = client.post(&url).json(&req).send().await?.json().await?;
+            let _response: Provider = api_post(&client, &url)
+                .json(&req)
+                .send()
+                .await?
+                .json()
+                .await?;
             println!("✓ Added provider: {} ({})", name, id);
         }
         ProviderCommands::Remove { id } => {
             let url = format!("{}/api/v1/providers/{}", api_url, id);
-            client.delete(&url).send().await?;
+            api_delete(&client, &url).send().await?;
             println!("✓ Removed provider: {}", id);
         }
         ProviderCommands::Test { id } => {
             let url = format!("{}/api/v1/providers/{}/test", api_url, id);
-            match client.post(&url).send().await {
+            match api_post(&client, &url).send().await {
                 Ok(response) if response.status().is_success() => {
                     println!("✓ Provider {} is reachable", id);
                 }
@@ -550,7 +597,12 @@ async fn handle_provider_command(
                 source,
                 file_path: file,
             };
-            let result: ImportResult = client.post(&url).json(&req).send().await?.json().await?;
+            let result: ImportResult = api_post(&client, &url)
+                .json(&req)
+                .send()
+                .await?
+                .json()
+                .await?;
             println!("✓ Import completed:");
             println!("  Providers imported: {}", result.providers_imported);
             println!("  Aliases imported: {}", result.aliases_imported);
@@ -573,7 +625,7 @@ async fn handle_model_command(
     match command {
         ModelCommands::List => {
             let url = format!("{}/v1/models", api_url);
-            let response: ModelListResponse = client.get(&url).send().await?.json().await?;
+            let response: ModelListResponse = api_get(&client, &url).send().await?.json().await?;
 
             if response.data.is_empty() {
                 println!("No models available.");
@@ -591,8 +643,7 @@ async fn handle_model_command(
                 alias: alias.clone(),
                 model_id: model_id.clone(),
             };
-            client
-                .post(&url)
+            api_post(&client, &url)
                 .json(&req)
                 .send()
                 .await?
@@ -616,8 +667,7 @@ async fn handle_config_command(
             let req = SetDefaultModelRequest {
                 model_id: model.clone(),
             };
-            client
-                .post(&url)
+            api_post(&client, &url)
                 .json(&req)
                 .send()
                 .await?
@@ -629,8 +679,7 @@ async fn handle_config_command(
             let req = SetEffortLevelRequest {
                 level: level.clone(),
             };
-            client
-                .post(&url)
+            api_post(&client, &url)
                 .json(&req)
                 .send()
                 .await?

@@ -7,10 +7,10 @@
 use codepanion_agent_runtime::{AgentLoopEvent, AgentLoopRequest, run_agent_loop};
 use codepanion_shared::{CodePanionError, Result};
 use codepanion_workflow_engine::{
-    ArtifactInput, ArtifactType, DefaultShellExecutor, GlobalConfigManager, ModelProvider,
-    ProviderRegistry, StepExecutionResult, StepExecutor, WorkflowArtifactStore,
-    WorkflowArtifactType, WorkflowDefinition, WorkflowExecutor, WorkflowRun, WorkflowRunHistory,
-    WorkflowRunStatus, WorkflowStep,
+    ArtifactInput, ArtifactType, GlobalConfigManager, ModelProvider, ProviderRegistry,
+    StepExecutionResult, StepExecutor, WorkflowArtifactStore, WorkflowArtifactType,
+    WorkflowDefinition, WorkflowExecutor, WorkflowRun, WorkflowRunHistory, WorkflowRunStatus,
+    WorkflowStep,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -18,6 +18,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
+use tokio::process::Command;
 use tokio::sync::Mutex;
 
 /// Workflow 执行上下文
@@ -217,9 +218,49 @@ fn parse_model_reference(value: &str) -> Option<(&str, &str)> {
 
 impl StepExecutor for AgentStepExecutor {
     async fn execute_shell(&self, command: &str, args: &[String]) -> Result<StepExecutionResult> {
-        // 使用默认 shell executor
-        let executor = DefaultShellExecutor;
-        executor.execute_shell(command, args).await
+        let mut child = Command::new(command)
+            .args(args)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| {
+                CodePanionError::Runtime(format!("failed to execute command '{}': {}", command, e))
+            })?;
+
+        loop {
+            if self.context.cancel_signal.load(Ordering::Relaxed) {
+                let _ = child.kill().await;
+                let _ = child.wait().await;
+                return Err(CodePanionError::Runtime("workflow cancelled".to_string()));
+            }
+
+            if child
+                .try_wait()
+                .map_err(|e| {
+                    CodePanionError::Runtime(format!(
+                        "failed to wait for command '{}': {}",
+                        command, e
+                    ))
+                })?
+                .is_some()
+            {
+                let output = child.wait_with_output().await.map_err(|e| {
+                    CodePanionError::Runtime(format!(
+                        "failed to collect command '{}' output: {}",
+                        command, e
+                    ))
+                })?;
+
+                return Ok(StepExecutionResult {
+                    exit_code: output.status.code().unwrap_or(-1),
+                    stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+                    stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+                    truncated: false,
+                });
+            }
+
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
     }
 
     async fn execute_agent(
@@ -233,12 +274,13 @@ impl StepExecutor for AgentStepExecutor {
         let run_id = self.context.run_id.clone();
         let step_id = step.id.clone();
 
-        // 构建 agent loop request
+        // 构建 agent loop request with cancel signal
         let request = AgentLoopRequest::new(backend, prompt)
             .with_max_turns(12)
             .with_cancel(cancel_signal.clone());
 
-        tokio::task::spawn_blocking(move || {
+        // Spawn blocking task with cancellation support
+        let mut agent_task = tokio::task::spawn_blocking(move || {
             // 运行 agent loop，收集输出
             let mut output_buffer = String::new();
 
@@ -248,6 +290,11 @@ impl StepExecutor for AgentStepExecutor {
                 Option::<codepanion_agent_runtime::ReadonlyTools>::None,
                 |event| match event {
                     AgentLoopEvent::Assistant { text } => {
+                        // Check cancellation before processing events
+                        if cancel_signal.load(Ordering::Relaxed) {
+                            return;
+                        }
+
                         output_buffer.push_str(&text);
                         output_buffer.push('\n');
 
@@ -260,11 +307,19 @@ impl StepExecutor for AgentStepExecutor {
                         });
                     }
                     AgentLoopEvent::ToolCall { name, args } => {
+                        if cancel_signal.load(Ordering::Relaxed) {
+                            return;
+                        }
+
                         let msg = format!("[tool_call] {}: {}", name, args);
                         output_buffer.push_str(&msg);
                         output_buffer.push('\n');
                     }
                     AgentLoopEvent::ToolResult { name, result } => {
+                        if cancel_signal.load(Ordering::Relaxed) {
+                            return;
+                        }
+
                         let msg = format!("[tool_result] {}: {}", name, result);
                         output_buffer.push_str(&msg);
                         output_buffer.push('\n');
@@ -289,9 +344,26 @@ impl StepExecutor for AgentStepExecutor {
                 stderr: String::new(),
                 truncated: false,
             })
-        })
-        .await
-        .map_err(|err| CodePanionError::Runtime(format!("agent task failed: {}", err)))?
+        });
+
+        // Wait for agent task with periodic cancellation checks
+        let cancel_check = self.context.cancel_signal.clone();
+        loop {
+            tokio::select! {
+                // Check if cancelled
+                _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {
+                    if cancel_check.load(Ordering::Relaxed) {
+                        // Agent task will see the signal and exit
+                        return Err(CodePanionError::Runtime("workflow cancelled".to_string()));
+                    }
+                }
+                // Agent task completed
+                result = &mut agent_task => {
+                    return result
+                        .map_err(|err| CodePanionError::Runtime(format!("agent task failed: {}", err)))?;
+                }
+            }
+        }
     }
 }
 
@@ -374,36 +446,55 @@ impl WorkflowRunner {
         let active_runs = self.active_runs.clone();
         let history = self.history.clone();
         let artifacts = self.artifacts.clone();
+        let cancel_signal_for_task = cancel_signal.clone();
         tokio::spawn(async move {
             let result = workflow_executor.run(&workflow, values, false).await;
+            let was_cancelled = cancel_signal_for_task.load(Ordering::Relaxed);
 
             // 发送完成事件
             match result {
                 Ok(mut run) => {
                     run.id = run_id.clone();
+                    run.project_id = project_id.clone();
                     if let Err(err) =
                         persist_workflow_outputs(&history, &artifacts, &workflow, &run)
                     {
                         eprintln!("Failed to persist workflow outputs: {}", err);
                     }
 
-                    let status = format!("{:?}", run.status);
-                    let _ = event_tx.send(WorkflowRunnerEvent::WorkflowCompleted {
-                        run_id: run_id.clone(),
-                        project_id: project_id.clone(),
-                        workflow_id: workflow.name.clone(),
-                        status,
-                        timestamp: WorkflowRunnerEvent::timestamp(),
-                    });
+                    if was_cancelled {
+                        let _ = event_tx.send(WorkflowRunnerEvent::WorkflowCancelled {
+                            run_id: run_id.clone(),
+                            project_id: project_id.clone(),
+                            timestamp: WorkflowRunnerEvent::timestamp(),
+                        });
+                    } else {
+                        let status = format!("{:?}", run.status);
+                        let _ = event_tx.send(WorkflowRunnerEvent::WorkflowCompleted {
+                            run_id: run_id.clone(),
+                            project_id: project_id.clone(),
+                            workflow_id: workflow.name.clone(),
+                            status,
+                            timestamp: WorkflowRunnerEvent::timestamp(),
+                        });
+                    }
                 }
                 Err(e) => {
-                    let _ = event_tx.send(WorkflowRunnerEvent::WorkflowCompleted {
-                        run_id: run_id.clone(),
-                        project_id: project_id.clone(),
-                        workflow_id: workflow.name.clone(),
-                        status: format!("Failed: {}", e),
-                        timestamp: WorkflowRunnerEvent::timestamp(),
-                    });
+                    if was_cancelled {
+                        let _ = event_tx.send(WorkflowRunnerEvent::WorkflowCancelled {
+                            run_id: run_id.clone(),
+                            project_id: project_id.clone(),
+                            timestamp: WorkflowRunnerEvent::timestamp(),
+                        });
+                    } else {
+                        let _ = event_tx.send(WorkflowRunnerEvent::WorkflowCompleted {
+                            run_id: run_id.clone(),
+                            project_id: project_id.clone(),
+                            workflow_id: workflow.name.clone(),
+                            status: format!("Failed: {}", e),
+                            timestamp: WorkflowRunnerEvent::timestamp(),
+                        });
+                    }
                 }
             }
 
@@ -818,7 +909,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_workflow_cancel() {
+    async fn test_workflow_cancel_stops_running_shell_step() {
+        let (command, args) = long_running_shell_command();
         let workflow = WorkflowDefinition {
             name: "long-workflow".to_string(),
             description: "test".to_string(),
@@ -835,8 +927,8 @@ mod tests {
                 human_gate: None,
                 artifacts: vec![],
                 template: None,
-                command: Some("echo".to_string()),
-                args: vec!["test".to_string()],
+                command: Some(command),
+                args,
                 values: HashMap::new(),
                 depends_on: vec![],
                 checkpoint: false,
@@ -854,7 +946,7 @@ mod tests {
         );
         let run_id = "test-run-2".to_string();
 
-        let _event_rx = runner
+        let mut event_rx = runner
             .start_workflow(
                 run_id.clone(),
                 "test-project".to_string(),
@@ -864,11 +956,19 @@ mod tests {
             .await
             .unwrap();
 
-        // 验证 run 已注册（workflow 执行很快，可能已经完成）
-        // 所以我们只测试 cancel 不会 panic
-        let result = runner.cancel_workflow(&run_id).await;
-        // cancel 可能失败（如果 workflow 已经完成），这是正常的
-        assert!(result.is_ok() || result.is_err());
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        runner.cancel_workflow(&run_id).await.unwrap();
+
+        let mut saw_cancelled = false;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        while let Ok(Some(event)) = tokio::time::timeout_at(deadline, event_rx.recv()).await {
+            if matches!(event, WorkflowRunnerEvent::WorkflowCancelled { .. }) {
+                saw_cancelled = true;
+                break;
+            }
+        }
+
+        assert!(saw_cancelled, "cancel should stop the shell step promptly");
     }
 
     #[test]
@@ -983,5 +1083,23 @@ mod tests {
         assert_eq!(result.exit_code, 0);
         assert!(result.stdout.contains("slow done"));
         assert!(request.contains("POST /v1/chat/completions HTTP/1.1"));
+    }
+
+    fn long_running_shell_command() -> (String, Vec<String>) {
+        if cfg!(windows) {
+            (
+                "powershell.exe".to_string(),
+                vec![
+                    "-NoProfile".to_string(),
+                    "-Command".to_string(),
+                    "Start-Sleep -Seconds 5; Write-Output done".to_string(),
+                ],
+            )
+        } else {
+            (
+                "sh".to_string(),
+                vec!["-c".to_string(), "sleep 5; echo done".to_string()],
+            )
+        }
     }
 }

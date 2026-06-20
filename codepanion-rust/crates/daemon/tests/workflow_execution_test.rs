@@ -133,6 +133,78 @@ async fn test_workflow_with_artifacts() {
     );
 }
 
+#[tokio::test]
+async fn test_execute_workflow_rejects_invalid_definitions() {
+    let daemon = TestDaemon::start().await;
+
+    let empty_response = daemon
+        .post(
+            "/api/v1/workflows/execute",
+            json!({
+                "projectId": "test-project",
+                "workflow": {
+                    "name": "empty-workflow",
+                    "description": "invalid",
+                    "params": {},
+                    "steps": [],
+                    "createdAt": 0,
+                    "updatedAt": 0
+                }
+            }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(empty_response.status(), 400);
+
+    let duplicate_response = daemon
+        .post(
+            "/api/v1/workflows/execute",
+            json!({
+                "projectId": "test-project",
+                "workflow": {
+                    "name": "duplicate-workflow",
+                    "description": "invalid",
+                    "params": {},
+                    "steps": [
+                        { "id": "same", "architecture": "shell", "command": "echo" },
+                        { "id": "same", "architecture": "shell", "command": "echo" }
+                    ],
+                    "createdAt": 0,
+                    "updatedAt": 0
+                }
+            }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(duplicate_response.status(), 400);
+
+    let missing_dependency_response = daemon
+        .post(
+            "/api/v1/workflows/execute",
+            json!({
+                "projectId": "test-project",
+                "workflow": {
+                    "name": "missing-dep-workflow",
+                    "description": "invalid",
+                    "params": {},
+                    "steps": [
+                        {
+                            "id": "build",
+                            "architecture": "shell",
+                            "command": "echo",
+                            "dependsOn": ["missing"]
+                        }
+                    ],
+                    "createdAt": 0,
+                    "updatedAt": 0
+                }
+            }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(missing_dependency_response.status(), 400);
+}
+
 /// Test workflow gate resolution
 #[tokio::test]
 async fn test_workflow_gate_resolution() {
@@ -172,7 +244,11 @@ async fn test_workflow_gate_resolution() {
     assert_eq!(gates_response.status(), 200);
     let gates_data: serde_json::Value = gates_response.json().await.unwrap();
     let gates = gates_data["gates"].as_array().unwrap();
-    assert!(gates.iter().any(|gate| gate["runId"] == run_id));
+    assert!(
+        gates
+            .iter()
+            .any(|gate| { gate["runId"] == run_id && gate["projectId"] == "test-project" })
+    );
 
     let resolve_response = daemon
         .post(
@@ -250,6 +326,56 @@ async fn test_workflow_runs_history() {
     assert!(runs_data.is_array() || runs_data.is_object());
 }
 
+#[tokio::test]
+async fn test_workflow_board_lists_definition_store_workflows() {
+    let daemon = TestDaemon::start().await;
+
+    write_test_workflows(&daemon, "board-workflow");
+
+    let response = daemon.get("/workflow/board").await.unwrap();
+    assert_eq!(response.status(), 200);
+    let body: serde_json::Value = response.json().await.unwrap();
+    let workflows = body["workflows"].as_array().unwrap();
+    assert!(workflows.iter().any(|workflow| {
+        workflow["id"] == "board-workflow"
+            && workflow["name"] == "board-workflow"
+            && workflow["description"] == "workflow loaded from definitions"
+    }));
+}
+
+#[tokio::test]
+async fn test_gui_launch_workflow_endpoint_uses_definition_registry() {
+    let daemon = TestDaemon::start().await;
+
+    write_test_workflows(&daemon, "gui-workflow");
+
+    let response = daemon
+        .post(
+            "/workflow/runs",
+            json!({ "workflow": "gui-workflow", "workspace": "gui-project" }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(body["workflowName"], "gui-workflow");
+    let run_id = body["runId"].as_str().unwrap();
+
+    let run_detail = wait_for_run_detail(&daemon, run_id).await;
+    assert_eq!(run_detail["run"]["workflowName"], "gui-workflow");
+}
+
+#[tokio::test]
+async fn test_gui_launch_workflow_endpoint_returns_not_found_for_missing_definition() {
+    let daemon = TestDaemon::start().await;
+
+    let response = daemon
+        .post("/workflow/runs", json!({ "workflow": "missing-workflow" }))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 404);
+}
+
 /// Test scheduler stats
 #[tokio::test]
 async fn test_scheduler_stats_integration() {
@@ -275,4 +401,37 @@ async fn wait_for_run_detail(daemon: &TestDaemon, run_id: &str) -> serde_json::V
     }
 
     panic!("run detail did not become available for {}", run_id);
+}
+
+fn write_test_workflows(daemon: &TestDaemon, workflow_name: &str) {
+    #[cfg(target_os = "windows")]
+    let (command, args) = ("cmd", vec!["/C", "echo gui-launch"]);
+    #[cfg(not(target_os = "windows"))]
+    let (command, args) = ("echo", vec!["gui-launch"]);
+
+    let store = json!({
+        "version": 1,
+        "workflows": [
+            {
+                "name": workflow_name,
+                "description": "workflow loaded from definitions",
+                "params": {},
+                "steps": [
+                    {
+                        "id": "launch",
+                        "architecture": "shell",
+                        "command": command,
+                        "args": args
+                    }
+                ],
+                "createdAt": 0,
+                "updatedAt": 0
+            }
+        ]
+    });
+    std::fs::write(
+        daemon.temp_dir.join("workflows.json"),
+        serde_json::to_string_pretty(&store).unwrap(),
+    )
+    .unwrap();
 }

@@ -13,6 +13,12 @@ pub mod artifacts;
 // W-05: Human gate
 pub mod human_gate;
 
+// W-06: Omnigent-inspired agent intelligence modules
+pub mod loop_detection;
+pub mod circuit_breaker;
+pub mod domain_registry;
+pub mod reasoning_graph;
+
 // M-01: Project registry
 pub mod project;
 
@@ -58,7 +64,9 @@ pub use model_provider::{
 
 pub use global_config::{GlobalConfig, GlobalConfigManager, ResolvedConfig};
 
-pub use config_import::{ImportResult, auto_import, import_ccm_config, import_claude_settings};
+pub use config_import::{
+    ImportResult, ImportedProvider, auto_import, import_ccm_config, import_claude_settings,
+};
 
 pub use scheduler::{
     EventCallback, RunPriority, RunScheduler, RunStatus, ScheduledRun, SchedulerConfig,
@@ -69,6 +77,15 @@ pub use cross_project::{
     ArtifactReference, CrossProjectOrchestrator, DependencyGraph, WorkflowDependency,
     WorkflowWithDeps,
 };
+
+// Omnigent-inspired agent intelligence
+pub use loop_detection::LoopDetector;
+pub use circuit_breaker::CircuitBreaker;
+pub use domain_registry::{
+    ChainStep, DomainRegistry, ErrorPattern, ExtractorConfig, PhaseTemplate, ReflectorConfig,
+    TaskStep,
+};
+pub use reasoning_graph::{Edge, Node, NodeState, ReasoningGraph};
 
 // 旧的简化版本（保留用于向后兼容）
 use codepanion_providers::ProviderDefinition;

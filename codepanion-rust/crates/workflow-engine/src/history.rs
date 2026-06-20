@@ -20,6 +20,8 @@ const HISTORY_COMPACTION_RATIO: f32 = 1.5;
 struct WorkflowRunRecord {
     pub id: String,
     pub workflow_name: String,
+    #[serde(default)]
+    pub project_id: String,
     pub status: String,
     pub values: HashMap<String, String>,
     pub started_at: u64,
@@ -48,6 +50,7 @@ impl From<&WorkflowRun> for WorkflowRunRecord {
         Self {
             id: run.id.clone(),
             workflow_name: run.workflow_name.clone(),
+            project_id: run.project_id.clone(),
             status: status_to_string(run.status),
             values: run.values.clone(),
             started_at: run.started_at,
@@ -82,6 +85,7 @@ impl TryFrom<WorkflowRunRecord> for WorkflowRun {
         Ok(Self {
             id: record.id,
             workflow_name: record.workflow_name,
+            project_id: record.project_id,
             status: string_to_status(&record.status)?,
             values: record.values,
             started_at: record.started_at,
@@ -373,6 +377,7 @@ mod tests {
         WorkflowRun {
             id: id.to_string(),
             workflow_name: workflow_name.to_string(),
+            project_id: "test-project".to_string(),
             status: WorkflowRunStatus::Success,
             values: HashMap::new(),
             started_at: timestamp,

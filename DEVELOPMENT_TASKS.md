@@ -44,9 +44,65 @@
 
 ---
 
-## P3：Rust Workflow Engine
+## P3：Rust Workflow Engine ✅
 
 目标：迁移并强化现有 workflow 行为基线。
+
+- [x] W-01: Workflow 定义存储
+- [x] W-02: Step executor 基础框架
+- [x] W-03: Run history 与事件追踪
+- [x] W-04: Artifact store
+- [x] W-05: Human gate 机制
+- [x] W-06: **Omnigent 核心智能模块集成** ✨
+  - [x] 循环检测器 (LoopDetector)
+  - [x] 断路器 (CircuitBreaker)
+  - [x] 领域注册表 (DomainRegistry)
+  - [x] 推理图 (ReasoningGraph)
+  - [x] 120 个测试全部通过
+  - [x] 集成测试与使用示例
+
+**参考文档**:
+- [Omnigent 集成计划](docs/OMNIGENT_INTEGRATION_PLAN.md)
+- [Omnigent 集成完成报告](docs/OMNIGENT_INTEGRATION_COMPLETE.md)
+
+---
+
+## P4：Omnigent Agent Intelligence (新增阶段)
+
+目标：将 Omnigent 的完整 agent 智能架构集成到 CodePanion。
+
+### 阶段 1：核心模块 ✅ (已完成)
+- [x] 循环检测 (Loop Detection)
+- [x] 断路器 (Circuit Breaker)
+- [x] 领域注册表 (Domain Registry)
+- [x] 推理图 (Reasoning Graph)
+
+### 阶段 2：上下文管理 (1-2 周)
+- [ ] O-01: ContextManager 实现
+- [ ] O-02: 3 层智能修剪
+- [ ] O-03: 原子消息组保护
+- [ ] O-04: 语义压缩 (可选)
+
+### 阶段 3：分层规划 (2-3 周)
+- [ ] O-05: TaskPlanner 实现
+- [ ] O-06: 模板匹配系统
+- [ ] O-07: LLM 细化集成
+- [ ] O-08: 宏反思 (phase-end reflection)
+
+### 阶段 4：后处理管道 (2-3 周)
+- [ ] O-09: Extractors 框架
+- [ ] O-10: Reflection 引擎
+- [ ] O-11: Error Recovery 系统
+
+### 阶段 5：完整 ReAct 循环 (2-3 周)
+- [ ] O-12: AgentRuntime 统一接口
+- [ ] O-13: 集成所有模块到 workflow executor
+- [ ] O-14: 端到端 agent workflow 测试
+- [ ] O-15: 性能基准测试与优化
+
+---
+
+## P5：多项目/多任务并行调度
 
 - [x] W-01 Workflow definition
 
@@ -279,6 +335,7 @@
 - [x] T-03 实现 Codex 式线程工作台、typed daemon client、WS run event reducer
 - [x] T-04 切换 `gui:run`、`gui:build`、`package:windows` 默认入口
 - [x] T-05 更新文档、legacy 测试路径和 portable package 验证脚本
+- [x] T-06 默认 Tauri 工作台补齐 project/provider CRUD、active/select 流程，并把 shell 契约限定为 daemon 生命周期、认证配置桥接、受限外部 URL 打开和关闭清理
 
 **验收**：`npm --prefix packages/gui test` ✓；`npm --prefix packages/gui run test:visual` ✓；`npm --prefix packages/gui run build` ✓；`npm run gui:build` ✓；`npm run package:windows` ✓；`scripts/validate-portable-package.ps1` ✓
 

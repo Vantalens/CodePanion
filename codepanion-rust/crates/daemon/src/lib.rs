@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod daemon_manager;
 pub mod routes;
 pub mod websocket;
@@ -6,6 +7,7 @@ pub mod workflow_runner;
 use axum::{
     Router,
     http::{Method, header},
+    middleware,
     routing::{delete, get, post, put},
 };
 use codepanion_workflow_engine::{
@@ -22,9 +24,11 @@ use websocket::EventBroadcaster;
 pub struct DaemonConfig {
     pub bind: String,
     pub port: u16,
+    pub auth_token: Option<String>,
     pub projects_path: PathBuf,
     pub providers_path: PathBuf,
     pub global_config_path: PathBuf,
+    pub workflow_definitions_path: PathBuf,
     pub workflow_history_path: PathBuf,
     pub workflow_artifacts_path: PathBuf,
 }
@@ -38,13 +42,29 @@ impl Default for DaemonConfig {
         Self {
             bind: "127.0.0.1".to_string(),
             port: 8318,
+            auth_token: daemon_auth_token_from_env_or_file(&codepanion_dir.join("config.json")),
             projects_path: codepanion_dir.join("projects.json"),
             providers_path: codepanion_dir.join("providers.json"),
             global_config_path: codepanion_dir.join("config.json"),
+            workflow_definitions_path: codepanion_dir.join("workflows.json"),
             workflow_history_path: codepanion_dir.join("workflow-runs.ndjson"),
             workflow_artifacts_path: codepanion_dir.join("workflow-artifacts.ndjson"),
         }
     }
+}
+
+fn daemon_auth_token_from_env_or_file(config_path: &std::path::Path) -> Option<String> {
+    std::env::var("CODEPANION_DAEMON_TOKEN")
+        .ok()
+        .filter(|token| !token.trim().is_empty())
+        .or_else(|| {
+            let raw = std::fs::read_to_string(config_path).ok()?;
+            let json: serde_json::Value = serde_json::from_str(&raw).ok()?;
+            json.get("token")
+                .and_then(|value| value.as_str())
+                .filter(|token| !token.trim().is_empty())
+                .map(ToString::to_string)
+        })
 }
 
 #[derive(Clone)]
@@ -56,8 +76,10 @@ pub struct AppState {
     pub orchestrator: Arc<std::sync::Mutex<CrossProjectOrchestrator>>,
     pub event_broadcaster: Arc<EventBroadcaster>,
     pub workflow_runner: Arc<tokio::sync::Mutex<workflow_runner::WorkflowRunner>>,
+    pub workflow_definitions_path: Arc<PathBuf>,
     pub workflow_history: Arc<WorkflowRunHistory>,
     pub workflow_artifacts: Arc<WorkflowArtifactStore>,
+    pub auth_token: Option<Arc<str>>,
 }
 
 pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::Error>> {
@@ -94,8 +116,10 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::
         orchestrator: Arc::new(std::sync::Mutex::new(CrossProjectOrchestrator::new())),
         event_broadcaster,
         workflow_runner,
+        workflow_definitions_path: Arc::new(config.workflow_definitions_path),
         workflow_history,
         workflow_artifacts,
+        auth_token: config.auth_token.map(Arc::from),
     };
 
     // Configure CORS
@@ -121,9 +145,9 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::
 
     // Build router
     let app = Router::new()
-        // Health check (legacy endpoint)
+        // Health check (legacy endpoint) - no auth required
         .route("/health", get(health_handler))
-        // Project API endpoints
+        // All other routes require authentication
         .route("/api/v1/projects", post(routes::projects::create_project))
         .route("/api/v1/projects", get(routes::projects::list_projects))
         .route("/api/v1/projects/:id", get(routes::projects::get_project))
@@ -350,6 +374,11 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), Box<dyn std::error::
         .route("/ws", get(websocket::websocket_handler))
         // OpenAI-compatible endpoints
         .route("/v1/models", get(routes::providers::list_all_models))
+        // Add authentication middleware to all routes except /health
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth::auth_middleware,
+        ))
         .layer(cors)
         .with_state(state);
 

@@ -301,6 +301,7 @@ mod tests {
         WorkflowRun {
             id: id.to_string(),
             workflow_name: "test-workflow".to_string(),
+            project_id: "test-project".to_string(),
             status: WorkflowRunStatus::Paused,
             values: HashMap::new(),
             started_at: 1000,

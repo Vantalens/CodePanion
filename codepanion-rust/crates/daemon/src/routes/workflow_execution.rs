@@ -59,6 +59,10 @@ pub async fn execute_workflow(
     State(state): State<AppState>,
     Json(req): Json<ExecuteWorkflowRequest>,
 ) -> Result<Json<ExecuteWorkflowResponse>, StatusCode> {
+    req.workflow
+        .validate()
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+
     // 生成 run_id
     let run_id = format!(
         "run-{}-{:x}",
@@ -66,7 +70,7 @@ pub async fn execute_workflow(
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs(),
-        rand::random::<u32>()
+        rand_for_run_id()
     );
 
     // 启动 workflow（fire-and-forget）
@@ -168,7 +172,7 @@ pub async fn list_active_workflows(State(state): State<AppState>) -> Json<Active
 // ============================================================================
 
 /// 将 WorkflowRunnerEvent 转换为 WorkflowRunEvent（用于 WebSocket 广播）
-fn convert_to_ws_event(
+pub(crate) fn convert_to_ws_event(
     event: &WorkflowRunnerEvent,
 ) -> Option<codepanion_workflow_engine::WorkflowRunEvent> {
     match event {
@@ -257,8 +261,12 @@ fn convert_to_ws_event(
     }
 }
 
+pub(crate) fn rand_for_run_id() -> u32 {
+    random::random::<u32>()
+}
+
 // 简单的随机数生成（避免依赖 rand crate）
-mod rand {
+mod random {
     use std::collections::hash_map::RandomState;
     use std::hash::{BuildHasher, Hash, Hasher};
 

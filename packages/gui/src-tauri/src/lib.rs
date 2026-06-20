@@ -60,14 +60,21 @@ fn ensure_daemon(
         .parent()
         .ok_or_else(|| "daemon binary path has no parent directory".to_string())?;
 
-    let child = Command::new(&daemon_path)
+    let mut command = Command::new(&daemon_path);
+    command
         .arg("--serve")
         .arg(config.port.to_string())
         .current_dir(working_dir)
         .env("CODEPANION_STARTED_BY_GUI", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::null());
+
+    if !config.token.is_empty() {
+        command.env("CODEPANION_DAEMON_TOKEN", &config.token);
+    }
+
+    let child = command
         .spawn()
         .map_err(|err| format!("failed to start Rust daemon: {err}"))?;
 

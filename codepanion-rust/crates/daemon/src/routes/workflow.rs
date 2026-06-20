@@ -4,10 +4,12 @@ use axum::{
     http::StatusCode,
 };
 use codepanion_workflow_engine::{
-    ArtifactType, GateDecision, GateResolution, HumanGateManager, WorkflowArtifact, WorkflowRun,
+    ArtifactType, DefinitionStore, GateDecision, GateResolution, HumanGateManager,
+    WorkflowArtifact, WorkflowRun,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::Path as FsPath;
 
 use crate::AppState;
 
@@ -169,19 +171,41 @@ pub struct ResolveGateResponse {
 
 /// GET /workflow/board - List workflow definitions, recent runs, and paused gates
 pub async fn get_workflow_board(State(state): State<AppState>) -> Json<WorkflowBoardResponse> {
+    let definition_workflows = load_definition_store(&state.workflow_definitions_path)
+        .map(|store| {
+            store
+                .workflows
+                .into_iter()
+                .map(|workflow| WorkflowDefinition {
+                    id: workflow.name.clone(),
+                    name: workflow.name,
+                    description: if workflow.description.is_empty() {
+                        None
+                    } else {
+                        Some(workflow.description)
+                    },
+                    project_id: String::new(),
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
     // Get all workflows from orchestrator
     let orchestrator = state.orchestrator.lock().unwrap();
     let workflows = orchestrator.list_workflows();
 
-    let workflow_defs = workflows
-        .into_iter()
-        .map(|w| WorkflowDefinition {
-            id: w.workflow_id.clone(),
-            name: w.workflow_id.clone(), // TODO: Get actual name from workflow definition
-            description: None,           // TODO: Get from workflow definition
-            project_id: w.project_id,
-        })
-        .collect();
+    let mut workflow_defs = definition_workflows;
+    workflow_defs.extend(
+        workflows
+            .into_iter()
+            .map(|w| WorkflowDefinition {
+                id: w.workflow_id.clone(),
+                name: w.workflow_id.clone(),
+                description: None,
+                project_id: w.project_id,
+            })
+            .collect::<Vec<_>>(),
+    );
 
     // Get recent runs from scheduler and history
     let history_runs = state.workflow_history.list().unwrap_or_default();
@@ -193,7 +217,7 @@ pub async fn get_workflow_board(State(state): State<AppState>) -> Json<WorkflowB
         .map(|r| WorkflowRunSummary {
             run_id: r.id,
             workflow_id: r.workflow_name,
-            project_id: String::new(),
+            project_id: r.project_id,
             status: format!("{:?}", r.status),
             started_at: Some(r.started_at),
             completed_at: Some(r.ended_at),
@@ -215,13 +239,16 @@ pub async fn get_workflow_board(State(state): State<AppState>) -> Json<WorkflowB
         .list_paused_gates()
         .unwrap_or_default()
         .into_iter()
-        .map(|gate| GateSummary {
-            run_id: gate.run_id,
-            step_id: gate.step_id,
-            workflow_id: gate.workflow_name,
-            project_id: String::new(),
-            message: gate.message,
-            paused_at: gate.paused_at,
+        .map(|gate| {
+            let project_id = project_id_for_run(&state, &gate.run_id);
+            GateSummary {
+                run_id: gate.run_id,
+                step_id: gate.step_id,
+                workflow_id: gate.workflow_name,
+                project_id,
+                message: gate.message,
+                paused_at: gate.paused_at,
+            }
         })
         .collect();
 
@@ -234,19 +261,41 @@ pub async fn get_workflow_board(State(state): State<AppState>) -> Json<WorkflowB
 
 /// POST /workflow/runs - Launch a workflow (GUI compatibility endpoint)
 pub async fn launch_workflow(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Json(req): Json<LaunchWorkflowRequest>,
 ) -> Result<Json<LaunchWorkflowResponse>, StatusCode> {
-    // Generate a unique run ID using timestamp
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let run_id = format!("run-{}", timestamp);
+    let store = load_definition_store(&state.workflow_definitions_path)?;
+    store.validate().map_err(|_| StatusCode::BAD_REQUEST)?;
+    let workflow = store
+        .find_workflow(&req.workflow)
+        .ok_or(StatusCode::NOT_FOUND)?
+        .clone();
+    workflow.validate().map_err(|_| StatusCode::BAD_REQUEST)?;
 
-    // TODO: Actually start the workflow execution
-    // For now, return the run ID so GUI doesn't error
+    let run_id = format!(
+        "run-{}-{:x}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .as_secs(),
+        crate::routes::workflow_execution::rand_for_run_id()
+    );
+    let project_id = req.workspace.unwrap_or_default();
+
+    let runner = state.workflow_runner.lock().await;
+    let mut event_rx = runner
+        .start_workflow(run_id.clone(), project_id, workflow, HashMap::new())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let broadcaster = state.event_broadcaster.clone();
+    tokio::spawn(async move {
+        while let Some(event) = event_rx.recv().await {
+            if let Some(ws_event) = crate::routes::workflow_execution::convert_to_ws_event(&event) {
+                broadcaster.broadcast(ws_event);
+            }
+        }
+    });
 
     Ok(Json(LaunchWorkflowResponse {
         run_id,
@@ -269,7 +318,7 @@ pub async fn cancel_workflow_run(
 
     // Try to cancel via workflow runner
     let runner = state.workflow_runner.lock().await;
-    runner.cancel_workflow(&run_id).await;
+    let _ = runner.cancel_workflow(&run_id).await;
 
     Ok(Json(serde_json::json!({
         "success": true,
@@ -299,6 +348,7 @@ pub async fn get_workflow_run(
     let detail = WorkflowRunDetailGUI {
         id: run.run_id.clone(),
         workflow_name: run.workflow_id.clone(),
+        project_id: run.project_id.clone(),
         status: format!("{:?}", run.status),
         started_at: run.started_at,
         completed_at: run.completed_at,
@@ -314,6 +364,7 @@ pub async fn get_workflow_run(
 struct WorkflowRunDetailGUI {
     pub id: String,
     pub workflow_name: String,
+    pub project_id: String,
     pub status: String,
     pub started_at: Option<u64>,
     pub completed_at: Option<u64>,
@@ -336,6 +387,7 @@ fn run_detail_from_history_gui_format(run: WorkflowRun) -> WorkflowRunDetailGUI 
     WorkflowRunDetailGUI {
         id: run.id,
         workflow_name: run.workflow_name,
+        project_id: run.project_id,
         status: format!("{:?}", run.status),
         started_at: Some(run.started_at),
         completed_at: Some(run.ended_at),
@@ -365,7 +417,7 @@ pub async fn get_workflow_runs(State(state): State<AppState>) -> Json<WorkflowRu
         .map(|r| WorkflowRunSummary {
             run_id: r.id,
             workflow_id: r.workflow_name,
-            project_id: String::new(),
+            project_id: r.project_id,
             status: format!("{:?}", r.status),
             started_at: Some(r.started_at),
             completed_at: Some(r.ended_at),
@@ -493,13 +545,16 @@ pub async fn get_workflow_gates(State(state): State<AppState>) -> Json<GatesResp
         .list_paused_gates()
         .unwrap_or_default()
         .into_iter()
-        .map(|gate| GateSummary {
-            run_id: gate.run_id,
-            step_id: gate.step_id,
-            workflow_id: gate.workflow_name,
-            project_id: String::new(),
-            message: gate.message,
-            paused_at: gate.paused_at,
+        .map(|gate| {
+            let project_id = project_id_for_run(&state, &gate.run_id);
+            GateSummary {
+                run_id: gate.run_id,
+                step_id: gate.step_id,
+                workflow_id: gate.workflow_name,
+                project_id,
+                message: gate.message,
+                paused_at: gate.paused_at,
+            }
         })
         .collect();
 
@@ -549,34 +604,23 @@ pub async fn resolve_gate(
         )
         .map_err(|_| StatusCode::NOT_FOUND)?;
 
+    // If should_resume is true, resume the workflow execution
+    if result.should_resume {
+        // Try to resume via scheduler if the run is there
+        if let Some(_run) = state.scheduler.get_run(&run_id) {
+            let _ = state.scheduler.resume_run(&run_id);
+        }
+
+        // TODO: If not in scheduler, load from history and restart from resume_step_id
+        // This requires implementing workflow resumption in the workflow runner
+    }
+
     Ok(Json(ResolveGateResponse {
         artifact_id: result.artifact_id,
         should_resume: result.should_resume,
         resume_step_id: result.resume_step_id,
         updated_values: result.updated_values,
     }))
-}
-
-fn run_detail_from_history(run: WorkflowRun) -> WorkflowRunDetail {
-    WorkflowRunDetail {
-        run_id: run.id,
-        workflow_id: run.workflow_name,
-        project_id: String::new(),
-        status: format!("{:?}", run.status),
-        started_at: Some(run.started_at),
-        completed_at: Some(run.ended_at),
-        steps: run
-            .steps
-            .into_iter()
-            .map(|step| StepSummary {
-                step_id: step.id.clone(),
-                name: step.id,
-                status: format!("{:?}", step.status),
-                started_at: step.started_at,
-                completed_at: step.ended_at,
-            })
-            .collect(),
-    }
 }
 
 fn workflow_status_label(run: &WorkflowRun) -> &'static str {
@@ -586,4 +630,24 @@ fn workflow_status_label(run: &WorkflowRun) -> &'static str {
         codepanion_workflow_engine::WorkflowRunStatus::Paused => "paused",
         codepanion_workflow_engine::WorkflowRunStatus::DryRun => "dry-run",
     }
+}
+
+fn project_id_for_run(state: &AppState, run_id: &str) -> String {
+    state
+        .workflow_history
+        .get(run_id)
+        .ok()
+        .flatten()
+        .map(|run| run.project_id)
+        .or_else(|| state.scheduler.get_run(run_id).map(|run| run.project_id))
+        .unwrap_or_default()
+}
+
+fn load_definition_store(path: &FsPath) -> Result<DefinitionStore, StatusCode> {
+    if !path.exists() {
+        return Ok(DefinitionStore::new());
+    }
+
+    let raw = std::fs::read_to_string(path).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    DefinitionStore::from_json(&raw).map_err(|_| StatusCode::BAD_REQUEST)
 }
