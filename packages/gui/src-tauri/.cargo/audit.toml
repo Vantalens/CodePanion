@@ -1,0 +1,6 @@
+[advisories]
+ignore = [
+    # glib 0.18.5 vulnerability only affects Linux builds
+    # This project targets Windows, where glib is not used
+    "RUSTSEC-2024-0429",
+]

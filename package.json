@@ -26,6 +26,10 @@
     "packages/daemon",
     "packages/gui"
   ],
+  "dependencies": {
+    "vite": "8.0.16",
+    "esbuild": "0.28.1"
+  },
   "scripts": {
     "build": "npm run build -w packages/daemon",
     "dev:daemon": "npm run dev -w packages/daemon",
@@ -38,5 +42,10 @@
     "validate:extensions": "node scripts/validate-extensions.mjs",
     "gen:dtos": "npm run build -w packages/daemon && node scripts/generate-csharp-dtos.mjs",
     "validate:dtos": "npm run build -w packages/daemon && node scripts/generate-csharp-dtos.mjs --check"
+  },
+  "overrides": {
+    "vite": {
+      "esbuild": "0.28.1"
+    }
   }
 }
